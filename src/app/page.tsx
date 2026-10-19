@@ -7,6 +7,12 @@ import { GithubIcon } from '@/components/icons/brand'
 import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
 import { cn, getAccent } from '@/lib/utils'
+import { tracks as curriculumTracks } from '@/lib/curriculum'
+
+const trackIcons: Record<string, typeof BookOpen> = {
+  beginner: BookOpen,
+  developer: Code2,
+}
 
 const features = [
   {
@@ -47,47 +53,46 @@ const features = [
   },
 ]
 
-const tracks = [
-  {
-    key: 'beginner',
-    name: 'Beginner Track',
-    description: 'No coding experience? Start here. We\'ll guide you from zero to full-stack developer.',
-    duration: '~16 weeks',
-    modules: 5,
-    lessons: 48,
-    color: 'emerald',
-    icon: BookOpen,
-    modulesList: [
-      'HTML/CSS/JavaScript Foundations (5 weeks)',
-      'Node.js & Express Backend (3 weeks)',
-      'MongoDB & Mongoose (2 weeks)',
-      'React Frontend (4 weeks)',
-      'Full Stack Integration (2 weeks)',
-    ],
-  },
-  {
-    key: 'developer',
-    name: 'Developer Track',
-    description: 'Already know JavaScript? Skip the basics and dive straight into MERN mastery.',
-    duration: '~10 weeks',
-    modules: 4,
-    lessons: 36,
-    color: 'violet',
-    icon: Code2,
-    modulesList: [
-      'Node.js & Express Deep Dive (3 weeks)',
-      'MongoDB & Advanced Mongoose (2 weeks)',
-      'React & State Management (3 weeks)',
-      'Full Stack & Deployment (2 weeks)',
-    ],
-  },
-]
+const tracks = curriculumTracks.map((track) => {
+  const lessons = track.modules.reduce((sum, m) => sum + m.lessons.length, 0)
+  const totalHours = track.modules.reduce((sum, m) => sum + m.estimatedHours, 0)
+  return {
+    key: track.key,
+    name: track.name,
+    description: track.description,
+    duration: `~${Math.round(totalHours / 10)} wks`,
+    modules: track.modules.length,
+    lessons,
+    color: track.color,
+    icon: trackIcons[track.key] ?? BookOpen,
+    modulesList: track.modules.map(
+      (m) => `${m.name} (~${Math.round(m.estimatedHours / 10)} wks)`
+    ),
+  }
+})
+
+const totalLessons = tracks.reduce((sum, t) => sum + t.lessons, 0)
+const totalResources = curriculumTracks.reduce(
+  (sum, t) =>
+    sum + t.modules.reduce((s, m) => s + m.lessons.reduce((n, l) => n + l.resources.length, 0), 0),
+  0
+)
+const projectCount = curriculumTracks.reduce(
+  (sum, t) =>
+    sum +
+    t.modules.reduce(
+      (s, m) =>
+        s + m.lessons.filter((l) => l.resources.some((r) => r.type === 'project')).length,
+      0
+    ),
+  0
+)
 
 const stats = [
   { value: '100%', label: 'Free Forever' },
-  { value: '84+', label: 'Curated Lessons' },
-  { value: '200+', label: 'Free Resources' },
-  { value: '12', label: 'Real Projects' },
+  { value: `${totalLessons}`, label: 'Curated Lessons' },
+  { value: `${totalResources}+`, label: 'Free Resources' },
+  { value: `${projectCount}`, label: 'Real Projects' },
 ]
 
 export default function HomePage() {
@@ -189,7 +194,7 @@ export default function HomePage() {
                           <p className="text-xs text-muted-foreground">Modules</p>
                         </div>
                         <div className="p-3 rounded-lg bg-muted/50">
-                          <p className="text-2xl font-bold">{track.lessons}+</p>
+                          <p className="text-2xl font-bold">{track.lessons}</p>
                           <p className="text-xs text-muted-foreground">Lessons</p>
                         </div>
                       </div>

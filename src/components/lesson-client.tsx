@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, type ReactNode } from 'react'
 import Link from 'next/link'
 import { useProgress } from '@/hooks/use-progress'
 import type { Lesson } from '@/lib/curriculum'
@@ -31,9 +31,10 @@ interface LessonClientProps {
   moduleKey: string
   prev: { id: string; title: string; moduleKey: string } | null
   next: { id: string; title: string; moduleKey: string } | null
+  children?: ReactNode
 }
 
-export function LessonClient({ lesson, track, moduleKey, prev, next }: LessonClientProps) {
+export function LessonClient({ lesson, track, moduleKey, prev, next, children }: LessonClientProps) {
   const { isLoaded, isCompleted, markComplete, saveNotes, state, toggleBookmark, setLastVisited } = useProgress()
   const [notes, setNotes] = useState('')
   const [notesSaved, setNotesSaved] = useState(false)
@@ -85,16 +86,23 @@ export function LessonClient({ lesson, track, moduleKey, prev, next }: LessonCli
         </Card>
       )}
 
+      {/* Written lesson */}
+      {children && (
+        <article className="prose prose-neutral max-w-none dark:prose-invert prose-headings:scroll-mt-24 prose-headings:font-bold prose-headings:tracking-tight prose-h2:mt-10 prose-h2:text-2xl prose-h3:mt-8 prose-h3:text-xl prose-p:leading-relaxed prose-li:my-1 prose-strong:text-foreground prose-code:rounded-md prose-code:bg-muted prose-code:px-1.5 prose-code:py-0.5 prose-code:font-medium prose-code:text-foreground prose-code:before:content-none prose-code:after:content-none">
+          {children}
+        </article>
+      )}
+
       {/* Resources */}
       <section aria-labelledby="resources-heading">
         <div className="flex items-center justify-between mb-5">
           <h2 id="resources-heading" className="text-2xl font-bold tracking-tight">
-            Free Learning Resources
+            Go deeper
           </h2>
           <Badge variant="secondary" className="text-xs">{lesson.resources.length} resources</Badge>
         </div>
         <p className="text-sm text-muted-foreground mb-5">
-          Hand-picked, high-quality, and 100% free. Work through them in any order.
+          Optional supplementary material — videos, articles, and docs to reinforce what you just read.
         </p>
         <div className="grid gap-4 sm:grid-cols-2">
           {lesson.resources.map((resource, i) => {

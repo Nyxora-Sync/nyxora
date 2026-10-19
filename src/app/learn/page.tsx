@@ -6,42 +6,33 @@ import { BookOpen, Code2, ArrowRight, CheckCircle, Clock, Users, Trophy, Code2 a
 import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
 import { cn, getAccent } from '@/lib/utils'
+import { tracks as curriculumTracks } from '@/lib/curriculum'
 
-const tracks = [
-  {
-    key: 'beginner',
-    name: 'Beginner Track',
-    description: 'No coding experience? Start here. We\'ll guide you from zero to full-stack developer.',
-    duration: '~16 weeks',
-    modules: 5,
-    lessons: 48,
-    color: 'emerald',
-    icon: BookOpen,
-    modulesList: [
-      { key: 'foundations', name: 'HTML/CSS/JavaScript Foundations', weeks: 5, lessons: 15 },
-      { key: 'node-express', name: 'Node.js & Express Backend', weeks: 3, lessons: 12 },
-      { key: 'mongodb', name: 'MongoDB & Mongoose', weeks: 2, lessons: 8 },
-      { key: 'react', name: 'React Frontend', weeks: 4, lessons: 10 },
-      { key: 'fullstack', name: 'Full Stack Integration', weeks: 2, lessons: 8 },
-    ],
-  },
-  {
-    key: 'developer',
-    name: 'Developer Track',
-    description: 'Already know JavaScript? Skip the basics and dive straight into MERN mastery.',
-    duration: '~10 weeks',
-    modules: 4,
-    lessons: 36,
-    color: 'violet',
-    icon: Code2,
-    modulesList: [
-      { key: 'node-express', name: 'Node.js & Express Deep Dive', weeks: 3, lessons: 12 },
-      { key: 'mongodb', name: 'MongoDB & Advanced Mongoose', weeks: 2, lessons: 8 },
-      { key: 'react', name: 'React & State Management', weeks: 3, lessons: 10 },
-      { key: 'fullstack', name: 'Full Stack & Deployment', weeks: 2, lessons: 8 },
-    ],
-  },
-]
+const trackIcons: Record<string, typeof BookOpen> = {
+  beginner: BookOpen,
+  developer: Code2,
+}
+
+const tracks = curriculumTracks.map((track) => {
+  const lessons = track.modules.reduce((sum, m) => sum + m.lessons.length, 0)
+  const totalHours = track.modules.reduce((sum, m) => sum + m.estimatedHours, 0)
+  return {
+    key: track.key,
+    name: track.name,
+    description: track.description,
+    duration: `~${Math.round(totalHours / 10)} wks`,
+    modules: track.modules.length,
+    lessons,
+    color: track.color,
+    icon: trackIcons[track.key] ?? BookOpen,
+    modulesList: track.modules.map((m) => ({
+      key: m.key,
+      name: m.name,
+      weeks: Math.max(1, Math.round(m.estimatedHours / 10)),
+      lessons: m.lessons.length,
+    })),
+  }
+})
 
 export default function LearnPage() {
   return (
@@ -90,7 +81,7 @@ export default function LearnPage() {
                           <p className="text-xs text-muted-foreground">Modules</p>
                         </div>
                         <div className="p-3 rounded-lg bg-muted/50">
-                          <p className="text-2xl font-bold">{track.lessons}+</p>
+                          <p className="text-2xl font-bold">{track.lessons}</p>
                           <p className="text-xs text-muted-foreground">Lessons</p>
                         </div>
                       </div>

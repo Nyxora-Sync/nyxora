@@ -1,13 +1,15 @@
 import { notFound } from 'next/navigation'
 
 export const instant = false
+import type { ComponentType } from 'react'
 import Link from 'next/link'
 import { getTrack, getModule, getLesson, tracks } from '@/lib/curriculum'
 import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
 import { LessonClient } from '@/components/lesson-client'
 import { Badge } from '@/components/ui/badge'
-import { Clock, Zap, BookOpen } from 'lucide-react'
+import { Card, CardContent } from '@/components/ui/card'
+import { Clock, Zap, BookOpen, Construction } from 'lucide-react'
 import { cn, getDifficultyColor, getAccent } from '@/lib/utils'
 
 export function generateStaticParams() {
@@ -43,6 +45,16 @@ export default async function LessonPage({
   const next = currentIndex < allLessons.length - 1 ? allLessons[currentIndex + 1] : null
 
   const difficultyColor = getDifficultyColor(lesson.difficulty)
+
+  // Written lesson content is authored as MDX. Not every lesson has been
+  // written yet, so missing files fall back to a friendly notice.
+  let LessonContent: ComponentType | null = null
+  try {
+    const mdx = await import(`@/content/lessons/${lesson.id}.mdx`)
+    LessonContent = mdx.default as ComponentType
+  } catch {
+    LessonContent = null
+  }
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -105,7 +117,24 @@ export default async function LessonPage({
             moduleKey={mod.key}
             prev={prev}
             next={next}
-          />
+          >
+            {LessonContent ? (
+              <LessonContent />
+            ) : (
+              <Card className="border-dashed bg-muted/20">
+                <CardContent className="flex gap-3 pt-6">
+                  <Construction className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" aria-hidden="true" />
+                  <div>
+                    <p className="font-semibold">Full written lesson coming soon</p>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      We are writing this lesson directly on the site. Until then, the curated
+                      resources below cover the topic end to end.
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </LessonClient>
         </div>
       </main>
       <Footer />

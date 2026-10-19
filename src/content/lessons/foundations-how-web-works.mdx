@@ -1,0 +1,209 @@
+You use the web every day. You open a browser, type an address, and a page appears. It feels instant and almost magical — but underneath, a very predictable conversation is happening between two computers.
+
+By the end of this lesson you will be able to explain, in plain language, exactly what happens between pressing **Enter** and seeing a page. That mental model will make every other lesson easier, because every MERN concept is built on top of it.
+
+## The big picture: clients and servers
+
+The web is a conversation between two roles:
+
+- **The client** is the program asking for something. Usually that is your browser (Chrome, Firefox, Safari), but it can also be a mobile app, a `curl` command, or another server.
+- **The server** is a computer that stays online, listens for requests, and sends back responses. It might be a machine in a data center — or, during development, your own laptop.
+
+<KeyPoint>
+The client asks. The server answers. Almost everything on the web is a variation of this request → response cycle.
+</KeyPoint>
+
+Here is the full journey at a glance:
+
+```text
+You type https://example.com
+        │
+        ▼
+1. DNS lookup      ──▶  find the server's IP address
+2. TCP connection  ──▶  open a channel to that address
+3. TLS handshake   ──▶  encrypt the channel (the "s" in https)
+4. HTTP request    ──▶  "GET / please"
+5. Server work     ──▶  query a database, render HTML, etc.
+6. HTTP response   ◀──  200 OK + HTML/CSS/JS
+7. Browser renders ──▶  pixels on your screen
+```
+
+We will walk through each step.
+
+## Step 1 — DNS: turning a name into an address
+
+Computers find each other using **IP addresses**, like `93.184.216.34`. Humans are bad at remembering numbers, so we use names like `example.com`.
+
+**DNS (Domain Name System)** is the internet's phone book. When you enter a domain, your browser asks a DNS resolver: *"What is the IP address for this name?"* The resolver checks its cache, then asks other DNS servers until it finds the answer.
+
+Think of it like the contacts app on your phone: you tap "Mom", not a phone number. DNS performs that same translation for the internet.
+
+<Callout type="info" title="DNS is cached everywhere">
+Your browser, operating system, and internet provider all cache DNS answers for a while. That is why a site you visit often loads faster — and why DNS changes can take hours to propagate.
+</Callout>
+
+## Step 2 — Opening a connection (TCP)
+
+Once the browser knows the IP address, it opens a connection to the server using **TCP**. TCP is a protocol that guarantees data arrives in order and without gaps — like a phone call where both sides confirm they can hear each other.
+
+The connection is identified by two things: the server's IP address and a **port**. Web traffic normally uses port `80` for HTTP and `443` for HTTPS. You rarely type ports because browsers assume them.
+
+## Step 3 — HTTPS and the lock icon
+
+If the URL starts with `https://`, the browser performs a **TLS handshake** before sending any data. This does two jobs:
+
+1. **Encryption** — nobody between you and the server can read the traffic (passwords, cookies, messages).
+2. **Identity** — the server proves it really is `example.com` using a certificate.
+
+That little padlock in your address bar is the result of this handshake. Plain `http://` sends everything in readable text, which is why modern sites use HTTPS everywhere.
+
+## Step 4 — The HTTP request
+
+Now the browser sends an **HTTP request**. An HTTP request has four important parts:
+
+| Part | What it means | Example |
+|------|---------------|---------|
+| **Method** | The action you want | `GET`, `POST`, `PUT`, `DELETE` |
+| **Path** | Which resource you want | `/learn/react` |
+| **Headers** | Extra information | `Accept: text/html`, cookies, user agent |
+| **Body** | Data you are sending (optional) | form fields, JSON |
+
+A real request looks like this:
+
+```http
+GET /learn/react HTTP/1.1
+Host: example.com
+Accept: text/html
+Cookie: session=abc123
+```
+
+`GET` means "give me something." `POST` means "here is data, create something." When you submit a login form, your browser sends a `POST` request with the email and password in the body.
+
+<Callout type="tip" title="You can watch this live">
+Open your browser DevTools (`F12` or `Ctrl+Shift+I`), go to the **Network** tab, and reload any page. You will see every request the page makes, including the method, status, headers, and response. This is one of the most useful debugging tools you will ever learn.
+</Callout>
+
+## Step 5 — The server does the work
+
+The server receives the request and decides what to do. A simple static site might just read an HTML file from disk. A full-stack app does much more:
+
+- Checks whether you are logged in (authentication)
+- Validates the data you sent
+- Queries a database
+- Applies business rules
+- Builds a response
+
+In a MERN app, this is where **Node.js** and **Express** run. Express matches the method and path to a route handler:
+
+```js
+app.get('/api/lessons/:id', async (req, res) => {
+  const lesson = await Lesson.findById(req.params.id)
+  if (!lesson) return res.status(404).json({ error: 'Not found' })
+  res.json(lesson)
+})
+```
+
+The handler talks to **MongoDB** (through Mongoose), gets the lesson, and sends JSON back.
+
+## Step 6 — The HTTP response
+
+The server answers with a response that also has three parts: a **status code**, **headers**, and a **body**.
+
+Status codes are grouped by their first digit:
+
+| Range | Meaning | Common examples |
+|-------|---------|-----------------|
+| `1xx` | Informational | `101 Switching Protocols` |
+| `2xx` | Success | `200 OK`, `201 Created` |
+| `3xx` | Redirect | `301 Moved Permanently`, `302 Found` |
+| `4xx` | Client error | `400 Bad Request`, `401 Unauthorized`, `404 Not Found` |
+| `5xx` | Server error | `500 Internal Server Error` |
+
+A JSON API response looks like this:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "id": "react-hooks",
+  "title": "React Hooks",
+  "xpReward": 15
+}
+```
+
+If something goes wrong, the status code tells the client what kind of problem it is. `404` means the resource does not exist; `401` means you need to sign in; `500` means the server itself broke.
+
+<Callout type="warning" title="A 200 does not always mean success">
+Always check the status code. A server can return `200 OK` with an error message in the body, which makes bugs much harder to find. Treat the status code as the source of truth.
+</Callout>
+
+## Step 7 — The browser renders the page
+
+The browser receives the HTML and starts parsing it. It discovers linked CSS and JavaScript files and requests those too. Then it:
+
+1. Builds the **DOM** (a tree of elements) from the HTML.
+2. Builds the **CSSOM** (style rules) from the CSS.
+3. Combines them into a **render tree**.
+4. Calculates layout (where each box goes).
+5. Paints pixels on the screen.
+
+JavaScript can change the page after it loads — which is exactly what **React** does. React runs in the browser, updates the DOM, and makes the page interactive without a full reload.
+
+## Where MERN fits
+
+The MERN stack maps directly onto this request/response cycle:
+
+```text
+Browser (React)  ── HTTP/JSON ──▶  Node.js + Express  ──▶  MongoDB
+   client                              server               data
+```
+
+- **MongoDB** stores your data as documents.
+- **Express** defines routes and handles requests.
+- **React** builds the interface that runs in the browser.
+- **Node.js** is the JavaScript runtime that runs Express on the server.
+
+When a user clicks "Save notes" in a React app, React sends a `PUT` request to Express, Express validates it and writes to MongoDB, and the response tells React whether it worked. That is the whole loop — repeated millions of times a day.
+
+<Callout type="danger" title="Never trust the client">
+Anything running in the browser can be inspected and modified. Validation in React is for user experience; **real validation and authorization must happen on the server**. We will return to this in the security lessons.
+</Callout>
+
+## Check your understanding
+
+<Quiz
+  question="Which protocol translates a domain name like example.com into an IP address?"
+  options={["HTTP", "DNS", "TCP", "TLS"]}
+  answer={1}
+  explanation="DNS is the domain name system — the internet's phone book. HTTP carries requests, TCP guarantees delivery, and TLS encrypts the connection."
+/>
+
+<Quiz
+  question="A request succeeds, but the resource does not exist. Which status code should the server return?"
+  options={["200 OK", "301 Moved Permanently", "404 Not Found", "500 Internal Server Error"]}
+  answer={2}
+  explanation="4xx codes mean the client asked for something that cannot be fulfilled. 404 specifically means the resource was not found. 500 would mean the server itself failed."
+/>
+
+<Exercise title="Inspect a real request" difficulty="easy">
+Open your browser DevTools and go to the **Network** tab, then reload this page. Find the request for the page itself and answer:
+
+1. What is the request method?
+2. What status code came back?
+3. What is the `content-type` response header?
+4. How many total requests did the page make?
+
+Then try the same on a site you use daily. You will start noticing patterns everywhere.
+</Exercise>
+
+## Summary
+
+- The web is a **client–server** conversation of requests and responses.
+- **DNS** turns names into IP addresses; **TCP** delivers data; **TLS** encrypts it.
+- An HTTP request has a **method, path, headers, and optional body**.
+- An HTTP response has a **status code, headers, and body**.
+- The browser parses HTML/CSS, runs JavaScript, and paints the result.
+- In MERN, **React** is the client, **Express + Node** is the server, and **MongoDB** stores the data.
+
+Next, you will write your first HTML and see how the browser turns plain text into a real page.
