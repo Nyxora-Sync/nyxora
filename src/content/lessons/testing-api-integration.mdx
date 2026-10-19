@@ -1,0 +1,357 @@
+Unit tests can prove your pricing function is right. They cannot prove `/api/v1/movies` returns the right status when a token is missing, that validation middleware actually runs before your controller, or that ownership checks stop user B from deleting user A's movie. Those bugs live in the **wiring** — and wiring is exactly what integration tests cover.
+
+An integration test sends a real HTTP request through your Express app into a real database and asserts on the real response. In this lesson you build that harness once — Supertest, an in-memory MongoDB, and factories — and then use it to test every route pattern you will ever write: happy path, validation, authentication, authorization, and not-found.
+
+## The setup: real requests, disposable database
+
+```bash
+npm install -D vitest supertest mongodb-memory-server
+```
+
+Two structural decisions make this work (and both come straight from the architecture lesson):
+
+- **`app.js` exports the app; `server.js` calls listen.** Tests import the app — no port, no side effects.
+- **The database is in-memory and per-test-run.** `mongodb-memory-server` downloads a real `mongod` binary once and runs it on a random port. Fast, isolated, no shared state with development, and identical query semantics to production Mongo.
+
+```js
+// src/app.js
+import express from 'express'
+import { moviesRouter } from './routes/movies.js'
+import { errorHandler } from './middleware/error-handler.js'
+
+export function createApp() {
+  const app = express()
+  app.use(express.json())
+  app.use('/api/v1/movies', moviesRouter)
+  app.use(errorHandler)
+  return app
+}
+```
+
+```js
+// src/server.js
+import mongoose from 'mongoose'
+import { createApp } from './app.js'
+import { env } from './config/env.js'
+
+await mongoose.connect(env.MONGODB_URI)
+createApp().listen(env.PORT)
+```
+
+The test harness — connection lifecycle and cleanup:
+
+```js
+// tests/helpers/db.js
+import mongoose from 'mongoose'
+import { MongoMemoryServer } from 'mongodb-memory-server'
+
+let memory
+
+export async function connect() {
+  memory = await MongoMemoryServer.create()
+  await mongoose.connect(memory.getUri())
+}
+
+export async function disconnect() {
+  await mongoose.disconnect()
+  await memory.stop()
+}
+
+export async function clearDatabase() {
+  const collections = await mongoose.connection.db.collections()
+  await Promise.all(collections.map((collection) => collection.deleteMany({})))
+}
+```
+
+```js
+// vitest.config.js
+import { defineConfig } from 'vitest/config'
+
+export default defineConfig({
+  test: {
+    setupFiles: ['./tests/setup.js'],
+    // one DB per file keeps parallel files isolated
+    poolOptions: { threads: { singleThread: false } },
+  },
+})
+```
+
+```js
+// tests/setup.js
+import { beforeAll, afterAll, afterEach } from 'vitest'
+import { connect, disconnect, clearDatabase } from './helpers/db.js'
+
+beforeAll(connect)
+afterAll(disconnect)
+afterEach(clearDatabase)
+```
+
+<Callout type="warning" title="Never point tests at a shared or production database">
+  The harness above creates its own database, but the same guarantee must hold when you swap in a CI service container or a local Mongo: stand up a **throwaway database**, and have the test setup refuse to run if `NODE_ENV === 'production'`. Tests that clean collections are one misconfigured URI away from wiping real data.
+</Callout>
+
+## Supertest basics
+
+Supertest wraps your app in a lightweight server and gives you a chainable request DSL:
+
+```js
+import request from 'supertest'
+import { describe, it, expect } from 'vitest'
+import { createApp } from '../src/app.js'
+
+const app = createApp()
+
+describe('GET /api/v1/health', () => {
+  it('returns ok', async () => {
+    const response = await request(app).get('/api/v1/health').expect(200)
+
+    expect(response.body).toEqual({ status: 'ok', uptime: expect.any(Number) })
+  })
+})
+```
+
+Rules that keep these tests healthy:
+
+- **`.expect(status)` early** — when the status is wrong, you want the failure to say `expected 201, got 500` before a body diff buries it.
+- **Assert the envelope, not the whole object.** `expect(response.body.data).toMatchObject({...})` ignores volatile fields like timestamps that would make the test flap.
+- **One behavior per test.** A 12-assertion mega-test fails with one line and tells you nothing.
+- **No `expect.any` on fields you care about.** Pin them.
+
+## Factories: users with tokens, entities with owners
+
+Every authenticated test needs a user and a token, then an entity owned by that user. Write the helpers once:
+
+```js
+// tests/factories.js
+import bcrypt from 'bcrypt'
+import jwt from 'jsonwebtoken'
+import { User } from '../src/models/user.js'
+import { Movie } from '../src/models/movie.js'
+import { env } from '../src/config/env.js'
+
+let counter = 0
+
+export async function makeUser(overrides = {}) {
+  counter += 1
+  const passwordHash = await bcrypt.hash('password-123', 4) // low cost: tests do not need 12 rounds
+  return User.create({
+    email: `user${counter}@test.dev`,
+    name: `User ${counter}`,
+    passwordHash,
+    ...overrides,
+  })
+}
+
+export function tokenFor(user) {
+  return jwt.sign({ sub: user.id }, env.JWT_SECRET, { expiresIn: '1h' })
+}
+
+export async function makeMovie(owner, overrides = {}) {
+  return Movie.create({
+    title: 'Test Movie',
+    year: 2024,
+    genres: ['drama'],
+    owner,
+    ...overrides,
+  })
+}
+
+export function auth(token) {
+  return { Authorization: `Bearer ${token}` }
+}
+```
+
+The `bcrypt` cost factor is a deliberate speed choice: hashing at cost 4 instead of 12 keeps fixtures fast, and login speed in tests is irrelevant. (Production stays at 12 — the config differs per environment, not the code path.)
+
+## The pattern set every resource needs
+
+For every resource, this grid covers the bugs that actually ship:
+
+| Case | Request | Expected |
+|---|---|---|
+| Happy path | valid body + token | 201 with `data`, DB row exists |
+| Validation | missing/invalid field | 422 with error code |
+| No token | valid body, no header | 401 |
+| Bad token | expired/garbage | 401 |
+| Wrong owner | user B mutates user A's row | 404 (or 403, by policy) |
+| Missing id | valid id shape, absent | 404 |
+| Bad id shape | `not-an-id` | 404, not 500 |
+| List filters | query params | only matching rows |
+
+A real slice of that grid against the movies API:
+
+```js
+// tests/movies.int.test.js
+import { describe, it, expect } from 'vitest'
+import request from 'supertest'
+import { createApp } from '../src/app.js'
+import { makeUser, makeMovie, tokenFor, auth } from './factories.js'
+import { Movie } from '../src/models/movie.js'
+
+const app = createApp()
+
+describe('POST /api/v1/movies', () => {
+  it('creates a movie for the authenticated owner', async () => {
+    const user = await makeUser()
+
+    const response = await request(app)
+      .post('/api/v1/movies')
+      .set(auth(tokenFor(user)))
+      .send({ title: 'Dune', year: 2021, genres: ['sci-fi'] })
+      .expect(201)
+
+    expect(response.body.data).toMatchObject({ title: 'Dune', year: 2021 })
+    expect(await Movie.countDocuments({ owner: user.id })).toBe(1)
+  })
+
+  it('rejects an invalid body with 422', async () => {
+    const user = await makeUser()
+
+    const response = await request(app)
+      .post('/api/v1/movies')
+      .set(auth(tokenFor(user)))
+      .send({ title: '', year: 1200 })
+      .expect(422)
+
+    expect(response.body.error.code).toBe('VALIDATION_ERROR')
+  })
+
+  it('rejects anonymous requests with 401', async () => {
+    await request(app)
+      .post('/api/v1/movies')
+      .send({ title: 'Dune', year: 2021 })
+      .expect(401)
+  })
+})
+
+describe('DELETE /api/v1/movies/:id', () => {
+  it('lets the owner delete their movie', async () => {
+    const user = await makeUser()
+    const movie = await makeMovie(user)
+
+    await request(app)
+      .delete(`/api/v1/movies/${movie.id}`)
+      .set(auth(tokenFor(user)))
+      .expect(204)
+
+    expect(await Movie.findById(movie.id)).toBeNull()
+  })
+
+  it('hides other users\' movies behind a 404', async () => {
+    const alice = await makeUser()
+    const bob = await makeUser()
+    const aliceMovie = await makeMovie(alice)
+
+    await request(app)
+      .delete(`/api/v1/movies/${aliceMovie.id}`)
+      .set(auth(tokenFor(bob)))
+      .expect(404)
+
+    expect(await Movie.findById(aliceMovie.id)).not.toBeNull()
+  })
+
+  it('returns 404 for a malformed id instead of crashing', async () => {
+    const user = await makeUser()
+
+    await request(app)
+      .delete('/api/v1/movies/not-an-id')
+      .set(auth(tokenFor(user)))
+      .expect(404)
+  })
+})
+```
+
+That last test is worth more than it looks: without it, a `CastError` slipping past the error handler turns into a 500, and nobody notices until a fuzzer or an angry user sends a bad id.
+
+<KeyPoint>
+The ownership tests are the ones that catch real vulnerabilities. “User B gets 404 on User A’s movie, and the row is still there afterward” is the minimum viable authorization test for every mutating endpoint. Write it once per resource and never remove it.
+</KeyPoint>
+
+## Reading failures like a detective
+
+Integration failures come in three flavors, each with a signature:
+
+- **`expected 201, got 401` everywhere at once** — the token helper or `JWT_SECRET` in the test env is off. Fix the harness, not the test.
+- **A test passes alone but fails with the suite** — leaked state: a collection not cleaned, or a unique index (email!) colliding across files. Check `afterEach` and whether two files share a database.
+- **Status right, body wrong** — most often a `select` or `populate` change. The failing assertion points at the exact field; trust it.
+
+Log the response body in a failing assertion helper once and reuse it — `console.log(response.body)` inside the failing branch turns a 10-minute mystery into a 10-second read.
+
+## Try it
+
+<TryIt title="First integration test in five minutes" hint="Add supertest and mongodb-memory-server, drop this file into your API project, and run npx vitest run. The health check needs no auth, so it works even before your models exist.">
+```js
+// tests/health.int.test.js
+import { describe, it, expect } from 'vitest'
+import request from 'supertest'
+import { createApp } from '../src/app.js'
+
+describe('app wiring', () => {
+  it('serves JSON 404 for unknown routes', async () => {
+    const response = await request(app)
+      .get('/api/v1/definitely-not-a-route')
+      .expect(404)
+
+    expect(response.body.error.code).toBe('NOT_FOUND')
+  })
+
+  it('rejects malformed JSON with 400', async () => {
+    await request(app)
+      .post('/api/v1/movies')
+      .set('Content-Type', 'application/json')
+      .send('{ "title": ')
+      .expect(400)
+  })
+})
+```
+</TryIt>
+
+## Check your understanding
+
+<Quiz
+  question="Why do integration tests import app.js instead of starting server.js?"
+  options={[
+    'server.js cannot be imported in ESM',
+    'app.js exports the configured app without listening, so tests get the full middleware stack on an ephemeral port with no side effects',
+    'Stopping a real server is impossible in tests',
+    'Supertest requires a port number'
+  ]}
+  answer={1}
+  explanation="Splitting app creation from listening is the enabler: Supertest binds the app itself per request, so there is nothing to start, stop, or leak between files — and the same split is what lets deployment platforms health-check the app object."
+/>
+
+<Quiz
+  question="The suite deletes all collections after each test but tests still pass alone and fail together. What is the most likely cause?"
+  options={[
+    'MongoDB cannot handle parallel tests',
+    'Two test files share one database and race on shared state — for example unique email indexes colliding',
+    'Vitest runs assertions out of order',
+    'The factories hash passwords too slowly'
+  ]}
+  answer={1}
+  explanation="Isolated databases or serialized files are the fix: when two files write to the same collections between each other's cleanup, no per-test cleanup can save them. Parallelism needs a database (or at least a collection prefix) per file."
+/>
+
+<Exercise title="Cover the movies API grid" difficulty="hard">
+Take the movies API and prove every route against the full integration grid.
+
+1. **Harness:** add supertest + mongodb-memory-server; split `app.js` from `server.js` if you have not already; wire the connect/cleanup lifecycle and a setup file. Confirm any test run leaves your development data untouched.
+2. **Factories:** implement `makeUser`, `tokenFor`, `makeMovie`, and `auth` as in the lesson. Verify login itself with one test: register via HTTP, then log in via HTTP, then use the returned token on a protected route — the only test that exercises the real token issuance.
+3. **The grid, per route:** for each of create, list, get one, update, and delete — happy path, 422 validation, 401 no/bad token, 404 wrong owner, 404 bad id shape. Use `toMatchObject` for envelopes; assert database state for mutations.
+4. **List behavior:** seed 30 movies for one user, 10 for another; assert filtering by query works, pagination returns the right window and `meta.total`, and the response contains no rows from the other user.
+5. **Error paths:** force a duplicate-email registration and a duplicate-key write; assert both map to your standard error envelope, not raw Mongo errors.
+6. **Speed check:** run `vitest run` and record total time. Target: the whole suite under ~20 seconds. If slower, find the culprit (usually hashing cost or a per-test memory server) and fix the harness.
+7. **CI:** add the suite to your GitHub Actions workflow with a Mongo service container; make the job fail on any test failure, and keep the memory-server path for local runs.
+8. **Mutation drill:** break one authorization check on purpose (`if (movie.owner.equals(req.user.id))` → `if (true)`) and confirm the suite fails loudly. Restore it. A suite that misses this is not doing its only job.
+</Exercise>
+
+## Summary
+
+- Integration tests send real requests through the full pipeline into a disposable database — they catch wiring bugs unit tests cannot see.
+- Split `app.js` (exported, testable) from `server.js` (listens), and run mongodb-memory-server per suite with strict cleanup.
+- Supertest chains assert status first, then envelope fields with `toMatchObject`; one behavior per test.
+- Factories (`makeUser`, `tokenFor`, `makeMovie`) turn setup into one line and encode the low-cost-hash speed choice.
+- Test the grid: happy path, 422, 401, 404-for-wrong-owner, 404-for-bad-id, and list filtering — ownership tests are the security net.
+- Guard against production URIs, keep the suite under seconds, and wire it into CI with a real MongoDB service.
+
+Next: the client side of the testing story — React components tested the way users use them, with the network mocked at the boundary.

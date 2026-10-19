@@ -1,0 +1,211 @@
+Most developers build security backwards: features first, then a panic patch after something breaks. Attackers work the opposite way — they automate scans for the same handful of mistakes across millions of sites, and your app is only interesting when it makes the list easy. Security is not a feature you add; it is the set of ways your app refuses to fail.
+
+This lesson builds the working model you need: what attackers actually try (XSS, CSRF, injection, session theft), why the defences work, and how to audit your own MERN app for each in an afternoon.
+
+## Threat modeling in ten minutes
+
+Skip the frameworks at first and answer four questions about your app:
+
+1. **What is worth taking?** Accounts (login paths), personal data, money paths, admin powers, and the compute/storage quota itself (a hijacked API mines crypto on your bill).
+2. **Who attacks?** Mostly bots replaying known exploits. Occasionally a curious user poking at your API. Rarely a targeted human — but the mitigations for the first two overlap heavily.
+3. **Where can they touch it?** Every input: forms, query strings, headers, uploaded files, webhooks. Every output: HTML, JSON, emails. Every dependency: one compromised npm package runs with your server's permissions.
+4. **What happens when it fails?** A read leak, a write (data corrupted/deleted), an account takeover, or full server compromise. Rank by damage, not likelihood.
+
+For a MERN app, that exercise consistently highlights the same five topics — the rest of this lesson and the next three.
+
+<KeyPoint>
+Every input crossing a trust boundary is hostile until validated: request bodies, query strings, route params, headers, cookies, uploaded files, and third-party API responses. The browser is not a security boundary — anything your client enforces can be removed by the client.
+</KeyPoint>
+
+## XSS: injecting scripts through your output
+
+Cross-site scripting is the most common web vulnerability, in three flavors:
+
+- **Stored XSS** — the payload is saved (comment, profile bio, movie title) and served to every viewer.
+- **Reflected XSS** — the payload comes back in the same response (a search term echoed into the page).
+- **DOM XSS** — client-side JavaScript injects untrusted data into the DOM (`innerHTML`).
+
+The attack matters because injected script runs with **your site's authority**: it can read `localStorage`, act as the user, and call your API. If you store bearer tokens in `localStorage`, one successful XSS is a full account takeover.
+
+React escapes text by default, which kills the easiest class of bugs:
+
+```jsx
+// Safe at the framework level — rendered as text, not markup
+<h1>{movie.title}</h1>
+```
+
+The vulnerabilities come from the escape hatches:
+
+```jsx
+// ❌ re-opens XSS if html is user-generated
+<div dangerouslySetInnerHTML={{ __html: review.content }} />
+
+// ❌ javascript: URLs execute on click
+<a href={user.website}>Website</a>
+
+// ❌ server-side templating that concatenates HTML
+res.send(`<h1>Results for ${req.query.q}</h1>`)
+```
+
+Defences, in order:
+
+1. **Never build HTML from strings** — render through React, send JSON to clients.
+2. **Sanitize when HTML is the product** — for a rich-text review field, store sanitized HTML (DOMPurify server-side) or better, store structured content (a JSON array of blocks) and render components.
+3. **Validate URLs** — allow only `http(s)` schemes before rendering user-provided links.
+4. **CSP as a second layer** — a Content-Security-Policy header that forbids inline scripts and untrusted origins; it does not fix the bug but restricts what a successful one can do.
+
+## CSRF: making the browser act against the user
+
+Cookies are attached to requests **by the browser, automatically** — that is the vulnerability. A user logged into your app visits evil.example, which contains a form posting to your API. The browser happily attaches the session cookie, and your API sees an authenticated request the user never made.
+
+```html
+<!-- on evil.example — posts to your API with the victim's cookies attached -->
+<form action="https://yourapp.com/api/v1/movies/42" method="POST">
+  <input name="title" value="HACKED" />
+</form>
+<script>document.forms[0].submit()</script>
+```
+
+Defences:
+
+- **SameSite cookies.** `SameSite=Lax` (modern browser default) blocks cookies on cross-site POSTs, which kills the classic attack. `SameSite=Strict` is stronger but breaks top-level navigations into your app (email links landing logged-out); for auth cookies, `Lax` is the right default.
+- **CSRF tokens.** The server embeds a random token in the page and requires it back in mutating requests. Cross-origin attackers can send requests but cannot read the page to learn the token. Frameworks like NextAuth handle this for you; if you hand-roll cookie sessions, you hand-roll this too.
+- **Bearer tokens in headers are immune by construction.** A `Authorization: Bearer …` header is not attached automatically by any browser — evil.example cannot make the victim's browser include it. This is the main reason JSON APIs tend to prefer header tokens over cookie sessions.
+- **Never enable state-changing GETs.** `/movies/42/delete` as a link is CSRF-able even with SameSite=Lax; mutations belong to POST/PATCH/DELETE.
+
+## Injection: building queries from input
+
+Injection means your input becomes part of a command — SQL for classic databases, and for MongoDB, **operators**. The JavaScript object you pass to a query can carry special keys:
+
+```js
+// The login route, written naively
+app.post('/api/v1/auth/login', async (req, res) => {
+  const user = await User.findOne({
+    email: req.body.email,
+    password: req.body.password,     // TypeScript would already complain here
+  })
+})
+```
+
+An attacker sends JSON instead of strings:
+
+```json
+{ "email": "victim@site.com", "password": { "$ne": null } }
+```
+
+`{ $ne: null }` matches any existing value — the query returns the victim's user without knowing the password. This is **operator injection**, and it only works when raw request data flows into query objects unvalidated. The defences, which the data-protection lesson expands:
+
+- **Validate and shape every input with Zod** (`z.string()` refuses objects; `.strict()` rejects unknown keys).
+- **Never pass `$`-carrying input into queries** — destructure the exact fields you expect.
+- **Cast ids with validation**, not raw passthrough.
+- **Disable server-side JavaScript** (`$where`) if your Mongo deployment allows it.
+
+## Sessions and tokens: storing the crown jewels
+
+Where the session lives decides what a successful XSS or CSRF is worth:
+
+| Storage | XSS exposure | CSRF exposure | Notes |
+|---|---|---|---|
+| `httpOnly` cookie | Script cannot read it | Needs SameSite/CSRF token | Best for session IDs and refresh tokens |
+| `localStorage` | Any XSS reads it | Immune | Common for access tokens; keep them short-lived |
+| Memory (JS variable) | Reads only if XSS active now | Immune | Lost on refresh; pairs with refresh cookie |
+
+The pragmatic MERN pattern most teams land on: a **short-lived access token** (15 minutes) kept in memory or `localStorage` for header auth, plus a **long-lived refresh token in an `httpOnly; Secure; SameSite=Lax` cookie** that can only mint new access tokens. The advanced-auth lesson implements the full rotation flow.
+
+Cookie flags, in one table:
+
+```text
+HttpOnly  → JavaScript cannot read it (XSS cannot steal it)
+Secure    → only sent over HTTPS
+SameSite  → Lax blocks cross-site POSTs; Strict blocks all cross-site sends
+Path=/    → scope; tighten where possible (refresh endpoint only, for example)
+Max-Age   → explicit lifetimes beat session cookies for tokens
+```
+
+## Transport and headers: cheap, broad defences
+
+**HTTPS everywhere, no exceptions.** Login forms over HTTP leak passwords to anyone on the network path. On managed hosts (Vercel, Render) TLS is automatic; add **HSTS** (`Strict-Transport-Security`) so browsers refuse to downgrade after the first visit.
+
+A small set of response headers closes entire classes of bugs. You will wire these with `helmet` in the next lesson; know what each does:
+
+```text
+Content-Security-Policy        → whitelist script/style/connect sources; kills most XSS execution
+X-Content-Type-Options: nosniff → stops MIME-sniffing a .txt into a script
+X-Frame-Options / frame-ancestors → blocks clickjacking (your UI in an invisible iframe)
+Referrer-Policy                 → stop leaking URLs (which can contain tokens) to third parties
+Strict-Transport-Security      → force HTTPS for future visits
+```
+
+<Callout type="warning" title="Start CSP in report-only mode">
+  `Content-Security-Policy-Report-Only` logs violations without blocking anything. Run it for a week, collect the reports endpoint output, whitelist what your app actually needs (fonts, image CDN, API origin), then enforce. Flipping straight to a strict policy is how people brick their own site at 2 a.m.
+</Callout>
+
+## Try it
+
+<TryIt title="Spot the vulnerability" hint="Read each snippet and name the class of bug before scrolling on: (1) XSS via dangerouslySetInnerHTML with review content, (2) XSS via javascript: URL, (3) operator injection. Then write the one-line fix for each.">
+```jsx
+// 1 — user reviews are rich text from the editor
+<div dangerouslySetInnerHTML={{ __html: review.body }} />
+
+// 2 — user profile link
+<a href={user.website}>{user.website}</a>
+
+// 3 — movie search by id from the query string
+const movie = await Movie.findOne({ _id: req.query.id })
+
+// Fixed versions:
+// 1: sanitize server-side (DOMPurify) or store structured JSON and render components
+// 2: const safe = /^https?:\/\//.test(user.website) ? user.website : '#'
+// 3: const id = z.string().regex(/^[0-9a-f]{24}$/).parse(req.query.id)
+```
+</TryIt>
+
+## Check your understanding
+
+<Quiz
+  question="Why are bearer tokens in an Authorization header not vulnerable to classic CSRF?"
+  options={[
+    'They expire too quickly to be replayed',
+    'No browser attaches a custom Authorization header automatically — a cross-site page cannot make the victim’s browser include the token',
+    'They are encrypted with the JWT secret',
+    'CORS blocks all cross-origin requests'
+  ]}
+  answer={1}
+  explanation="CSRF works because cookies ride along automatically. A header must be set explicitly by JavaScript running on your origin, which a cross-site attacker cannot do. That is why header-token APIs need SameSite/CSRF defenses far less than cookie-session apps — while still being exposed to XSS."
+/>
+
+<Quiz
+  question={'An API validates login with User.findOne({ email: req.body.email, password: req.body.password }). How does { "password": { "$ne": null } } defeat it?'}
+  options={[
+    'It decrypts the password hash',
+    'MongoDB interprets $ne as an operator, matching any non-null value — so the query returns the user regardless of the real password',
+    'It causes a type error that bypasses checks',
+    'It injects JavaScript into the server'
+  ]}
+  answer={1}
+  explanation="Injection is about input becoming code. A plain object smuggled into a query position is treated as a query operator. Zod schemas that require a string (and reject objects) stop this at the boundary — which is why every write endpoint in this curriculum validates with strict schemas."
+/>
+
+<Exercise title="Audit your own app like an attacker" difficulty="medium">
+Walk your movies app through a full pass of this lesson and fix what you find. Document each finding in a `SECURITY-AUDIT.md`.
+
+1. **Inventory the surfaces:** list every place user input enters (forms, query params, uploads, webhooks) and every place data is rendered (components, emails, error messages). This list is your audit checklist.
+2. **XSS sweep:** grep for `dangerouslySetInnerHTML`, `innerHTML`, `href={`, and `res.send` with template strings. For each hit: eliminate, sanitize (DOMPurify), or validate (URL schemes). Record the decision.
+3. **Cookie audit:** for every cookie your app sets (dev tools → Application → Cookies), check HttpOnly, Secure, and SameSite. Fix anything insecure; note which cookie needs which flag and why.
+4. **Mutation methods:** confirm no state-changing operation is reachable by GET; move any offenders to POST/DELETE with proper method routing.
+5. **CSP dry run:** add a `Content-Security-Policy-Report-Only` header allowing only your own origin, your API origin, and your font/image CDNs; run the app for a few days or a full test pass and collect what it would have blocked. Then write the final enforcement policy you would ship.
+6. **Injection proof:** send `{ "email": { "$ne": null } }` to your login endpoint with a REST client. A 422 is the pass condition; a user object in the response means you have a critical fix to make first.
+7. **Write it down:** finish `SECURITY-AUDIT.md` with each area, the finding, the fix, and the verification command or test that proves the fix.
+</Exercise>
+
+## Summary
+
+- Threat model by asset, actor, surface, and damage — for a MERN app that points straight at XSS, CSRF, injection, session handling, and headers.
+- All input crossing a trust boundary is hostile; the browser is not a security boundary.
+- XSS survives through HTML escape hatches (`dangerouslySetInnerHTML`, raw URLs, string-built HTML): render through React, sanitize rich text, validate URLs, and add CSP as a second layer.
+- CSRF exploits automatic cookie attachment: SameSite cookies, CSRF tokens for cookie sessions, and header-token APIs as the structurally immune choice for JSON clients.
+- Injection turns input into query operators: strict Zod schemas and explicit field shaping are the fix.
+- Sessions belong in `httpOnly; Secure; SameSite` cookies (or short-lived tokens paired with a refresh cookie); HTTPS and a small header set are broad, cheap defence.
+
+Next: turning all of this on in the Express layer — helmet, rate limiting, validation at the edge, secrets, and dependency hygiene.
+

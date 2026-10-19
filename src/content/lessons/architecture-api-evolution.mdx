@@ -1,0 +1,293 @@
+The day you launch, your API stops being yours. Deployed clients, mobile apps, integrations, and scripts you never heard of start depending on every field name and status code — and "we changed it, redeploy your app" is not a strategy for any of them. APIs are products with customers, and this lesson covers the practices that let a product change without breaking its customers: versioning, deprecation, pagination, idempotency, webhooks, and the 202 pattern for work that takes time.
+
+## Versioning: rules for changing the contract
+
+Start from the discipline that prevents most breakage: **classify every change as additive or breaking**, and only breaking changes need versioning machinery at all.
+
+```text
+ADDITIVE (safe, no version bump):
+  - new optional request field
+  - new field in responses (clients ignore unknown fields — if yours do not, that is the bug to fix)
+  - new endpoint
+  - new optional query parameter
+  - relaxing a validation rule (wider limits)
+
+BREAKING (needs a version or a deprecation plan):
+  - renaming or removing a response field
+  - changing a field's type (number → string)
+  - making an optional field required
+  - tightening validation (narrower limits, new required formats)
+  - changing error codes or status codes for existing cases
+  - changing default sort order or pagination semantics
+```
+
+If your rule is "additive forever," you need no versioning for a long time. When you genuinely must break something, the options and their costs:
+
+```text
+URL versioning        /api/v1/ → /api/v2/     Explicit, cache-friendly, easy to route.
+                                               Every client migrates at once; two code paths live on.
+
+Header versioning     Accept: application/vnd.movies.v2+json
+                                               Clean URLs, harder to test by hand, easy to forget
+                                               (clients silently get v1 behavior).
+
+No versioning         additive-only forever   Works for internal APIs; a breaking change becomes
+                                               a project, not a release.
+```
+
+For this stack, **URL versioning for public APIs, additive-only for internal ones** is the honest default. The decisive question is not which scheme is prettier; it is *what runs at the old version while clients migrate*. Normally that is a thin compatibility layer:
+
+```js
+// src/routes/index.js — v1 stays alive, translating to the same services
+router.use('/api/v1/movies', v1Movies)   // old shape: { year }, offset pagination
+router.use('/api/v2/movies', v2Movies)   // new shape: { releaseYear }, cursor pagination
+
+// modules/movies/movie.routes.v1.js — a translation shell, not a second implementation
+export function toV1(movie) {
+  return { id: movie.id, title: movie.title, year: movie.releaseYear }   // rename on the way out
+}
+```
+
+The new logic lives in the services once; the v1 route is a codec — parse the old shape, call the same service, re-encode the old shape. That keeps the migration window cheap instead of forking the entire codebase.
+
+## Deprecation: a timeline, not a surprise
+
+Removing something needs a published schedule and machine-readable signals, exactly like a good library:
+
+```text
+Day 0     announce: changelog entry + email to API key holders + docs banner
+          responses gain headers:
+            Deprecation: @1730000000            (when it became deprecated)
+            Sunset: Sat, 01 Aug 2026 00:00:00 GMT
+            Link: <https://docs.example.com/migrate-v2>; rel="deprecation"
+
+Day 0+    monitor usage of the deprecated path per API key; message the
+          heavy users directly with their own numbers
+
+Sunset-30 the "this is getting serious" notice to remaining users
+
+Sunset    return 410 Gone with { error: { code: 'SUNSET', ... } } — never 404,
+          and never a silent behavior change
+
+Sunset+30 keep the migration guide and the 410 body pointing at it for a while
+```
+
+The `Deprecation` and `Sunset` headers cost nothing and let sophisticated clients warn their own users automatically. The per-key usage numbers are what turn "we announced it" into "we can prove who is affected" — announce inside the product, not just in a changelog nobody reads.
+
+## Collection endpoints: pagination, filtering, sorting
+
+The conventions worth standardizing once and reusing everywhere:
+
+```text
+GET /api/v1/movies?limit=20&cursor=eyJpZCI6...&genre=sci-fi&sort=-createdAt
+
+Response envelope (offset for small/admin collections, cursor for feeds):
+{
+  "data": [ ... ],
+  "meta": {
+    "limit": 20,
+    "nextCursor": "eyJpZCI6...",     // null when done — clients stop here
+    "hasMore": true
+  }
+}
+```
+
+**Offset vs cursor** is the decision that ages best:
+
+| | Offset (`?page=3`) | Cursor (`?cursor=…`) |
+|---|---|---|
+| Implementation | Skip/limit — trivial | Encode last-seen sort key |
+| Deep pages | O(n) skip, slow past ~10k | O(1) — index seek |
+| Live data | Duplicates/skips when rows insert | Stable by construction |
+| Random access | Pages are addressable | Sequential only |
+
+Rule of thumb: cursor pagination for any feed sorted by time (stable under writes, fast at any depth); offset pagination only for small, admin-facing, or jump-to-page UIs. Cursor implementation in Mongo is a `{ _id: { $gt: lastId } }` window with the sort key encoded in the opaque token (base64url JSON — opaque to clients so you can change the internals).
+
+Other conventions that compound:
+
+- **Filtering:** one query param per field, values validated by a strict schema (previous lessons); `?genre=sci-fi&year=2021`.
+- **Sorting:** `sort=-createdAt,title` — leading `-` for descending, allowlist the sortable fields so nobody can sort on an unindexed field and bring the database to its knees.
+- **Field selection:** `?fields=id,title,year` (sparse fieldsets) — only where payloads are genuinely heavy; it doubles your response-shape permutations.
+- **Caps:** `limit` max 50–100, always enforced server-side.
+
+`meta` is not decoration: telling the client `hasMore` is what allows infinite scroll without a probe request, and `nextCursor` keeps the pagination logic identical across every endpoint.
+
+## Idempotency: safe retries for unsafe operations
+
+Networks fail ambiguously: the client sends `POST /payments`, the connection drops before the response arrives — did it charge? A client that retries risks double-charging; one that does not risks never charging. **Idempotency keys** resolve the ambiguity: the client generates a key, retries carry the same key, and the server guarantees the operation happens at most once, replaying the original response for duplicates.
+
+```js
+// src/middleware/idempotency.js
+import { IdempotencyKey } from '../models/idempotency-key.js'
+
+export function idempotent(scope) {
+  return async (req, res, next) => {
+    const key = req.get('Idempotency-Key')
+    if (!key) return next()
+
+    const existing = await IdempotencyKey.findOne({ key, scope, user: req.user.id })
+    if (existing?.response) {
+      // replay: same status, same body — the client cannot tell it was a duplicate
+      return res.status(existing.status).json(existing.response)
+    }
+    if (existing) {
+      return res.status(409).json({ error: { code: 'IN_PROGRESS', message: 'Request is still being processed' } })
+    }
+
+    const record = await IdempotencyKey.create({ key, scope, user: req.user.id })
+    res.on('finish', async () => {
+      if (res.statusCode < 500) {                     // persist successful results
+        await record.updateOne({ $set: { status: res.statusCode, response: res.locals.body } })
+      } else {
+        await record.deleteOne()                      // 5xx: allow a clean retry
+      }
+    })
+    next()
+  }
+}
+
+router.post('/payments', requireAuth, idempotent('payments'), createPayment)
+```
+
+The details that make it correct: **scope keys** (a payment key must not collide with a refund key), **store only successes** (a failed attempt should be retryable), **TTL the records** (24–48h is plenty; keys are not permanent state), and **scope to the user** so one tenant cannot probe another's keys. The client side is one line of responsibility: generate a UUID per *logical operation* — not per attempt — and reuse it across retries.
+
+## Webhooks: pushing events to consumers
+
+When other systems need to react to changes, they can poll your API forever or you can push. For pushes, the design rules are all about the receiving side's reliability:
+
+```js
+// src/services/webhooks.js
+import crypto from 'node:crypto'
+import { fetch } from 'undici'
+
+export async function deliver(webhook, event, payload) {
+  const body = JSON.stringify({ event, data: payload, sentAt: new Date().toISOString() })
+  const signature = crypto
+    .createHmac('sha256', webhook.secret)
+    .update(body)
+    .digest('hex')
+
+  const response = await fetch(webhook.url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Webhook-Event': event,
+      'X-Webhook-Signature': `sha256=${signature}`,
+      'X-Webhook-Id': crypto.randomUUID(),          // receiver dedupes on this
+    },
+    body,
+    signal: AbortSignal.timeout(10_000),
+  })
+
+  if (!response.ok) throw new Error(`Webhook delivery failed: ${response.status}`)
+}
+```
+
+Delivered through the queue from the architecture lesson, so retries, backoff, and the dead-letter view come for free. The contract rules:
+
+- **Sign the payload with HMAC** and document the exact signed string (the raw body, byte for byte). Receivers verify before trusting — the secret is per-webhook-endpoint, shown once at creation.
+- **Event names are part of the contract**: `movie.created`, `movie.deleted` in past tense — they announce something that happened, not a command.
+- **At-least-once delivery** is the only honest promise over the internet: receivers must dedupe on the event id. Say so in the docs; give them the id to do it with.
+- **Give receivers a testing story**: a “send test event” button and a delivery log (attempt count, last status, replay) in the dashboard. The single largest support cost of webhooks is consumers debugging their own endpoints without visibility.
+
+## Long-running operations: 202 Accepted
+
+Some work is too big to complete inside a request: exports, bulk imports, report generation, account migrations. Doing it inline times out gateways and holds connections; the pattern that fits every client is the **202 status-resource handshake**:
+
+```text
+POST /api/v1/exports          → 202 Accepted
+                                { "data": { "jobId": "...", "statusUrl": "/api/v1/exports/…", "status": "queued" } }
+
+GET  /api/v1/exports/:jobId   → 200 { "data": { "status": "processing", "progress": 0.4 } }
+                              → 200 { "data": { "status": "completed", "downloadUrl": "… (expires in 1h)" } }
+                              → 200 { "data": { "status": "failed", "error": { "code": "…" } } }
+```
+
+Why it works: every HTTP client can implement it (poll a GET until terminal state), it is resumable across client restarts (the job id is durable), and it composes with the queue (the job *is* a BullMQ job; the status endpoint is `job.getState()` plus your own progress field). Include `Retry-After` on the 202 to space out polling, and expire the result artifact with a clear timestamp — storage is not free and “the link worked yesterday” is a support ticket you can prevent.
+
+<Callout type="tip" title="The API is a product with a changelog">
+  Maintain `docs/api-changelog.md` with one line per release: added, changed, deprecated, scheduled for sunset. The habit costs minutes per sprint and is what lets the v1-to-v2 migration be a scheduled project instead of an archaeological emergency at contract-renewal time.
+</Callout>
+
+## Try it
+
+<TryIt title="Replay a request and watch idempotency absorb it" hint="Send the same POST twice with one Idempotency-Key, then twice with two different keys. The first pair creates one row; the second pair creates two — that is the entire feature in one experiment.">
+```bash
+KEY=$(uuidgen)
+
+# 1 — first attempt: creates the resource
+curl -s -X POST http://localhost:3000/api/v1/payments \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Idempotency-Key: $KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"amount": 1999, "currency": "usd"}'
+
+# 2 — retry with the SAME key: replay, no second charge
+curl -s -X POST http://localhost:3000/api/v1/payments \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Idempotency-Key: $KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"amount": 1999, "currency": "usd"}'
+
+# 3 — same body, NEW key: a genuinely new charge
+curl -s -X POST http://localhost:3000/api/v1/payments \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Idempotency-Key: $(uuidgen)" \
+  -H 'Content-Type: application/json' \
+  -d '{"amount": 1999, "currency": "usd"}'
+
+# Verify: exactly two payment records exist.
+curl -s http://localhost:3000/api/v1/payments -H "Authorization: Bearer $TOKEN" | jq '.data | length'
+```
+</TryIt>
+
+## Check your understanding
+
+<Quiz
+  question="A client sends POST /payments, the connection drops, and it retries with the same Idempotency-Key. What must the server return on the retry?"
+  options={[
+    '201 Created — the request was received again',
+    'The stored status and body from the first successful attempt, so the retry is indistinguishable from the original response',
+    '409 Conflict in all cases',
+    'Nothing — duplicate keys are the client’s problem'
+  ]}
+  answer={1}
+  explanation="The point of the key is to make the retry safe and unremarkable: replaying the original response lets the client proceed as if nothing happened. Returning an error forces the client to distinguish 'charged' from 'unknown', which is exactly the ambiguity idempotency exists to remove."
+/>
+
+<Quiz
+  question="Why does cursor pagination remain stable when new rows are inserted while a user pages through a feed, while offset pagination does not?"
+  options={[
+    'Cursors are cached by the CDN',
+    'The cursor is a position keyed to the last item seen; new rows appear before it or not at all, so no item is skipped or duplicated — while offsets shift when rows are inserted, causing repeats and gaps',
+    'Offset pagination is only for SQL databases',
+    'Cursors sort results automatically'
+  ]}
+  answer={1}
+  explanation="skip(40) means '40 rows into whatever the order is now' — insert one row and every later page shifts, so the reader sees an item twice or misses one. A cursor — typically the sort key of the last returned item — selects 'everything after the thing I already saw', which is unaffected by writes elsewhere in the collection."
+/>
+
+<Exercise title="Evolve the movies API like a product" difficulty="hard">
+Ship a v2 that would not break a single v1 client, and prove every guarantee with tests or commands.
+
+1. **Inventory breaking changes:** decide one substantive v2 change (for example: rename `year` to `releaseYear`, move from offset to cursor pagination, or restructure the error envelope). Write the additive/breaking classification table from this lesson for your change.
+2. **V1 compatibility shell:** keep `/api/v1` working through a translation layer over the same services — no forked business logic. Test both versions against the same database row and confirm the shapes match their respective contracts.
+3. **Cursor pagination:** implement `?limit=&cursor=` on the movies list for v2: encode the last sort key into an opaque base64url token, return `meta.nextCursor` and `meta.hasMore`, cap `limit` server-side. Tests: page through 3 pages with seeded data inserting a new movie mid-traversal; assert no duplication or omission.
+4. **Deprecation signals:** add the `Deprecation`, `Sunset`, and `Link` headers to v1 responses; log per-API-key usage of v1 (key from the auth token or a client id header); write the three-step announcement timeline with dates in `docs/api-changelog.md`.
+5. **Idempotency:** add the middleware to your most dangerous POST (payment, purchase, or any money-adjacent operation); store keys per user with TTL and scope; tests: same key twice returns identical body and creates one record; different key creates two; concurrent duplicate keys get 409 IN_PROGRESS; a 500 leaves the key reclaimable.
+6. **Webhook emitter:** implement outbound webhooks for `movie.created` and `movie.deleted`, HMAC-signed, delivered through the queue with retries; include the event id and a webhook delivery log page (or endpoint) with attempt counts and a replay button for failed deliveries.
+7. **202 export:** add `POST /exports` (a CSV of the user's movies) that returns a job id and status URL; the worker generates the file into object storage (or local disk in dev with a clear path), and the status endpoint reports queued/processing/completed with an expiring download URL. Poll it end to end with curl.
+8. **Changelog and docs:** document v2 in the API docs with one migration example per breaking change, and add the deprecation banner to the v1 section. Bonus: write the v1 sunset checklist a successor could execute without asking you anything.
+</Exercise>
+
+## Summary
+
+- Classify every API change as additive or breaking; additive changes need no versioning, and breaking ones need a plan for what runs while clients migrate.
+- URL versioning with a translation shell keeps v1 alive without forking business logic; deprecation is a dated timeline with `Deprecation`/`Sunset` headers and per-key usage data.
+- Cursor pagination for feeds (stable and O(1) at depth), offset only for small admin collections; standardize the `meta` envelope, allowlist sortable fields, and cap limits.
+- Idempotency keys make unsafe retries safe: scoped per user and operation, failures reclaim the key, successes replay the original response byte for byte.
+- Webhooks are at-least-once, HMAC-signed, event-named, deduplicated by id on the receiver, and supported with delivery logs; the queue provides retries for free.
+- Long operations use the 202-accepted handshake: a job id, a status URL, progress, an expiring result — composable with any client and with your own queue.
+
+Next: the data layer itself — modeling by access patterns, indexes at depth, transactions, denormalization, and migrations you can run without downtime.
+

@@ -1,0 +1,254 @@
+The previous lessons hardened the edges: requests are validated, sessions are revocable, headers are set. This lesson goes down a layer — to the data itself. It is short on drama and long on consequence: the mistakes here are the ones that end up in breach reports, because no amount of API hardening helps when the database user can drop collections or the query builder forwards attacker-controlled operators.
+
+Four concerns, in order of how often they bite: **injection-proof queries**, **least-privilege database access**, **encryption and backups**, and **a sane policy for personal data**.
+
+## NoSQL injection, properly
+
+You saw operator injection in the fundamentals lesson. Here is the full picture, because MongoDB's query model makes this category wider than SQL injection in some ways — and narrower in others.
+
+The dangerous pattern is any code path where a JavaScript object from a request reaches a query position:
+
+```js
+// ❌ three ways this is exploitable
+app.post('/api/v1/login', async (req, res) => {
+  const user = await User.findOne({
+    email: req.body.email,          // could be { "$ne": null }
+    password: req.body.password,    // or { "$regex": "^" }
+  })
+  res.json({ data: user })
+})
+```
+
+```js
+// ❌ query strings are strings, but coercion brings them back
+const movie = await Movie.find({ year: req.query.year })   // ?year[$gt]=1990 works after parsing
+```
+
+```js
+// ❌ $where executes server-side JavaScript
+const results = await Movie.find({ $where: `this.title == '${req.query.title}'` })
+```
+
+Defences, strongest first:
+
+**1 — Validate to primitives.** A Zod schema that says `z.string()` will never produce an object; `.strict()` objects reject operator keys at the top level:
+
+```js
+const loginSchema = z
+  .object({
+    email: z.email(),
+    password: z.string().min(8).max(72),
+  })
+  .strict()
+
+// { "email": "x@y.z", "password": { "$ne": null } } → 422 before any query runs
+```
+
+**2 — Build queries from fields, never spread input:**
+
+```js
+// ❌ query shape controlled by caller
+await Movie.find(req.query)
+
+// ✅ every key is chosen by your code
+const filters = listQuerySchema.parse(req.query)
+const query = { owner: req.user.id }
+if (filters.genre) query.genres = filters.genre
+if (filters.year) query.year = filters.year
+await Movie.find(query).limit(filters.limit)
+```
+
+**3 — Cast ids explicitly.** `_id` values go through validation, not raw passthrough, so `{ "$ne": null }` in a params position dies at the schema:
+
+```js
+const objectId = z.string().regex(/^[0-9a-f]{24}$/)
+```
+
+**4 — Disable `$where` and server-side JS** at the deployment level (Atlas: disallow it), so a missed code path still cannot execute JavaScript inside the database process.
+
+<KeyPoint>
+The rule is one line: input never determines query *shape*, only query *values*, and only after validation to primitives. TypeScript helps here more than anywhere else — schemas that cannot produce an object make the dangerous query positions unreachable.
+</KeyPoint>
+
+## Least-privilege database access
+
+Your application connects with a database user. There is no reason that user should be able to drop the database, manage other users, or read collections it never queries.
+
+On MongoDB Atlas, the setup that takes five minutes and removes a class of disasters:
+
+```text
+Database Access → Create user per environment:
+  app-dev    → readWrite on app-dev only
+  app-prod   → readWrite on app-prod only      (no dbAdmin, no clusterMonitor)
+  migrations → readWrite on app-prod           (used only by the migration job)
+  (no shared admin user in applications — ever)
+
+Network Access → allowlist by IP or VPC peering:
+  production API host egress IPs
+  CI runner ranges (or none — run migrations through the deploy pipeline's private network)
+  your own IP for dev (temporary)
+```
+
+Two amplifier details:
+
+- **TLS is required, not optional.** Atlas enforces it on `mongodb+srv://` URIs; note that the connection string contains credentials, so it is a secret like any other — rotate it if it ever lands in a log.
+- **Separate databases per environment** (or separate clusters). The cheapest protection against a test script truncating production collections is that it cannot reach them.
+
+Verify the blast radius yourself once:
+
+```bash
+# As the app user, these should all fail
+mongosh "mongodb+srv://app-prod:…@cluster0.xxxxx.mongodb.net/app-prod" \
+  --eval "db.getSiblingDB('admin').runCommand({ listDatabases: 1 })"   # unauthorized expected
+mongosh "$MONGODB_URI" --eval "db.dropDatabase()"                       # unauthorized expected
+```
+
+If either succeeds, tighten the role today.
+
+## Encryption: at rest, in transit, and for the truly sensitive
+
+Three layers, often confused:
+
+**In transit** — TLS on every connection: browser to API (your host's certificate), API to database (Atlas requires it), API to third-party services. Nothing to build; everything to not break (never disable certificate validation to make a connection error go away).
+
+**At rest** — Atlas encrypts the underlying storage by default. You get this for free, and it protects against physical disk theft, one specific scenario. It does **not** protect against the far more common scenario: a leaked connection string, a misconfigured network rule, or a compromised application user reading everything through your own API.
+
+**Field-level** — the only layer that protects specific fields from a database-level compromise. Worth it for a short list: national ids, payment instrument references, health notes, private keys the app must use. The pattern in Node:
+
+```js
+// src/services/field-crypto.js
+import crypto from 'node:crypto'
+import { env } from '../config/env.js'
+
+const key = Buffer.from(env.FIELD_ENCRYPTION_KEY, 'base64')   // 32 bytes, from the secret store
+
+export function encryptField(value) {
+  const iv = crypto.randomBytes(12)
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv)
+  const ciphertext = Buffer.concat([cipher.update(String(value), 'utf8'), cipher.final()])
+  const tag = cipher.getAuthTag()
+  return `v1.${iv.toString('base64url')}.${ciphertext.toString('base64url')}.${tag.toString('base64url')}`
+}
+
+export function decryptField(stored) {
+  const [version, ivB64, dataB64, tagB64] = stored.split('.')
+  if (version !== 'v1') throw new Error('Unknown field ciphertext version')
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(ivB64, 'base64url'))
+  decipher.setAuthTag(Buffer.from(tagB64, 'base64url'))
+  return Buffer.concat([decipher.update(Buffer.from(dataB64, 'base64url')), decipher.final()]).toString('utf8')
+}
+```
+
+Rules that keep field encryption honest:
+
+- **Version the format** (`v1.` prefix) so key or algorithm rotation is a migration, not a crisis.
+- **Encrypted fields are not indexable or searchable** — design queries around them (lookup by a *hashed* value if you need exact-match, as with refresh tokens).
+- **Hashing is not encryption.** Passwords and recovery codes are hashed (one-way); fields you must display later are encrypted (two-way). Mixing these up is a classic breach finding.
+- **The key lives in the secret manager**, not the database. Field encryption protects against database leaks precisely because the key is elsewhere; storing it next to the data defeats it.
+
+## Backups: the failure mode nobody tests
+
+Backups are the one security control that matters after everything else has failed — a bad migration, a malicious write, a dropped collection. Untested backups are not backups; they are hopes.
+
+A workable regime on Atlas:
+
+```text
+Frequency   → continuous (point-in-time recovery) on the production cluster
+Retention   → 7 days PITR + daily snapshots kept 30 days
+Testing     → monthly: restore to a scratch cluster, run the app's test suite against
+              the restored data, confirm row counts and spot-check recent documents
+Access      → backup restore is an admin action; the app user cannot create or delete backups
+```
+
+The monthly restore drill has a second benefit beyond disaster readiness: it proves your application can start against a database at an older schema version — which is exactly the situation during a rollback.
+
+## PII: collect less, keep it briefly, delete it truly
+
+Every personal-data field you store is a liability with a carrying cost. The discipline:
+
+1. **Inventory.** List every field tied to a human: email, name, IP addresses in logs, user agent strings, avatars, free-text fields where users paste anything. Add it to `SECURITY-AUDIT.md`.
+2. **Minimize.** Does the feature work without the birth date? Does the log line need the full IP or is a /24 truncation enough? Deleting a field from the collection is cheaper than encrypting, securing, and purging it forever.
+3. **Retention with teeth.** Session records: TTL index, 30 days. Audit logs: 12 months, then archived or dropped. Failed-login IP logs: 30 days. If a TTL cannot be set (regulatory retention), document the exception and the owner.
+4. **Deletion actually deletes.** "Delete my account" should not set `deletedAt` and leave everything else readable. A real deletion flow: soft-delete immediately (account unusable), then a job that hard-deletes or anonymizes related documents, then verification — and for anything you keep for legal reasons (invoices), strip the identifiers and keep the row.
+
+```js
+// the deletion job, in outline
+export async function purgeUser(userId) {
+  await Movie.deleteMany({ owner: userId })
+  await Session.deleteMany({ user: userId })
+  await AuditLog.updateMany({ actor: userId }, { $set: { actor: 'deleted-user' } })
+  await User.findByIdAndDelete(userId)      // last: foreign keys reference it until now
+  logger.info({ event: 'user_purged', userId })
+}
+```
+
+<Callout type="warning" title="Backups complicate deletion">
+  A PITR backup taken before the purge still contains the user's data, and restoring it resurrects the account. That is unavoidable and generally acceptable — but it must be *documented*: "deleted data may persist in backups for up to 30 days and is purged on backup expiry." Say it in your privacy policy; unsaid, it is a surprise in an audit.
+</Callout>
+
+## Try it
+
+<TryIt title="Attack your own query layer" hint="Point these at a scratch database. Each line should be a 422 or an empty result after the lesson's fixes — and a login or a full collection dump before them, which is the point.">
+```bash
+# 1 — operator injection against a naive login
+curl -s -X POST http://localhost:3000/api/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email": "victim@test.dev", "password": {"$ne": null}}'
+
+# 2 — operator in a query string (?year[$gt]=0 style, parsed by nested query parsers)
+curl -s 'http://localhost:3000/api/v1/movies?year%5B%24gt%5D=0'
+
+# 3 — bad id shape must be 404, never a 500 stack trace
+curl -s -o /dev/null -w '%{http_code}\n' http://localhost:3000/api/v1/movies/%7B%22%24ne%22%3Anull%7D
+
+# Expected after fixes: 422 / 422 / 404, with no database error text in any body.
+```
+</TryIt>
+
+## Check your understanding
+
+<Quiz
+  question="Why is a Zod schema with z.string() fields sufficient to stop operator injection at a boundary?"
+  options={[
+    'It escapes the $ characters in input strings',
+    'It rejects any non-string value — including objects carrying $ operators — before the data can reach a query position',
+    'It encrypts the request body',
+    'It converts objects to strings automatically'
+  ]}
+  answer={1}
+  explanation="Injection needs an object in a query slot; a schema that only admits strings makes that structurally impossible. This is why validation and typing are security controls, not just ergonomics — the fix happens before the query code even sees the input."
+/>
+
+<Quiz
+  question="Atlas encrypts storage at rest. Why would you still encrypt a specific field like a national id?"
+  options={[
+    'To compress it for storage savings',
+    'Because at-rest encryption only protects the disk, while field encryption protects the value even when someone reads the database through a leaked connection string or a compromised app user',
+    'Because MongoDB cannot index unencrypted fields',
+    'To make backups smaller'
+  ]}
+  answer={1}
+  explanation="Disk encryption is transparent to anyone who can run a query — the database decrypts on read. Field-level encryption moves the trust boundary: ciphertext in a leak is useless without the key, which lives in the secret store rather than anywhere near the data."
+/>
+
+<Exercise title="A data-protection pass over the movies app" difficulty="hard">
+Walk the data layer through all four concern areas and leave evidence for each in `SECURITY-AUDIT.md`.
+
+1. **Injection sweep:** grep every route for direct use of req.body, req.query, and req.params in query positions. For each hit: validate to primitives with a strict schema, build the query object explicitly, and confirm id params go through the 24-hex regex. Add integration tests: operator object in login body → 422; operator payload in list filters → 422; $where in any field → 422.
+2. **Least privilege:** create environment-scoped Atlas users (app user, migration user) with readWrite on a single database; allowlist only the hosts that need access; prove that the app user cannot list databases or drop its own database (record the commands and their "unauthorized" output).
+3. **Encrypt one field:** add a field that would worry you in a leak (for example, a phone number on the profile) with the aes-256-gcm helper from this lesson, version-prefixed; store the key in the secret manager; test round-trip encryption, and that querying the plaintext yields nothing.
+4. **Backup drill:** enable PITR (or the closest available tier); perform a restore to a scratch cluster; point a local API instance at the restored data and run the integration suite; record row counts before and after. Note the restore duration — that is your realistic recovery time.
+5. **PII inventory and purge:** list every human-identifying field including log lines; mark each with storage location, retention, and TTL status. Implement (or complete) the account-purge job and test it end to end: purge a seeded user, verify every collection that referenced them, confirm log lines store no raw identifiers beyond the retention window.
+6. **Write the policy:** finish the audit file with one paragraph per area stating what you would tell a user whose account was compromised: what was exposed, what was not, and what you would rotate.
+</Exercise>
+
+## Summary
+
+- Input must never determine query shape: validate to primitives with strict schemas, build query objects field by field, cast ids through a regex, and disable `$where` server-side.
+- Least-privilege database users per environment, with network allowlists, contain the damage of a leaked connection string to one database.
+- Encryption has layers: TLS in transit, storage encryption at rest (free, limited), and field-level AES-256-GCM with versioned ciphertext and keys held in the secret store — hashing for one-way values, encryption for two-way.
+- Untested backups are hopes: PITR plus scheduled snapshots plus a monthly restore drill that runs your own test suite against restored data.
+- Personal data: inventory it, minimize it, give every category a TTL, and make deletion a real job with verification — while documenting the backup retention carve-out honestly.
+
+That completes the security module. Next: operations — Docker, CI/CD, and observability, so all of this ships and stays running in production.
+

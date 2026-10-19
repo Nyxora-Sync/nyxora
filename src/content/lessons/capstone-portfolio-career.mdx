@@ -1,0 +1,283 @@
+You have built the skills; this lesson makes them legible. Hiring does not run on raw ability discovered by accident — it runs on artifacts: repositories that read well in five minutes, a demo that works, a story about decisions, and a public trail of contributions. Every one of those is a skill you can build deliberately, and this capstone is the week you build them.
+
+## The README that gets you read
+
+A reviewer spends 30–120 seconds per repository. The README either earns the next five minutes or it does not. The structure that survives that scan:
+
+```markdown
+# PulseBoard — multi-tenant feedback boards
+
+One sentence: what it is and who it's for.
+
+**Live demo:** https://pulseboard.example.com · **Demo login:** demo@pulseboard.dev / demo-password-123
+
+![Board screenshot](docs/screenshot-board.png)
+*(4-8 second GIF of the core loop: sign up → post → vote → status change)*
+
+## What's interesting here
+- Multi-tenant authorization with per-org roles and a cross-tenant test suite (link to it)
+- Vote counts exact under concurrency: unique indexes + atomic $inc (link to service + test)
+- Batched, idempotent email notifications via BullMQ with a dead-letter UI
+
+## Stack
+Node 20 · Express · MongoDB · React 19 · TanStack Query · BullMQ + Redis · Docker · GitHub Actions
+
+## Architecture
+[text diagram: client → api → mongo/redis → worker; one line per component]
+
+## Running it
+docker compose up  →  open http://localhost:5173  (or two-command setup)
+
+## Decisions & trade-offs
+- Chose a modular monolith over services: one team, one deploy; extraction triggers documented in/architecture.md
+- Chose session cookies over localStorage tokens: XSS exposure bounded, CSRF handled by SameSite + header check
+- Chose cursor pagination: feeds stable under writes
+
+## Roadmap
+- [ ] Slack notifications   - [ ] SSO (SAML)   - [ ] CSV exports (202-pattern in place)
+
+## Tests
+`npm test` — 187 tests: integration grid per route, cross-tenant suite, component + 8 E2E journeys
+[CI badge]
+```
+
+Why this works: the **live link** answers "does it run" instantly; the **demo credentials** remove the signup friction that kills evaluation; the **What's interesting** section tells the reviewer what to look at (they cannot find your best work by accident); **Decisions** shows judgment, which is what separates hires at every level; and the link-heavy prose lets a technical reviewer verify claims in one click.
+
+Honesty rules: no invented user counts, no "production-grade" adjectives you cannot point at, no screenshots of a UI that does not deploy. Reviewers have a sixth sense for inflation, and one overclaim poisons everything true.
+
+## GitHub as a portfolio surface
+
+```text
+Profile README     pinned at github.com/you/you — 5 lines: what you build,
+                   the one project you want looked at, how to reach you
+Pinned repos       4-6, ordered by what you want judged: PulseBoard (capstone),
+                   the MERN curriculum project if you built it, any OSS contribution,
+                   a small sharp utility that shows taste
+Commit history     of your best repo: does it read like a story? [see below]
+Contribution graph any consistent activity is fine; green squares are not the metric,
+                   alive repositories are
+```
+
+Commit hygiene, as a reviewer experiences it:
+
+```text
+✅ feat(votes): idempotent toggle with unique index + concurrency tests
+✅ fix(invites): hash tokens at rest; reject expired before membership write
+✅ perf(board): compound index for status+voteCount sort; explain before/after in PR
+❌ wip
+❌ fix stuff
+❌ one commit, "initial commit", 12,000 files
+```
+
+The last one is the most common: a capstone squeezed into a single commit reads as a copied tutorial, and reviewers cannot see how you work. If you built the capstones in the curriculum, you already have the alternative — the git log of real, incremental, documented work. If you did not, retro-fix by committing forward: refactors, tests, and fixes with honest messages beat a rewritten fake history.
+
+## The demo video: 3 minutes, no exceptions
+
+A human watches this before they run anything. The script that works:
+
+```text
+0:00-0:20  Problem + product, spoken: "Teams collect feedback in spreadsheets.
+            PulseBoard gives them a public board where users vote on what matters."
+0:20-1:30  The core loop live: sign up, create a board, post, switch to an
+            incognito window, vote as a visitor, show the count update.
+1:30-2:15  One decision shown in the code: the vote service — the unique index,
+            the $inc, the duplicate-key catch — 20 seconds, screen recording.
+2:15-2:45  One system view: the architecture diagram; one sentence per box.
+2:45-3:00  What's next + where the code is.
+```
+
+Record with OBS or Loom; no face required; audio can be a calm voice or (inferior) captions. The bar is: after watching, the viewer can describe what the product does and one reason you are careful — that is a yes to the next stage.
+
+<Callout type="tip" title="The README, video, and case study are one story told three times">
+  Write the case study first (next section). Its structure — problem, constraints, decisions, outcome — is the video script and the README's "What's interesting" list. One story, three formats, and each one gets sharper because it is a translation of the others.
+</Callout>
+
+## Open source: the fastest credential
+
+One merged pull request to a real project outweighs a paragraph of self-description, because a maintainer — a stranger with no reason to be kind — looked at your work and took it. The path that actually leads to merges, in order:
+
+```text
+1. USE before you contribute. Run the tool; hit a rough edge; live in the issue tracker
+   for a day. Context you use is context you can contribute to.
+2. Start with what you can verify: docs fixes with a real reproduction, a failing
+   edge case you hit personally, a flaky test you can characterize.
+3. Read CONTRIBUTING.md and the last twenty merged PRs. Match the house style
+   exactly — the review bar is lower for changes that look native.
+4. Keep the first PR surgical: one concern, tests if the repo has them, the issue
+   linked, a screenshot/terminal output proving it. Reviewers review diffs, not resumes.
+5. Expect a review cycle. Respond within a day, accept nits without ego, and ask
+   "anything else before this can land?" — persistence inside politeness is the whole game.
+```
+
+Where to look with the skills you now have: Express/Mongoose ecosystem packages (middleware, CLI tools) for API-shaped fixes; React component libraries for component tests and accessibility fixes; documentation for anything you learned the hard way (your curriculum notes are a map of real gaps). GitHub search:
+
+```text
+label:"good first issue" language:TypeScript state:open
+label:"help wanted" repo:expressjs/express
+"first-timers-only" is:issue is:open created:>2026-01-01
+```
+
+Licensing in one paragraph, because you will meet it: MIT and Apache-2.0 are permissive — people may use your code in closed products, keep notices/attribution; GPL-family licenses require derivative works to stay open — fine for tools, a landmine if you copy GPL code into a closed product; "no license" means all rights reserved — you may not copy it (and other people may not copy yours). Your own projects: add an MIT `LICENSE` file the day you publish, or you have published nothing usable.
+
+## Case studies: the decision story
+
+A portfolio site is optional; three case studies are not — they are the written form of your judgment. One page each, for your three best projects (PulseBoard, the movies app with its full pipeline, anything real you shipped):
+
+```markdown
+# PulseBoard — multi-tenant feedback boards
+
+**Problem.** Small product teams collect feedback in spreadsheets; their users
+cannot see what is planned, and nothing gets prioritized by demand.
+**Constraints.** Solo build, one week of evenings, one cheap server, a demo that
+must evaluate in under five minutes without a signup wall.
+**Key decisions.**
+1. Tenancy as a first-class invariant (org on every document + scoped service layer)
+   because retrofitting it costs a rewrite — and I wanted the cross-tenant test suite
+   as a portfolio piece in itself.
+2. Batched, idempotent notifications (one job per event, sent-markers) because a
+   status change touching 4,000 voters is a bomb if each fan-out is its own job.
+3. Modular monolith with documented extraction triggers — I could defend the
+   architecture in an interview without pretending microservices were needed.
+**Outcome.** Live at [url]; 187 tests green in CI; p95 on the public board under
+200ms at 100 concurrent connections; documented in [architecture.md].
+**What I'd change.** Move vote counts to a Redis-synced counter for hot boards;
+the $inc+repair pattern is correct but I would rather not run the repair.
+```
+
+The **"What I'd change"** section is the single most differentiating paragraph — it proves you understand the trade-offs rather than reciting a happy path. Show the case studies as pages of your portfolio site, as pinned gists, or as README "Engineering notes" — the format matters less than the honesty of the decisions section.
+
+## Interviews: what the curriculum already trained
+
+The four interview formats, mapped to what you have done:
+
+**Coding interviews.** Patterns over puzzles: arrays/hash maps/strings plus recognizing when a question is a graph or a sliding window. Practice 40–60 problems total (LeetCode easy/medium, or CodeSignal), timed, explaining out loud. Your real edge: clean function boundaries, edge-case tests written first (unit tests from the testing module), and correctness under pressure — interviewers notice candidates who test their own code.
+
+**System design.** Communicate in the vocabulary this curriculum built: requirements → constraints → back-of-envelope numbers → data model → API shape → scaling path. A practiced answer for PulseBoard:
+
+```text
+"Requirements: boards read-heavy (100:1 read:write), multi-tenant, notifications async.
+Constraints: one region, small team, cost-sensitive.
+Data: Mongo with org-scoped documents; the board query is an index on
+{board, status, voteCount}; votes are unique-indexed rows with an atomic counter.
+API: REST, cursor pagination, idempotency keys where writes retry.
+Scaling: stateless API behind a balancer, Redis for cache + queue + rate limits,
+workers for email; the next bottleneck is the count contention on hot boards,
+which I'd solve with sharded counters if metrics justified it."
+```
+
+That answer is buildable from the architecture modules alone — and it beats any amount of memorized CAP-theorem trivia because every sentence is something you have actually done.
+
+**Take-homes.** The golden rule: deliver less, polished, with tests and a README — than more, broken. State your assumptions, note what you would do with another day (the "What I'd change" habit), and document how to run it. Reviewers grade the same three things every time: does it work; is it tested; are the decisions defensible.
+
+**Behavioral.** STAR, with specifics: the pulled-in-deadline project, the bug you caused and fixed, the disagreement with a teammate resolved. Prepare six stories (conflict, failure, leadership, ambiguity, impact, learning) and practice them aloud until they are 90 seconds each. Specific beats impressive: "I shipped a migration in three expand-contract steps because the first attempt took down staging for six minutes" is unforgettable; "I'm a fast learner" is not.
+
+## Applying: a numbers game played deliberately
+
+```text
+Target  10-15 companies, tiered: reach / match / safety. Include remote-first
+        startups (fastest loops, best fit for a portfolio of shipped products).
+
+Materials per tier: resume (one page, projects above education if experience
+        is short, links at the top), the case studies, the video, GitHub pinned.
+
+Volume  aim 5-10 tailored applications per week; tailoring = two sentences
+        connecting their stack to your projects — most applicants send none.
+
+Referrals   one warm message to an engineer who works there ("I built X that
+        resembles Y; would you be willing to pass this on?") — a polite no costs
+        nothing; a yes shortlists you.
+
+Outreach    cold email/DM that respects time: one paragraph, the live link,
+        one specific reason you built for their domain. Never a mass blast.
+
+Iterate     track everything (a spreadsheet: company, stage, outcome, next step).
+        Rejections after a take-home are data: get one review of the artifact
+        from a friend, fix the gap, reapply in three months — companies hire
+        the re-applicant more often than candidates assume.
+```
+
+Interview loops are noisy — you are rejected for reasons that have nothing to do with you, and hired for reasons that feel like luck. The only strategy that gets through the noise is parallel, systematic, and generous with time between attempts. The candidates who fail are usually the ones who stop at application number eleven.
+
+## Try it
+
+<TryIt title="Write your README right now" hint="Open the best repository you own. Time-box 45 minutes. If the demo link is broken or absent, that one fact is worth more fixing than every adjective you could write.">
+```markdown
+# <Product> — <one-line description>
+
+**Live:** <url> · **Demo login:** <credentials or "open access">
+
+![screenshot or gif](...)
+
+## What's interesting here
+- <the concurrency/tenancy/perf decision you are proudest of — link to the file and its test>
+- <the second one>
+
+## Stack
+<one line>
+
+## Architecture
+<text diagram, one line per box>
+
+## Running it
+<the two-command setup, tested on a clean machine>
+
+## Decisions & trade-offs
+- <decision> because <reason>; would revisit if <trigger>
+
+## Roadmap
+- [ ] <next>, - [ ] <next>
+
+## Tests
+<what runs, how many, what layers>
+```
+</TryIt>
+
+## Check your understanding
+
+<Quiz
+  question="A reviewer has 60 seconds and your repo has one commit named 'initial commit' with 12,000 files. What does that signal?"
+  options={[
+    'The project is mature and stable',
+    'The work likely came from a tutorial or generator — there is no visible process, no decision trail, and no evidence of how the author debugs or iterates',
+    'The repository is private',
+    'Nothing; commit history does not matter'
+  ]}
+  answer={1}
+  explanation="History is a work sample: it shows how you decompose problems, what you test, and how you respond to your own bugs. A single dump commit is indistinguishable from a clone. If your capstone looks like this, commit the future work honestly — refactors, tests, fixes — rather than fabricating a past."
+/>
+
+<Quiz
+  question="Why does the 'What I'd change' section of a case study outperform a list of achievements?"
+  options={[
+    'It is shorter to write',
+    'It demonstrates judgment — knowing where your own solution breaks and what you would trade next is what senior engineers are paid for; achievements without trade-offs read as recitation',
+    'Interviewers prefer negative candidates',
+    'It avoids talking about the technology'
+  ]}
+  answer={1}
+  explanation="Anyone can list what they built; explaining why it is not perfect and what signal would change the design proves you understand the system rather than the tutorial. It also pre-empty the interviewer's best questions — you have already had the interesting conversation with yourself."
+/>
+
+<Exercise title="The career pack" difficulty="medium">
+Assemble the complete artifact set, in this order (each step feeds the next).
+
+1. **README rewrite:** take PulseBoard (or your best project) through the structure from Try-it. Live link first. Test the setup instructions on a clean checkout — every missing step you discover goes into the README.
+2. **Screenshots/GIF:** one static image of the public board and one 6–8 second GIF of the core loop (signup → post → vote → status). Tools: Kap/CleanShot/Loom, or `ffmpeg` on a screen recording; keep files under 3MB.
+3. **Demo video:** 3 minutes, script from this lesson, recorded in one or two takes. Publish unlisted (YouTube) or in the repo. Do not polish for a week; a rough video that exists beats a perfect one that does not.
+4. **Three case studies:** write the problem/constraints/decisions/outcome/what-I'd-change page for PulseBoard and two more projects. Keep each under 400 words.
+5. **GitHub surface:** profile README (5 lines), pin the four best repos in deliberate order, and sweep the capstone's commit messages for anything embarrassing — fix forward with honest commits, not history rewrites.
+6. **One real open-source PR:** find an issue (search recipes above), reproduce it locally, submit a surgical fix with its test, and see it through the review cycle. It can be small; it must be merged-quality.
+7. **Interview drilling:** 10 coding problems timed; prepare and speak the PulseBoard system-design answer out loud twice (record yourself once); write your six STAR stories at 90 seconds each.
+8. **Application system:** build the spreadsheet (company, tier, contact, stage, next action, date); apply to 5 this week with the two-sentence tailoring; send two referral messages. Report the pipeline state to yourself next week — and keep the practice loop running regardless of any single outcome.
+</Exercise>
+
+## Summary
+
+- The README, demo video, and case studies are one story in three formats: problem, decisions, evidence — written for a reviewer with 60 seconds and a sixth sense for inflation.
+- Live link and demo credentials are non-negotiable; "What's interesting" points the reviewer at your best work; "What I'd change" proves judgment.
+- GitHub is a portfolio surface: pinned repos in deliberate order, a 5-line profile README, and commit history that reads like a story — or honest commits going forward.
+- One merged open-source PR is the fastest portable credential: use first, fix surgically, match house style, survive the review cycle politely.
+- Interviews reuse what you built: patterns for coding, your own architecture for design rounds, less-but-polished take-homes, and six specific STAR stories.
+- Apply in parallel tiers with tailored two-sentence applications, referrals, and a tracker — and treat every rejection as data that feeds the next attempt.
+
+That is the whole path: from `console.log` to a deployed, tested, observable, multi-tenant product — and the story to get paid for building the next one. The curriculum's work is done; yours runs forever. Ship something.

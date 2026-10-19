@@ -1,0 +1,351 @@
+Production is where your assumptions meet reality, and the only way to learn the difference is to watch. Observability means being able to answer new questions about a running system without shipping new code to ask them: why was last Tuesday slow, which requests failed after the deploy, and where did this one user's request spend its time.
+
+This lesson instruments the stack — structured logs with correlation ids, health and metrics endpoints, error tracking, alerting that respects sleep — and then scales it past the single process everything so far has assumed.
+
+## The three pillars, sized for this stack
+
+```text
+Logs      → discrete events with structure: "request 422 on POST /movies, reason validation"
+Metrics   → numbers over time: requests/sec, error rate, p95 latency, queue depth
+Traces    → the path of one request across services and queries, as a timeline
+```
+
+You do not need a tracing platform on a small budget. You do need logs you can filter, a handful of metrics you actually look at, and a request id that ties a user complaint to the exact log lines and database work it caused. That last one is the highest-value single item in this whole lesson.
+
+## Structured logging with pino
+
+`console.log('user created', user)` breaks the moment you have 10,000 lines of it: no levels, no filterable fields, and `user` may contain a password hash. **pino** writes JSON: fast, level-aware, redactable.
+
+```bash
+npm install pino pino-http
+```
+
+```js
+// src/lib/logger.js
+import pino from 'pino'
+import { env } from '../config/env.js'
+
+export const logger = pino({
+  level: env.LOG_LEVEL ?? (env.NODE_ENV === 'production' ? 'info' : 'debug'),
+  redact: {
+    paths: [
+      'req.headers.authorization',
+      'req.headers.cookie',
+      'password',
+      'passwordHash',
+      'refreshToken',
+      '*.password',
+      '*.token',
+    ],
+    censor: '[redacted]',
+  },
+  base: { service: 'movies-api', env: env.NODE_ENV },
+})
+```
+
+```js
+// src/app.js
+import { pinoHttp } from 'pino-http'
+import { randomUUID } from 'node:crypto'
+import { logger } from './lib/logger.js'
+
+app.use(
+  pinoHttp({
+    logger,
+    genReqId: (req, res) => {
+      const existing = req.headers['x-request-id']
+      const id = typeof existing === 'string' ? existing : randomUUID()
+      res.setHeader('x-request-id', id)
+      return id
+    },
+    customLogLevel: (req, res, err) => {
+      if (err || res.statusCode >= 500) return 'error'
+      if (res.statusCode >= 400) return 'warn'
+      return 'info'
+    },
+    serializers: {
+      req: (req) => ({ method: req.method, url: req.url, id: req.id }),
+      res: (res) => ({ statusCode: res.statusCode }),
+    },
+  })
+)
+```
+
+What this buys you, concretely:
+
+- **Every log line carries a request id.** A user reports "it failed at 14:32"; you search the id from the error message or response header and read the request's entire story.
+- **Levels are meaningful**: 500s log at error, 4xx at warn (client's fault, still interesting in aggregate), everything else info. Your alerting can key on level.
+- **Redaction is structural.** Even if someone later logs `req.headers` or `{ password }`, the listed paths come out as `[redacted]`. This is the guardrail that makes "never log secrets" survivable by teams.
+- **`x-request-id` propagates.** If you later add a worker or call another service, forward this header and the id follows the work across process boundaries.
+
+<Callout type="tip" title="Log events, not poetry">
+  `logger.info({ event: 'user_registered', userId })` beats `logger.info('user ' + userId + ' registered')` every time: the event name is filterable, the fields are searchable, and nothing about the message format is load-bearing. Pick an event vocabulary (snake_case verbs) and reuse it across the codebase.
+</Callout>
+
+## Health, readiness, and metrics
+
+Three endpoints, three audiences:
+
+```js
+// src/routes/ops.js — no auth; these exist for machines
+router.get('/health', (req, res) => {
+  res.json({ status: 'ok', uptime: process.uptime() })     // liveness: is the process up
+})
+
+router.get('/ready', async (req, res) => {
+  const mongoOk = mongoose.connection.readyState === 1
+  const redisOk = await redis.ping().then(() => true).catch(() => false)
+  const ready = mongoOk && redisOk
+  res.status(ready ? 200 : 503).json({
+    status: ready ? 'ready' : 'degraded',
+    checks: { mongo: mongoOk, redis: redisOk },
+  })
+})
+
+router.get('/metrics', async (req, res) => {
+  res.set('Content-Type', registry.contentType)
+  res.end(await registry.metrics())
+})
+```
+
+The distinction matters to orchestrators: **liveness** failing restarts the container; **readiness** failing pulls it out of the load balancer while it recovers. A process that is up but cannot reach Mongo should stay alive (restarting will not fix Mongo) but must not receive traffic.
+
+For metrics, `prom-client` with the **RED** method — Rate, Errors, Duration — covers most of what you will ever look at:
+
+```bash
+npm install prom-client
+```
+
+```js
+// src/lib/metrics.js
+import { Registry, Counter, Histogram, collectDefaultMetrics } from 'prom-client'
+
+export const registry = new Registry()
+collectDefaultMetrics({ register: registry })   // event loop lag, heap, GC — free and useful
+
+const httpDuration = new Histogram({
+  name: 'http_request_duration_seconds',
+  help: 'HTTP request duration',
+  labelNames: ['method', 'route', 'status'],
+  buckets: [0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5],
+  registers: [registry],
+})
+
+export function metricsMiddleware(req, res, next) {
+  const end = httpDuration.startTimer()
+  res.on('finish', () => {
+    // record the ROUTE PATTERN, not the concrete URL — /movies/:id, never /movies/6a3f...
+    const route = req.route?.path ?? req.path
+    end({ method: req.method, route, status: res.statusCode })
+  })
+  next()
+}
+```
+
+That comment is the classic mistake: labeling by concrete URL turns one time series into millions (one per movie id) and crushes whatever stores the metrics. Use the route pattern. From these numbers you get the three panels that answer most incidents: request rate, error-rate percentage, p95/p99 duration — per route.
+
+## Error tracking with Sentry
+
+Logs tell you what you thought to log; Sentry tells you what you did not: every unhandled exception, grouped, with a stack trace, release tag, and breadcrumbs of what happened before.
+
+```bash
+npm install @sentry/node
+```
+
+```js
+// src/instrument.js — imported FIRST in server.js, before any app code
+import * as Sentry from '@sentry/node'
+import { env } from './config/env.js'
+
+Sentry.init({
+  dsn: env.SENTRY_DSN,
+  environment: env.NODE_ENV,
+  release: env.RELEASE_SHA,
+  tracesSampleRate: env.NODE_ENV === 'production' ? 0.1 : 1.0,
+})
+```
+
+```js
+// error handler — report 500s, ignore expected 4xx
+export const errorHandler = (error, req, res, next) => {
+  const status = error.status ?? 500
+  if (status >= 500) {
+    Sentry.captureException(error, { extra: { requestId: req.id, path: req.path } })
+    logger.error({ err: error, requestId: req.id }, 'unhandled_error')
+  }
+  res.status(status).json({ error: { code: error.code ?? 'INTERNAL', message: status >= 500 ? 'Something went wrong' : error.message } })
+}
+```
+
+On the client, `@sentry/react` reports render errors with component stacks and source maps (upload them in CI during build — without source maps, stack traces are minified noise). Tag releases with the commit SHA in both apps so "is this error in the current deploy or the previous one" is answerable in one click.
+
+## Alerting that respects sleep
+
+Alerts should fire on **symptoms users feel**, not on causes you find interesting:
+
+```text
+✅ error rate on /api/v1/* exceeds 2% for 5 minutes
+✅ p95 latency on POST /movies exceeds 1.5s for 5 minutes
+✅ /ready returns 503 on more than half the instances
+✅ queue depth older than 10 minutes exists (jobs are not draining)
+❌ CPU is 80%                     (users do not experience CPU)
+❌ a single 500 in the last hour  (noise; users did not notice)
+```
+
+Rules that keep the channel trustworthy: **every alert must be actionable** (if the response is "ignore for now," delete the alert); **start wide** (a 5-minute window and a meaningful threshold beat instant triggers until you know normal variance); and **have a page vs. notify split** — production-down pages a human at 3 a.m.; a single failed login notification waits for business hours.
+
+A minimal viable setup: UptimeRobot or Better Stack checking `/health` (or `/ready`) from outside every minute, Sentry alert rules on error frequency per release, and one webhook channel. This trio catches: site down, sudden error spikes, and bad deploys — before users tweet.
+
+## Scaling past one process
+
+Everything the curriculum built so far works beautifully as one process. Here is exactly what changes when it does not.
+
+**The prerequisite: statelessness.** A second instance can only help if any instance can serve any request. That means:
+
+- **Sessions already live in the database** (the auth lesson did this) — no session state in process memory.
+- **Uploaded files do not go to local disk** — object storage (S3/R2/Cloudinary) or they vanish for requests routed to the other instance.
+- **In-memory rate limiting becomes wrong** — each instance counts separately, so the effective limit multiplies. Move counters to Redis (`rate-limit-redis`) before scaling out.
+
+Then the topology is a straight line:
+
+```text
+clients → CDN (static client, cached)
+        → load balancer (TLS, health checks on /ready)
+        → N api instances (stateless, same image, different SHA during deploys)
+        → Atlas (M-tier or up), Redis (cache + queues)
+        → M worker instances (BullMQ workers from the architecture lesson)
+```
+
+Scaling the API is horizontal — add instances, the balancer spreads load. Scaling the workers is also horizontal, and independent: a backlog of 10,000 emails justifies ten workers whether the API needs one instance or five. Dedicated worker processes also mean a heavy job (video resize) can never slow request handling.
+
+**WebSockets add one wrinkle.** A socket connection is pinned to the instance that accepted it, so messages produced on instance B never reach a client connected to instance A. The fix is not sticky sessions (a partial answer that breaks on redeploys); it is a **Redis pub/sub adapter** — every instance publishes to a channel, every instance delivers to its own connected clients:
+
+```js
+// src/realtime.js — socket.io with the Redis adapter
+import { Server } from 'socket.io'
+import { createAdapter } from '@socket.io/redis-adapter'
+import { createClient } from 'redis'
+
+const pub = createClient({ url: env.REDIS_URL })
+const sub = pub.duplicate()
+await Promise.all([pub.connect(), sub.connect()])
+
+export const io = new Server(httpServer, { adapter: createAdapter(pub, sub) })
+```
+
+**Redis takes on three jobs** as you scale — cache, rate-limit counters, queues — and they are one dependency with three failure modes. If Redis dies: caching degrades to database load (acceptable), rate limits fail open (decide the policy; failing closed turns Redis into a single point of denial), and queues stall until it returns (jobs must be idempotent for the retry after reconnect). Know each answer before it happens.
+
+**Database scaling comes last** because it is the most expensive and the least reversible: bigger tier (vertical) buys time; read replicas help read-heavy workloads at the cost of replication lag and read-your-writes surprises; sharding is a redesign. Caching and queue smoothing absorb most growth before any of that.
+
+<KeyPoint>
+Scale out only after subtracting state: sessions in the database, uploads in object storage, counters in Redis. Every piece of per-instance state you remove makes the next instance a copy-paste and the next deploy a rolling swap. If instances differ, you own routing logic forever.
+</KeyPoint>
+
+## The twelve-factor view
+
+The principles that got you here, as a checklist worth testing against your repo:
+
+```text
+1. One codebase, many deploys      — one repo, one image per SHA
+2. Dependencies declared           — package-lock committed, npm ci everywhere
+3. Config in the environment       — no .env committed; env schema at boot
+4. Backing services as resources   — Mongo/Redis URLs from config
+5. Build, release, run             — build once, promote the artifact
+6. Stateless processes             — sessions, uploads, counters externalized
+7. Port binding                    — PORT from env, not hardcoded
+8. Concurrency by process          — instances and workers, not threads-in-one-Node
+9. Disposability                   — fast boot, graceful shutdown, idempotent jobs
+10. Dev/prod parity                — same topology, smaller tiers
+11. Logs as event streams          — stdout JSON, collected by the platform
+12. Admin tasks as one-off procs   — migrate.js, never hidden routes
+```
+
+Factor 9 deserves one concrete piece before you close this lesson — graceful shutdown, because rolling deploys otherwise drop in-flight requests:
+
+```js
+// src/server.js
+const server = createApp().listen(env.PORT)
+
+async function shutdown(signal) {
+  logger.info({ signal }, 'shutting_down')
+  server.close(() => logger.info('http_closed'))      // stop accepting, drain
+  await worker.close()                                // finish active jobs
+  await mongoose.disconnect()
+  await redis.quit()
+  process.exit(0)
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'))      // deploy: stop, drain, exit
+process.on('SIGINT', () => shutdown('SIGINT'))        // ctrl-c: same path
+```
+
+The orchestrator sends SIGTERM, the process stops accepting new connections, finishes what is in flight, and exits — which is what makes a rolling deploy invisible to users.
+
+## Try it
+
+<TryIt title="Prove the request id threads through everything" hint="Start the API with pino-http and make one request that fails validation. Then grep the log file for the id the server returned — the story of that request should come out in one pipe.">
+```bash
+curl -s -i -X POST http://localhost:3000/api/v1/movies \
+  -H 'Content-Type: application/json' \
+  -d '{"title": ""}' | grep -i x-request-id
+
+# with logs in a file via: npm run dev 2>&1 | tee /tmp/api.log
+grep "$(curl -s -D- -o /dev/null -X POST http://localhost:3000/api/v1/movies \
+  -H 'Content-Type: application/json' -d '{"title": ""}' \
+  | grep -i x-request-id | cut -d' ' -f2 | tr -d '\r')" /tmp/api.log
+
+# Expect: the request line, the 422 response line, and any validation
+# warning logs — all sharing one request id, secrets redacted.
+```
+</TryIt>
+
+## Check your understanding
+
+<Quiz
+  question="Why label the duration Histogram with the route pattern (/movies/:id) instead of the concrete URL (/movies/6a3f9...)?"
+  options={[
+    'Route patterns render more accurately on dashboards',
+    'Concrete URLs create unbounded distinct label combinations — one time series per id — which explodes metric storage and makes aggregation meaningless',
+    'Express does not expose the concrete URL',
+    'Prometheus requires lowercase labels'
+  ]}
+  answer={1}
+  explanation="High-cardinality labels are the classic metrics outage: a value that is unique per request turns a handful of series into millions. Route patterns keep cardinality bounded, so p95-per-route is computable and the metrics backend survives."
+/>
+
+<Quiz
+  question="Your app uses in-memory express-rate-limit stores and one instance. What is the first concrete change required before starting a second instance?"
+  options={[
+    'Increase the rate limit threshold',
+    'Move counters to a shared store like Redis — otherwise each instance enforces its own copy of the limit and the effective rate multiplies by the instance count',
+    'Switch to sticky sessions',
+    'Disable rate limiting during deploys'
+  ]}
+  answer={1}
+  explanation="In-memory state is per-process by definition. The moment there are two processes, both session state (already solved by DB sessions) and rate-limit counters (not yet solved) must be external. Redis is the standard home for the counters, shared by every instance."
+/>
+
+<Exercise title="Instrument, alert, and scale the movies app" difficulty="hard">
+Take the app from observable to scalable, proving each step with numbers.
+
+1. **Structured logging:** replace console logging with pino; add the pino-http middleware with generated request ids and the redaction list. Make one failing request and show the full log story (request line, warn/error line, response line) sharing one id, with the password field censored.
+2. **Ops endpoints:** implement `/health`, `/ready` (checking Mongo and Redis), and `/metrics` with RED histograms labeled by route pattern. Point a local Prometheus or a hosted scraper at `/metrics` and build one panel each for rate, error rate, and p95 duration.
+3. **Errors:** wire Sentry in server and client with release tags from the commit SHA and source-map upload in CI; trigger a deliberate 500, confirm it appears in Sentry grouped under the release, and that the client error shows a readable stack.
+4. **Alerts:** configure external uptime checking on `/ready`, a Sentry alert on error frequency, and (if you have a channel) webhook notification. Each alert must state its response plan in one line. Trigger each once to confirm delivery.
+5. **Load test:** run k6 or autocannon against the list endpoint at increasing concurrency; record p50/p95/p99 and error rate. Note at what concurrency the single instance saturates.
+6. **Scale out:** run two API instances behind a local load balancer (or two Compose services with the Redis rate-limit store); repeat the load test; show throughput roughly doubling with Redis-backed limits still global. Kill one instance mid-test and confirm requests keep succeeding via the other.
+7. **Graceful shutdown:** send SIGTERM during the load test and confirm zero client failures: the draining instance finishes in-flight requests while the balancer routes new ones elsewhere. Fix any in-flight request loss you discover.
+8. **Write the runbook:** `docs/ops.md` with: the three dashboards to open when something is slow, the three to open when something is down, how to silence an alert, and the one-command check that answers "is it the database or the app." Keep it to one page.
+</Exercise>
+
+## Summary
+
+- Observability is the ability to answer unasked questions: structured logs with request ids, a few honest metrics, and traces if you have budget for them.
+- pino gives JSON logs with levels and structural redaction; pino-http injects and propagates request ids and sets log levels from status codes.
+- `/health` (liveness), `/ready` (readiness, checks dependencies), and `/metrics` (RED histograms labeled by route pattern) are the three endpoints machines need.
+- Sentry catches unplanned errors with releases and breadcrumbs; source maps and release tags make stacks and regression attribution real.
+- Alert on user-visible symptoms with actionable thresholds; page on outages, notify on everything else.
+- Scaling requires statelessness: external sessions, object-storage uploads, Redis counters; then instances, workers, and database tiers scale independently, with graceful shutdown making rolling deploys invisible.
+
+The DevOps module is complete — you can containerize, ship, watch, and grow this stack. Next: architecture, starting with system design and the modular monolith.
+

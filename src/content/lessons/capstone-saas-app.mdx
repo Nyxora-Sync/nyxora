@@ -1,0 +1,340 @@
+This capstone is where every module in the developer track converges into one deployable product. You will build **PulseBoard**: a multi-tenant feedback board — organizations collect feature requests from their users, the users vote and comment, the team triages statuses and ships. It is deliberately a shape you have never built exactly, so you must apply rather than copy: tenancy, roles, invites, public pages, notifications, audit, and a deploy pipeline.
+
+Budget a real week (the 900 minutes), work the milestones in order, and treat each "definition of done" as a gate — the temptation to skip tenancy isolation is the single biggest cause of security disasters in SaaS code.
+
+## The brief
+
+```text
+PulseBoard — multi-tenant feedback boards
+
+Organizations      sign up, invite teammates, own boards
+Boards             belong to an org; each has a public slug (feedback.acme.com/board/acme-site)
+Posts (feedback)   created by anyone (members or public visitors); have a title, body, status
+Votes              one per user per post; anonymous visitors can vote once per browser
+Comments           members and the original poster can discuss
+Statuses           open → planned → in-progress → shipped (team-managed, with changelog notes)
+Notifications      email when: your post changes status; someone comments on your post
+Audit log          who changed what in the org (admin-visible)
+Billing stub       plan per org (free/pro) with a post limit; "upgrade" is a stub page
+```
+
+What each earlier module contributes, concretely:
+
+```text
+Foundations/Node/Express   the API patterns, middleware, error envelope
+MongoDB                    schema design, indexes, aggregation for vote counts
+React + Fullstack          the SPA, routing, data fetching, optimistic votes, 4 states everywhere
+TypeScript                 everything strict; shared schemas for the API contract
+Testing                    integration grid per route; component tests for the board UI; ~8 E2E journeys
+Security                   org-scoped authorization, rate limits on public endpoints, hardened auth
+DevOps                     Docker image, CI/CD to staging and prod, worker for emails, observability
+Architecture               modules layout, queue for emails, cache-aside on public boards, audit log, API conventions
+Performance                indexed board queries, lean reads, budgets on the public page
+```
+
+## The tenancy model — decide once, enforce everywhere
+
+The shape that scales: **organizations own everything; users belong to organizations through memberships; every domain document carries `org`.**
+
+```js
+// organization.model.js
+const organizationSchema = new Schema({
+  name: { type: String, required: true, maxlength: 80 },
+  slug: { type: String, required: true, unique: true, lowercase: true },   // /board/:slug
+  plan: { type: String, enum: ['free', 'pro'], default: 'free' },
+}, { timestamps: true })
+
+// membership.model.js — roles live on the relationship, not the user
+const membershipSchema = new Schema({
+  org: { type: Schema.Types.ObjectId, ref: 'Organization', required: true },
+  user: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+  role: { type: String, enum: ['owner', 'admin', 'member'], required: true },
+}, { timestamps: true })
+membershipSchema.index({ org: 1, user: 1 }, { unique: true })
+membershipSchema.index({ user: 1 })                          // "my orgs" switcher
+
+// board.model.js
+const boardSchema = new Schema({
+  org: { type: Schema.Types.ObjectId, ref: 'Organization', required: true },
+  name: { type: String, required: true },
+  slug: { type: String, required: true, lowercase: true },
+  public: { type: Boolean, default: true },                  // public read of posts
+}, { timestamps: true })
+boardSchema.index({ org: 1, slug: 1 }, { unique: true })     // slug unique per org
+
+// post.model.js — the domain centerpiece
+const postSchema = new Schema({
+  org: { type: Schema.Types.ObjectId, ref: 'Organization', required: true },
+  board: { type: Schema.Types.ObjectId, ref: 'Board', required: true },
+  title: { type: String, required: true, maxlength: 200 },
+  body: { type: String, maxlength: 5000 },
+  status: { type: String, enum: ['open', 'planned', 'in-progress', 'shipped'], default: 'open' },
+  author: { type: Schema.Types.ObjectId, ref: 'User' },      // null: anonymous submission
+  anonymousKey: { type: String },                            // hashed browser key for anonymous posts
+  voteCount: { type: Number, default: 0 },                   // denormalized, vote service owns it
+}, { timestamps: true })
+postSchema.index({ board: 1, status: 1, voteCount: -1, createdAt: -1 })   // the main board query
+postSchema.index({ org: 1, author: 1 })
+
+// vote.model.js — the uniqueness that prevents double-voting
+const voteSchema = new Schema({
+  org: { type: Schema.Types.ObjectId, required: true },
+  post: { type: Schema.Types.ObjectId, ref: 'Post', required: true },
+  user: { type: Schema.Types.ObjectId, ref: 'User' },        // members
+  anonymousKey: { type: String },                            // visitors: hashed browser key
+}, { timestamps: true })
+voteSchema.index({ post: 1, user: 1 }, { unique: true, sparse: true })
+voteSchema.index({ post: 1, anonymousKey: 1 }, { unique: true, sparse: true })
+```
+
+The rules that make this safe — write them at the top of `docs/architecture.md` and never break them:
+
+1. **Every query on tenanted data carries `org`.** Enforced by a service-layer helper, not by memory:
+
+```js
+// src/lib/tenancy.js
+export function scoped(orgId) {
+  return {
+    find(Model, filter = {}) {
+      return Model.find({ ...filter, org: orgId })
+    },
+    async findOneOr404(Model, filter) {
+      const doc = await Model.findOne({ ...filter, org: orgId })
+      if (!doc) throw new AppError(404, 'NOT_FOUND', 'Resource not found')
+      return doc
+    },
+  }
+}
+```
+
+2. **Role checks come from the membership for the specific org** — the exact `requireRole` middleware from the security module, reused as-is. Non-member: 404. Member with insufficient role: 403.
+
+3. **Anonymous interactions are scoped by a hashed fingerprint**, never by IP alone: a random key stored in a first-party cookie, hashed server-side (`sha256`) as the storage form. Rate-limit by the same key: five posts per hour.
+
+4. **Cross-tenant tests are mandatory deliverables**: every mutating endpoint gets a test where a user from org B attempts the operation on org A's resource and receives 404 with zero database change. If this test suite is not green, the capstone is not done.
+
+<KeyPoint>
+Tenancy is not a field; it is an invariant. `org` on documents is necessary but not sufficient — the slower query, the deadline review, the admin endpoint written at 1 a.m. are where it leaks. The service-layer scoping helper plus one cross-tenant test per route is how the invariant survives contact with a deadline — including yours.
+</KeyPoint>
+
+## Milestone 0 — foundations (60 min)
+
+Set up like a product, not a tutorial repo:
+
+```text
+pulseboard/
+├── server/        Express + Mongoose + BullMQ + (strict TS if you finished that module)
+├── client/        Vite + React + React Router + TanStack Query
+├── shared/        Zod schemas + inferred types (the contract from the TypeScript module)
+├── docker-compose.yml      mongo + redis + api + worker (+ client in dev)
+└── .github/workflows/ci.yml
+```
+
+Done when: `docker compose up` runs mongo, redis, api, worker; the health endpoint answers; CI runs lint, typecheck, and the (empty) test suite on push; the shared package compiles into both workspaces.
+
+## Milestone 1 — identity and organizations (150 min)
+
+**Auth:** reuse the advanced-auth system — access token in memory, refresh token in an httpOnly cookie, sessions in the database, logout-everywhere. 2FA and OAuth are optional for the capstone; session management is not.
+
+**Signup flow:** creating an account also creates a personal organization (so a new user lands somewhere real) with an `owner` membership.
+
+**Invites:** the feature that makes it multi-tenant rather than single-player:
+
+```js
+// invite.model.js
+const inviteSchema = new Schema({
+  org: { type: Schema.Types.ObjectId, ref: 'Organization', required: true },
+  email: { type: String, required: true, lowercase: true },
+  role: { type: String, enum: ['admin', 'member'], default: 'member' },
+  token: { type: String, required: true },            // random 32 bytes, hashed at rest
+  invitedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+  expiresAt: { type: Date, required: true },          // now + 7 days
+}, { timestamps: true })
+inviteSchema.index({ org: 1, email: 1 }, { unique: true })
+inviteSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 })   // TTL: dead invites vanish
+```
+
+The accept flow: `POST /orgs/:orgId/invites` (admin+) hashes a random token, stores the hash, and enqueues an email whose link contains the raw token. `POST /invites/:token/accept` hashes the presented token, finds the invite, checks expiry and that the accepting user's verified email matches the invited email, creates the membership (upsert on `{org,user}`), deletes the invite, and writes an audit entry.
+
+**Org switching** on the client: an org selector in the shell; the selected org lives in the URL (`/orgs/:orgSlug/...`) so links are shareable and server checks are natural. The org slug → membership lookup happens in one route guard, not per component.
+
+Done when: signup creates a personal org; an invited second account can join an org and see its boards; a non-member gets 404 on org routes; invite emails arrive through the queue; the cross-tenant test suite covers invites (org B admin cannot invite into org A or accept org A's token).
+
+## Milestone 2 — boards, posts, votes (180 min)
+
+**Boards:** CRUD for admins; public read for `public: true` boards at `/api/v1/public/boards/:orgSlug/:boardSlug`.
+
+**Posts:** created by members (authenticated) or visitors (anonymous, rate-limited by hashed cookie key). Every post creation enqueues `notify.org-admins` (batched, not per-admin individually — dedupe by job id per org per hour).
+
+**Votes — the concurrency set piece.** The denormalized `voteCount` must stay exact while multiple people vote simultaneously. The pattern that survives load:
+
+```js
+// modules/posts/vote.service.js
+export async function toggleVote({ orgId, postId, actor }) {
+  const post = await Post.findOne({ _id: postId, org: orgId }).select('_id')
+  if (!post) throw new AppError(404, 'NOT_FOUND', 'Post not found')
+
+  const filter = actor.userId
+    ? { post: postId, user: actor.userId }
+    : { post: postId, anonymousKey: actor.anonymousKey }
+
+  const existing = await Vote.findOne(filter)
+  if (existing) {
+    await Vote.deleteOne({ _id: existing._id })
+    await Post.updateOne({ _id: postId }, { $inc: { voteCount: -1 } })
+    return { voted: false }
+  }
+
+  try {
+    await Vote.create({ ...filter, org: orgId })
+    await Post.updateOne({ _id: postId }, { $inc: { voteCount: 1 } })
+    return { voted: true }
+  } catch (error) {
+    if (error.code === 11000) return { voted: true }   // concurrent duplicate: already voted
+    throw error
+  }
+}
+```
+
+Three things carry the correctness: the **unique sparse indexes on votes** make double-voting impossible at the database level (not just unlikely in the handler); **`$inc` is atomic** so concurrent counts never lose updates; and the **duplicate-key catch** makes the check-then-create race harmless — the loser returns the same answer the winner would. The repair script (`rebuild-vote-counts.js`) recomputes counts from the votes collection, because derived data always ships with its repair tool.
+
+On the client, votes are **optimistic** (TanStack Query `onMutate` with rollback) because a vote round trip feels broken otherwise — and the optimistic update is component-tested (the Testing module) for the revert-on-error path.
+
+**The board query** — the read that everything else supports:
+
+```js
+const posts = await Post.find({ board: boardId, status: filters.status })
+  .sort({ voteCount: -1, createdAt: -1 })
+  .skip((page - 1) * 20)
+  .limit(20)
+  .lean()
+```
+
+Guarded by the `{ board: 1, status: 1, voteCount: -1, createdAt: -1 }` index from the model above; verify with `explain()` that it is an IXSCAN with `keysExamined ≈ limit`, and cache the first page of public boards (60s TTL, versioned keys from the architecture module) — the public page is your performance showcase.
+
+Done when: members and visitors can post and vote; double-voting is impossible by index (prove it: fire two votes concurrently in a test, expect one vote row); the count is exact after a 200-vote concurrent load script; the board list is an IXSCAN and public first-page renders from cache; anonymous endpoints are rate-limited.
+
+## Milestone 3 — comments, statuses, notifications, audit (150 min)
+
+**Comments:** members and the post author; `{ post: 1, createdAt: 1 }` index; simple pagination. Notifications enqueue on create (`notify.post-author` — skip when the commenter is the author).
+
+**Status changes:** admin+ moves posts through `open → planned → in-progress → shipped`. Each change optionally carries a public note shown on the post; each change enqueues `notify.post-voters` — batched into one job per post (a status change affects every voter; do not enqueue 4,000 jobs, enqueue one job that pages through voters and sends in batches with the queue's rate limiter).
+
+**The worker** — one process, three job types, all idempotent by job id:
+
+```js
+new Worker('email', async (job) => {
+  switch (job.name) {
+    case 'invite': return sendInviteEmail(job.data)
+    case 'post-status-changed': return sendStatusEmails(job.data)     // pages voters, batched
+    case 'comment-notify': return sendCommentEmail(job.data)
+    default: throw new Error(`Unknown job ${job.name}`)
+  }
+}, { connection: redis, concurrency: 5, limiter: { max: 10, duration: 1000 } })
+```
+
+Idempotency: every send checks a `sent_notifications` collection keyed by `{ dedupeKey: jobId + recipient }` — a retried job finds the marker and skips. Test it by delivering the same job twice and asserting one email.
+
+**Audit log:** the architecture module's append-only collection, written from services on: invites created/accepted, roles changed, board created/deleted, post status changed with actor and old/new values, member removed. `GET /orgs/:orgId/audit` (admin+) with cursor pagination. TTL: 365 days.
+
+Done when: status changes notify voters in one batched job; duplicate job delivery sends one email (tested); the audit endpoint shows the full org story with actor names; every admin action in the previous milestones appears in it.
+
+## Milestone 4 — the client (180 min)
+
+Screens, in build order, each with the four states (loading, error, empty, ready) from the testing module — no screen ships without them:
+
+```text
+/                                  landing (public, fast, the LCP showcase)
+/login, /register                  auth with inline validation from shared schemas
+/orgs/:slug/boards                 board list (member view)
+/orgs/:slug/boards/:board          board detail: post list, filters by status, votes,
+                                   create post; public mode hides admin actions
+/orgs/:slug/boards/:board/:post    post detail: body, comments, status timeline (public note)
+/orgs/:slug/settings               members, invites, roles, audit (admin tabs)
+/b/:orgSlug/:boardSlug             PUBLIC board (no auth): posts, votes, create with cookie key
+```
+
+Client rules that make this a showcase:
+
+- **Every API call goes through the typed client** from the TypeScript module with response validation; components never `fetch` directly.
+- **Votes optimistic, with rollback**; status changes invalidate the post and the board list precisely (`queryClient.invalidateQueries` on the right keys, not `invalidateQueries()` wholesale).
+- **The public board is static-friendly**: first page server-cacheable (your CDN/Redis story), anonymous interactions rate-limit-aware (a 429 shows a friendly cooldown message, not a red toast).
+- **Accessibility is the query strategy**: roles and labels everywhere (it was already how your tests find things); the status change is announced (`role="status"`); keyboard flows for voting and commenting.
+- **Mobile-first board cards**: vote count and title readable at 375px; the LCP image on the landing page follows the delivery lesson's priority rules.
+
+Done when: a brand-new user can sign up, create a board, post, vote from the public page in an incognito window, get a teammate to join via invite, move the post to `planned` and see the voter email arrive; every screen passes the component tests; Lighthouse on the public board ≥ 90 mobile.
+
+## Milestone 5 — hardening and the test suite (120 min)
+
+The pass that turns "it works" into "it holds":
+
+1. **Security sweep (the security module's checklist):** helmet + CSP report-only on the client host, rate limits on public writes (5/hour/key) and auth (10/15min), strict schemas everywhere, mass-assignment tests on every write route, redacted logs, secrets in the platform store, `npm audit` and gitleaks in CI.
+2. **Cross-tenant suite:** the mandatory one. For every route taking a resource id: an org-B actor attempts, expects 404, and the database is unchanged (assert both). Table-driven, one test per route.
+3. **Integration grid:** happy/422/401/404-owner/404-bad-id for every mutating endpoint; contract tests pinning response shapes against shared schemas.
+4. **Component suite:** board list (4 states), vote optimistic + rollback, post form validation + server error, invite flow form.
+5. **E2E (8 journeys max):** signup→board→post; invite→accept→see board; public vote with rate limit hitting a friendly 429; status change→audit shows it; non-admin sees no admin controls; deep-link reload on a nested route; login expiry redirects gracefully; public board renders with JS-heavy flow disabled? (optional).
+6. **Load smoke:** autocannon on the public board list at 100 connections — p95 under 300ms with cache warm; record numbers.
+
+Done when: CI runs the whole pyramid on every push; the cross-tenant table is green; load numbers are recorded in `docs/performance.md`.
+
+## Milestone 6 — deploy and polish (60 min)
+
+- **Three services deploy:** web (static host), api (container on Render/Fly/Railway), worker (same image, `node src/worker.js`). Redis from the platform; Atlas for Mongo; migrations run as pre-deploy steps.
+- **Observability:** pino + request ids, `/health` + `/ready` + `/metrics`, Sentry on both apps with release tags, uptime check on `/ready`, one alert webhook.
+- **Demo seed:** a `seed:demo` script that creates a populated org (3 boards, 40 posts, votes spread across statuses, comments, an audit trail) so anyone evaluating the app sees a living product in one command — and your E2E suite uses the same seeder.
+- **README** (the portfolio lesson goes deep): what it is, live link, demo credentials, architecture diagram, the six decisions you are proudest of with one line of reasoning each, setup, and the roadmap.
+- **Two extras worth the hour:** a per-org usage endpoint for the billing stub (posts this month vs plan limit, shown in settings), and a `Retry` button in the settings UI for failed jobs (a dead-letter view, admin-only, powered by `queue.getFailed()`).
+
+Done when: the live URL serves the seeded demo; a stranger can evaluate the product without reading code; a deploy and a rollback both take under five minutes; the runbook from the deployment lesson exists for this repo specifically.
+
+## Check your understanding
+
+<Quiz
+  question="Why are the unique sparse indexes on votes (post+user, post+anonymousKey) more important than the check-then-create logic in the vote service?"
+  options={[
+    'They make reads faster',
+    'They make double-voting impossible at the database level even under concurrent requests — the handler check is a race, the unique index is a guarantee; the duplicate-key catch then makes the race harmless',
+    'They store the vote count',
+    'They replace the need for the org field'
+  ]}
+  answer={1}
+  explanation="Two concurrent requests can both pass a select before either inserts — that is application-level TOCTOU racing. The unique index serializes reality: exactly one insert wins, the loser gets 11000 and returns the same answer. Concurrency correctness belongs in constraints, not in hopeful code."
+/>
+
+<Quiz
+  question="A cross-tenant test shows org B's user receiving 200 and reading org A's board. What class of bug is this and what is the fix?"
+  options={[
+    'A caching bug; purge the cache',
+    'A tenancy leak: a query missing the org scope — the fix is routing every tenanted read through the scoped service helper (and the test stays as the regression guard)',
+    'A race condition; add a mutex',
+    'A rate-limit bypass; tighten the limiter'
+  ]}
+  answer={1}
+  explanation="200 with foreign data is the classic missing-scope query — one findById without org in the filter. The structural fix is the scoping helper so no route can spell the query without it; the test exists precisely because this bug class is invisible in single-tenant development."
+/>
+
+<Exercise title="Ship PulseBoard, milestone by milestone" difficulty="hard">
+This entire lesson is the exercise — execute it in order and keep the evidence.
+
+1. **Milestone 0:** repo structure, Compose, CI green on an empty suite.
+2. **Milestone 1:** auth + sessions + orgs + invites + org switching, with the cross-tenant invite tests.
+3. **Milestone 2:** boards, posts, votes (with the concurrency proof: parallel vote test + load-tested count correctness), public board endpoint with cache.
+4. **Milestone 3:** comments, statuses with notes, batched voter notifications, idempotent worker with duplicate-delivery test, audit log with admin endpoint.
+5. **Milestone 4:** the full client, four states everywhere, optimistic votes with rollback, public board, settings/admin tabs, mobile pass, Lighthouse ≥ 90 on the public board.
+6. **Milestone 5:** the full test pyramid and the security sweep; record the load numbers.
+7. **Milestone 6:** production deploy of all three services, observability wired, demo seed, README, dead-letter UI.
+8. **Proof pack:** in `docs/capstone.md`, collect: the architecture diagram (text is fine), the cross-tenant test table, the load-test table, the audit-log screenshot/description, the repo link, the live URL, and the demo credentials. This file is what you show in an interview, and it is the direct input to the portfolio lesson's case study.
+</Exercise>
+
+## Summary
+
+- Tenancy is an invariant: `org` on documents, membership-scoped roles, a service-layer scoping helper, and a mandatory cross-tenant test per route.
+- Roles live on memberships so a user can hold different roles in different orgs; non-members get 404, wrong-role members 403.
+- Concurrency correctness lives in constraints: unique sparse indexes for votes, atomic `$inc` for counts, duplicate-key catches to make races harmless — plus repair scripts for every derived value.
+- Notifications are batched jobs (one per event, not per recipient), idempotent by job id with a sent-marker collection, retried with backoff, inspected via a dead-letter view.
+- The client is only done when every screen has four states, votes are optimistic with rollback, public pages are cache-friendly and rate-limit-aware, and the accessibility contract is the query strategy.
+- Ship it fully: three services, migrations as pre-deploy steps, observability and alerts, seeded demo, runbook — and a proof pack that turns this build into career capital.
+
+Final lesson: turning all of this — capstones, open source, and the story of your decisions — into the portfolio, presence, and interview readiness that gets it hired.
+
+

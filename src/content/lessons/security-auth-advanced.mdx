@@ -1,0 +1,331 @@
+Your login works and hands out a JWT that expires in seven days. That single decision gives you two bad options: log everyone out constantly, or ship tokens that, if stolen, stay valid for a week with no way to cancel them. Real applications need both endurance and revocation — and the standard answer is the **access + refresh token pair** with rotation.
+
+This lesson builds that system, then layers the two features users expect from any serious app: **session management** (see and kill devices) and **two-factor authentication** — plus the role-based access control pattern that multi-tenant apps need, and an honest look at OAuth.
+
+## Why two tokens
+
+Split the job in two:
+
+| Token | Lifetime | Storage | Job |
+|---|---|---|---|
+| Access | 15 minutes | Memory or `localStorage` | Authorize API calls; cheap to verify (signature only) |
+| Refresh | 7–30 days | `httpOnly; Secure; SameSite` cookie | Mint new access tokens; stored **hashed** server-side, revocable |
+
+The access token stays stateless — every request just verifies a signature, no database lookup. The refresh token is stateful — the server can revoke a session instantly, and because access tokens live only minutes, the revocation window is minutes, not days. If an access token is stolen, it is nearly worthless; if a refresh token is stolen, rotation is designed to catch it.
+
+<KeyPoint>
+The refresh token is the session. Treat it like a password: `httpOnly` so XSS cannot read it, hashed in the database so a database leak does not hand over live sessions, rotated on every use so a stolen copy has a short useful life — and detected when it gets used twice.
+</KeyPoint>
+
+## Refresh rotation and reuse detection
+
+The protocol, step by step:
+
+1. Login verifies credentials, creates a **session document** (device, IP, user agent), returns the access token in the body and the refresh token in the cookie. The database stores only `sha256(refreshToken)`.
+2. When the access token expires, the client calls `POST /auth/refresh` (cookie rides along). The server hashes the presented token, finds the session, checks expiry, and — critically — **rotates**: a new refresh token is issued, the old hash moves to history.
+3. If a presented token **matches history but not the current hash**, assume theft: revoke the entire session family and force re-login.
+
+Why reuse detection works: an attacker who steals token N uses it and rotates to N+1; the legitimate client then presents N, which is now stale. That collision reveals the theft, and both parties are logged out. The legitimate user re-authenticates; the attacker's stolen chain is dead.
+
+```js
+// src/services/session.js
+import crypto from 'node:crypto'
+
+const hash = (token) => crypto.createHash('sha256').update(token).digest('hex')
+
+export async function createSession(user, req) {
+  const refreshToken = crypto.randomBytes(48).toString('base64url')
+  await Session.create({
+    user: user.id,
+    refreshTokenHash: hash(refreshToken),
+    userAgent: req.get('user-agent') ?? 'unknown',
+    ip: req.ip,
+    expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+  })
+  return refreshToken
+}
+
+export async function rotateSession(presentedToken, req) {
+  const session = await Session.findOne({ refreshTokenHash: hash(presentedToken) })
+
+  if (!session) {
+    // a replaced token being presented again -> theft signal: revoke everything
+    const used = await Session.findOne({ 'history.hash': hash(presentedToken) })
+    if (used) await Session.deleteMany({ user: used.user })
+    throw new AppError(401, 'SESSION_EXPIRED', 'Please log in again')
+  }
+
+  if (session.expiresAt < new Date()) {
+    await session.deleteOne()
+    throw new AppError(401, 'SESSION_EXPIRED', 'Please log in again')
+  }
+
+  const next = crypto.randomBytes(48).toString('base64url')
+  session.history.push({ hash: session.refreshTokenHash, replacedAt: new Date() })
+  session.history = session.history.slice(-5)     // keep a short trail, not an archive
+  session.refreshTokenHash = hash(next)
+  session.ip = req.ip
+  await session.save()
+
+  return { session, refreshToken: next }
+}
+```
+
+```js
+// src/routes/auth.js
+import { Router } from 'express'
+import { env } from '../config/env.js'
+import { createSession, rotateSession } from '../services/session.js'
+import { signAccessToken } from '../services/tokens.js'
+
+const auth = Router()
+
+const cookieOptions = {
+  httpOnly: true,
+  secure: env.NODE_ENV === 'production',
+  sameSite: 'lax',
+  path: '/api/v1/auth',       // the refresh token is sent nowhere else
+  maxAge: 30 * 24 * 60 * 60 * 1000,
+}
+
+auth.post('/login', authLimiter, async (req, res) => {
+  const user = await verifyCredentials(req.body)          // throws 401 on failure
+  const refreshToken = await createSession(user, req)
+  res.cookie('refresh_token', refreshToken, cookieOptions)
+  res.json({ data: { accessToken: signAccessToken(user), user: publicUser(user) } })
+})
+
+auth.post('/refresh', async (req, res) => {
+  const { session, refreshToken } = await rotateSession(req.cookies.refresh_token, req)
+  const user = await User.findById(session.user)
+  res.cookie('refresh_token', refreshToken, cookieOptions)
+  res.json({ data: { accessToken: signAccessToken(user) } })
+})
+
+auth.post('/logout', async (req, res) => {
+  await Session.deleteOne({ refreshTokenHash: hash(req.cookies.refresh_token) })
+  res.clearCookie('refresh_token', cookieOptions)
+  res.status(204).end()
+})
+```
+
+Note `path: '/api/v1/auth'` on the cookie: the refresh token is only ever transmitted to the endpoints that need it, shrinking its exposure surface. And the refresh response returns a new access token **and** a rotated cookie — the client's refresh routine just repeats.
+
+Client side, the pattern that keeps this seamless is a **single-flight refresh**: when a request fails with 401, the client pauses other requests, refreshes once, retries them all. Without single-flight, five concurrent 401s trigger five refreshes, four of which present an already-rotated token — and your own reuse detection logs the user out. The bug is common enough to deserve its own test.
+
+## Session management users can trust
+
+“Where am I logged in?” is a security feature, not a nicety. With sessions in the database, it is nearly free:
+
+```js
+// src/routes/me.js
+export async function listSessions(req, res) {
+  const sessions = await Session.find({ user: req.user.id, expiresAt: { $gt: new Date() } })
+    .select('userAgent ip createdAt expiresAt')     // never the hashes
+    .sort({ createdAt: -1 })
+  res.json({ data: sessions })
+}
+
+router.delete('/sessions/:id', requireAuth, async (req, res) => {
+  const deleted = await Session.findOneAndDelete({ _id: req.params.id, user: req.user.id })
+  if (!deleted) throw new AppError(404, 'NOT_FOUND', 'Session not found')
+  res.status(204).end()
+})
+
+// panic button: revoke everything
+router.delete('/sessions', requireAuth, async (req, res) => {
+  await Session.deleteMany({ user: req.user.id })
+  res.clearCookie('refresh_token', cookieOptions)
+  res.status(204).end()
+})
+```
+
+Tie the lifecycle together with a TTL index so expired sessions clean themselves up:
+
+```js
+sessionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 })
+```
+
+## Two-factor authentication with TOTP
+
+TOTP (time-based one-time passwords — the codes in Google Authenticator, Authy, 1Password) works on a beautifully simple contract: the server generates a random **secret** at enrollment; both parties derive a 6-digit code from `HMAC(secret, floor(now / 30s))`. Nothing is transmitted at login except the derived code.
+
+```bash
+npm install otplib qrcode
+```
+
+```js
+// src/services/twofactor.js
+import { authenticator } from 'otplib'
+import QRCode from 'qrcode'
+
+export function beginEnrollment(user) {
+  const secret = authenticator.generateSecret()
+  const uri = authenticator.keyuri(user.email, 'MernLearn Movies', secret)
+  return { secret, uri }
+}
+
+// Route returns a QR data URL for the authenticator app
+async function enrollmentQr(req, res) {
+  const { secret, uri } = beginEnrollment(req.user)
+  // store as pending, not enabled — never enable until a code proves the app works
+  req.user.totp = { secret, enabled: false }
+  await req.user.save()
+  res.json({ data: { qr: await QRCode.toDataURL(uri) } })
+}
+
+// Confirm: the user types the first code their app shows
+async function confirmEnrollment(req, res) {
+  const valid = authenticator.verify({ token: req.body.code, secret: req.user.totp.secret })
+  if (!valid) throw new AppError(422, 'INVALID_CODE', 'That code did not match, try the next one')
+
+  const recoveryCodes = Array.from({ length: 8 }, () => crypto.randomBytes(5).toString('hex'))
+  req.user.totp.enabled = true
+  req.user.recoveryCodeHashes = recoveryCodes.map(sha256)   // hashed like passwords
+  await req.user.save()
+
+  res.json({ data: { recoveryCodes } })   // shown exactly once
+}
+```
+
+Login becomes two steps when 2FA is enabled:
+
+```text
+POST /auth/login  { email, password }
+  → 200 { requires2fa: true, challengeToken }     (no session yet)
+POST /auth/login/2fa { challengeToken, code }
+  → 200 { accessToken, user } + refresh cookie
+```
+
+The `challengeToken` is a short-lived (5 minute) signed token proving “password already checked for this user,” so the second step needs no password. Recovery codes go through a verify-then-delete flow, one use each.
+
+<Callout type="warning" title="OTP codes have a replay window">
+  A TOTP code is valid for its 30-second step (plus one step of clock drift). `otplib` verifies that; your job is to make sure a *session* is not created twice from one code — the challenge token is single-use, and a used code should not mint a second session within its window. Track the last accepted step per user (`lastTotpStep`) and reject any code with a step ≤ that value.
+</Callout>
+
+## OAuth: delegating identity
+
+“Sign in with GitHub” is OAuth 2.0 wrapped in OpenID Connect semantics, and the flow is worth understanding even when a library implements it:
+
+1. Your app redirects to GitHub with a `client_id`, a `redirect_uri`, a `state` (CSRF protection for the flow), and a PKCE challenge (`code_challenge` = hash of a random verifier you keep locally).
+2. The user authenticates **with GitHub** — your app never sees their GitHub password.
+3. GitHub redirects back with a one-time `code`; your server exchanges code + verifier for tokens, then calls GitHub's user API to get identity (id, email, name).
+4. You find or create a local user: match on provider id first, verified email second. Create your own access/refresh pair exactly as the password flow does — OAuth is just another way to prove identity, not a different session model.
+
+Rules that keep this safe:
+
+- **PKCE is mandatory for public clients** (SPAs, native apps) — it stops an intercepted code from being exchanged by an attacker.
+- **Never trust an unverified email** from a provider to link accounts; only link automatically on provider-verified emails.
+- **Store the provider id in its own collection or field** (`accounts`: provider, providerAccountId, userId) — one user, many login methods.
+
+On a Next.js frontend, NextAuth (Auth.js) implements this flow — including state, PKCE, and session refresh — in a few lines of configuration, which is why this curriculum's site itself uses it. The server-side lesson here exists so you can debug it when it misbehaves, and so your standalone Express APIs can accept the resulting identity.
+
+## RBAC: roles where they belong
+
+Most tutorials put `role: 'admin'` on the user. The moment a user belongs to multiple teams, that breaks — and retrofitting is painful. The scalable model is **roles on relationships**:
+
+```js
+// membership: the relationship between a user and an organization
+const membershipSchema = new Schema({
+  user: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+  org: { type: Schema.Types.ObjectId, ref: 'Org', required: true },
+  role: { type: String, enum: ['owner', 'admin', 'member'], required: true },
+}, { timestamps: true })
+
+membershipSchema.index({ user: 1, org: 1 }, { unique: true })
+```
+
+```js
+// src/middleware/require-role.js
+export function requireRole(...allowed) {
+  return async (req, res, next) => {
+    const membership = await Membership.findOne({ user: req.user.id, org: req.params.orgId })
+    if (!membership) return next(new AppError(404, 'NOT_FOUND', 'Organization not found'))
+    if (!allowed.includes(membership.role)) {
+      return next(new AppError(403, 'FORBIDDEN', 'Your role cannot perform this action'))
+    }
+    req.membership = membership
+    next()
+  }
+}
+
+// usage — the 404 for non-members avoids leaking that the org exists
+router.delete('/orgs/:orgId/members/:userId', requireAuth, requireRole('owner', 'admin'), removeMember)
+```
+
+Two conventions that keep RBAC honest:
+
+- **404 for non-members, 403 for members without the right role.** Outsiders should not learn an organization exists; insiders get a clear “not allowed.”
+- **Check permissions next to the resource scope** — the membership lookup is itself scoped by org, and every subsequent query in the handler is scoped by `req.membership.org`. One helper, uniformly used, beats scattered `if (user.role === 'admin')` checks that eventually disagree with each other.
+
+## Try it
+
+<TryIt title="See rotation and reuse detection happen" hint="With the session service wired up, use curl twice with the same refresh cookie — the second call should log the user out everywhere. That is reuse detection firing, and the same drill appears in the capstone's test suite.">
+```bash
+# 1 — log in, keep the cookie jar
+curl -s -c /tmp/jar.txt -X POST http://localhost:3000/api/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"demo@test.dev","password":"demo-password-123"}' | head -c 200
+
+# 2 — refresh once: succeeds, rotates the cookie
+curl -s -b /tmp/jar.txt -c /tmp/jar.txt -X POST http://localhost:3000/api/v1/auth/refresh | head -c 200
+
+# 3 — save the pre-rotation copy, then replay it: 401 + all sessions revoked
+cp /tmp/jar.txt /tmp/jar-stale.txt
+curl -s -b /tmp/jar-stale.txt -X POST http://localhost:3000/api/v1/auth/refresh
+
+# 4 — even the newest cookie is now dead, because the whole family was revoked
+curl -s -b /tmp/jar.txt -X POST http://localhost:3000/api/v1/auth/refresh
+```
+</TryIt>
+
+## Check your understanding
+
+<Quiz
+  question="What does refresh token reuse detection actually detect?"
+  options={[
+    'Expired tokens being renewed late',
+    'That a token which was already rotated is being presented again — the signature of a stolen copy racing the legitimate client — triggering revocation of the whole session family',
+    'Users logging in from two devices',
+    'Cookies larger than the browser limit'
+  ]}
+  answer={1}
+  explanation="Rotation makes each refresh token single-use. The legitimate holder always has the newest one; a copy of an older one appearing means two parties hold the chain. Revoking everything for that user is the safe response — availability beats compromised confidentiality."
+/>
+
+<Quiz
+  question="Why do TOTP enrollment routes store the secret but keep enabled: false until the user confirms with a code?"
+  options={[
+    'otplib requires two API calls',
+    'It proves the authenticator app is actually set up before locking the account behind codes — otherwise a wrong or mistyped secret locks the user out permanently',
+    'Secrets expire after one use',
+    'The QR code cannot be generated before confirmation'
+  ]}
+  answer={1}
+  explanation="A confirmed code is the only evidence the user's device holds the same secret the server does. Skipping confirmation is a classic way to brick accounts: 2FA enabled against a secret the user never actually stored anywhere."
+/>
+
+<Exercise title="Ship the full auth system" difficulty="hard">
+Upgrade the movies API's single-JWT auth into the complete system this lesson describes, with tests proving each property.
+
+1. **Token pair:** shorten access tokens to 15 minutes; add a `Session` model storing sha256-hashed refresh tokens with device metadata and a TTL index; set the refresh cookie with HttpOnly, Secure in production, SameSite=Lax, and a scoped path.
+2. **Rotation:** implement rotate-on-refresh with a short history trail; the endpoint returns a fresh access token and cookie.
+3. **Reuse detection:** reimplement family revocation; write the integration test: login, refresh, replay the first cookie, assert 401, then assert the newest cookie is also dead.
+4. **Session management:** endpoints to list sessions (metadata only), revoke one, and revoke all; tests for each, including that revoking another user's session returns 404.
+5. **Single flight:** implement the client refresh routine with one in-flight promise shared by all waiting requests; test that five simultaneous 401s cause exactly one refresh call and no logout.
+6. **2FA:** enrollment (pending secret + QR), confirm (verify code, generate 8 hashed recovery codes, show once), two-step login with a single-use challenge token, recovery-code login that deletes each used code; tests: wrong code rejected, replayed code within the same step rejected, used recovery code rejected.
+7. **RBAC:** introduce the org + membership model; gate at least two admin-only endpoints behind `requireRole`; test all three outcomes — non-member 404, member 403, admin success.
+8. **Threat review:** four lines in `SECURITY-AUDIT.md` stating what each mechanism would and would not stop — “rotation limits a stolen refresh token to one use; it does not protect a machine compromised by malware.”
+</Exercise>
+
+## Summary
+
+- Access + refresh pairs split the problem: stateless short-lived access tokens for speed, a revocable stateful session for control.
+- Refresh tokens live in httpOnly cookies, are stored hashed, and rotate on every use; reuse of a rotated token revokes the whole family — and the client must single-flight its refreshes to avoid tripping its own defense.
+- Sessions in the database make device lists, per-device revocation, and logout-everywhere nearly free — plus a TTL index for cleanup.
+- TOTP 2FA is a shared secret plus HMAC over time steps: enroll pending, confirm with a code, store hashed recovery codes, and enforce a single-use challenge token with replay protection.
+- OAuth delegates identity verification (never the password); match on provider id, honor verified emails, and create your own session pair afterward.
+- Roles belong on relationships (memberships), checked by one scoped middleware: 404 for outsiders, 403 for insufficient role.
+
+Next: protecting the data itself — injection-proof queries, least-privilege database access, encryption, backups, and a sane policy for personal data.
+

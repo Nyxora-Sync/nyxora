@@ -1,0 +1,372 @@
+Relational habits produce MongoDB models that work at 100 documents and collapse at 100,000: normalized three-collection joins for data always read together, an array of comments that grows without bound, queries nobody indexed because "the ORM handled it." MongoDB rewards designing **by access patterns** — what the application asks for, in what shape, how often — and this lesson builds that discipline: embed vs reference, index strategy, transactions, denormalization, and migrations.
+
+## Model by access patterns, not by ER diagram
+
+Start every model from a list of the actual reads and writes, with their frequency and scale:
+
+```text
+ACCESS PATTERN BOARD — movies app
+R1: list movies for a user, newest first, paginated          ~500/min, grows with users
+R2: movie detail page, includes reviews (first page)          ~200/min
+R3: public feed: newest movies across all users               ~800/min
+W1: create movie                                               ~5/min
+W2: add review (any user, on any movie)                        ~20/min, unbounded growth per movie
+W3: recompute average rating after a review                    ~20/min, read-heavy derived value
+```
+
+Design against the list. R1 and R3 shape the indexes. W2's "unbounded growth per movie" is the first red flag: an embedded `reviews: []` array on the movie document is the classic mistake — documents have a 16MB ceiling, every review write rewrites the document, and R2 only ever needs the first page. Reviews get their **own collection**, indexed by `{ movie: 1, createdAt: -1 }`.
+
+<KeyPoint>
+The relational question is "what are the entities and their relationships?" The document question is "what is read together, written together, and how does each side grow?" Two entities joined in every read and small on the many side get embedded. Anything unbounded, independently queried, or independently written gets its own collection.
+</KeyPoint>
+
+## Embed vs reference: the decision table
+
+```text
+Definition        → embed                  → reference
+Bounded (1:1, 1:few, fixed size)            unbounded (1:many, many:many)
+Always read with the parent                 read independently, often without parent
+Written together in the same operation      written on its own cadence
+No independent queries needed               queried/sorted/paginated by itself
+```
+
+Applied to the movies model:
+
+```js
+// movie.model.js — embedded: bounded and always read together
+const movieSchema = new Schema({
+  title: { type: String, required: true },
+  releaseYear: Number,
+  genres: [String],                          // max ~10, bounded, filtered by
+  poster: {                                  // 1:1, always shown together
+    url: String,
+    width: Number,
+    height: Number,
+  },
+  stats: {                                   // small, updated on write
+    reviewCount: { type: Number, default: 0 },
+    averageRating: { type: Number, default: 0 },
+  },
+  owner: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+}, { timestamps: true })
+```
+
+```js
+// review.model.js — referenced: unbounded, paginated, independently written
+const reviewSchema = new Schema({
+  movie: { type: Schema.Types.ObjectId, ref: 'Movie', required: true },
+  author: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+  rating: { type: Number, min: 1, max: 5, required: true },
+  body: { type: String, maxlength: 4000 },
+}, { timestamps: true })
+
+reviewSchema.index({ movie: 1, createdAt: -1 })   // exactly R2's access shape
+reviewSchema.index({ movie: 1, author: 1 }, { unique: true })  // one review per user per movie
+```
+
+The **bucket pattern** handles the in-between case — data that grows but is read in bounded pages, like a movie's activity feed or aggregated counters over time. Instead of one unbounded array or one document per event:
+
+```js
+// activity buckets: one document per movie per month
+const activityBucketSchema = new Schema({
+  movie: { type: Schema.Types.ObjectId, required: true },
+  period: { type: String, required: true },     // "2026-03"
+  events: [{ type: { type: String }, at: Date, userId: Schema.Types.ObjectId }],
+  count: { type: Number, default: 0 },
+})
+
+activityBucketSchema.index({ movie: 1, period: -1 })
+```
+
+Each bucket is bounded (a month of events), reads fetch one or two buckets, and writes append to the current one. When a single document *must* stay small or a hot write path contends on one bucket, an **outlier** pattern splits it (buckets by month with a size-triggered second document). The lesson: arrays are fine; unbounded arrays are not — bound them by time, count, or split.
+
+## Indexes: the query's other half
+
+An index is a sorted structure (B-tree) keyed by the fields you name, in the order you name them. Get the order right, and a query seeks instead of scanning; get it wrong, and Mongo quietly scans anyway (or sorts in memory). The ordering rule is **ESR — Equality, Sort, Range**:
+
+```text
+Query:  movies for a specific genre, newest first, released after 2010
+        db.movies.find({ genre: 'sci-fi', releaseYear: { $gt: 2010 } }).sort({ createdAt: -1 })
+
+Index:  { genre: 1, createdAt: -1, releaseYear: 1 }
+          ↑ Equality   ↑ Sort          ↑ Range (last)
+
+Why: equality fields pin one contiguous run; the sort can then walk the index in
+order (no in-memory sort); the range finally filters within that walk.
+Putting the range before the sort forces a blocking sort: EXAMINE stage in explain().
+```
+
+Reading `explain()` is the skill that makes all of this real:
+
+```js
+const plan = await MovieModel.find({ genre: 'sci-fi' })
+  .sort({ createdAt: -1 })
+  .limit(20)
+  .explain('executionStats')
+
+console.log(plan.executionStats)
+// winningPlan.stage: "IXSCAN" (good) vs "COLLSCAN" (missing index) vs
+//                    "SORT" (index does not serve the sort — fix ESR order)
+// totalKeysExamined ≈ totalDocsExamined ≈ nReturned (20) — a tight index
+// totalKeysExamined >> nReturned — the index is not selective enough for the query
+```
+
+Index types you will actually use:
+
+```js
+movieSchema.index({ title: 'text', 'genres': 'text' })            // $text search (one per collection)
+reviewSchema.index({ createdAt: 1 }, { expireAfterSeconds: 0 })   // TTL — only on Date fields
+movieSchema.index({ owner: 1, status: 1 }, { partialFilterExpression: { status: 'published' } })
+                                                                  // partial: index only published rows
+movieSchema.index({ 'stats.averageRating': -1 })                  // sort by derived value
+```
+
+Two costs that keep index counts honest: **every index slows writes** (each insert/update maintains all of them) and **each is real storage and RAM**. The practical budget: 5–12 indexes per busy collection, and **every index should point at a named access pattern** from your board — an index nobody's query uses is just write tax. To audit: Atlas's Performance Advisor, or server-side:
+
+```js
+// find indexes that were never used since the last restart
+db.movies.aggregate([{ $indexStats: {} }, { $match: { 'accesses.ops': 0 } }])
+```
+
+## Transactions: honest scope
+
+MongoDB has multi-document ACID transactions, and the honest framing is: **use them where partial application corrupts data, avoid them everywhere else.**
+
+```js
+// transferring ownership of a movie between users: two writes that must both happen
+const session = await mongoose.startSession()
+try {
+  await session.withTransaction(async () => {
+    const movie = await Movie.findOneAndUpdate(
+      { _id: movieId, owner: fromUserId },
+      { $set: { owner: toUserId } },
+      { session, new: true }
+    )
+    if (!movie) throw new AppError(404, 'NOT_FOUND', 'Movie not found or not yours')
+
+    await OwnershipTransfer.create([{ movie: movieId, from: fromUserId, to: toUserId }], { session })
+  })
+} finally {
+  await session.endSession()
+}
+```
+
+When a transaction *is* the right tool:
+
+- **Two writes that must agree** (ownership transfers, balances, inventory).
+- **Read-modify-write on a shared document** where a race could interleave two readers.
+- **Orders/payments constraints** — the money-adjacent cases where auditability demands atomicity.
+
+When it is not:
+
+- **Single-document writes are already atomic.** Updating one movie's `stats.reviewCount` with `$inc` needs no transaction — and the embed decisions above exist precisely so most invariants live within one document, where the database guarantees them for free.
+- **High-throughput counters and appends.** Transactions take locks and add round trips; at 5,000 events/sec you want `$inc` and idempotent writes, not a saga.
+- **Anything you can restructure away.** The best transaction is the one the data model made unnecessary.
+
+One MongoDB-specific rule while in a transaction: **read-your-own-writes within the session** (`{ session }` on every operation) and treat 16MB document limits and 60-second transaction lifetimes as hard walls — design operations to be short.
+
+## Denormalization: derived fields with owners
+
+`stats.reviewCount` and `stats.averageRating` on the movie are denormalized: data derivable from reviews, stored on the parent because every list read needs it. That is the right call — R1 and R3 would otherwise aggregate reviews on every page — done with three rules:
+
+**1 — One writer.** Only the review service touches `stats`.
+
+```js
+// modules/reviews/review.service.js
+export async function addReview(userId, movieId, input) {
+  const review = await ReviewModel.create({ ...input, movie: movieId, author: userId })
+
+  const [agg] = await ReviewModel.aggregate([
+    { $match: { movie: new mongoose.Types.ObjectId(movieId) } },
+    { $group: { _id: null, count: { $sum: 1 }, avg: { $avg: '$rating' } } },
+  ])
+
+  await MovieModel.updateOne(
+    { _id: movieId },
+    { $set: { 'stats.reviewCount': agg?.count ?? 0, 'stats.averageRating': Math.round((agg?.avg ?? 0) * 10) / 10 } }
+  )
+  return review
+}
+```
+
+**2 — Repair tools exist.** Derived values drift — a crashed write, a bulk import, a bug. A script that recomputes must exist and be cheap to run:
+
+```js
+// scripts/rebuild-movie-stats.js — idempotent, batched, runnable any time
+const cursor = MovieModel.find({}).select('_id').lean().cursor()
+for await (const { _id } of cursor) {
+  const [agg] = await ReviewModel.aggregate([
+    { $match: { movie: _id } },
+    { $group: { _id: null, count: { $sum: 1 }, avg: { $avg: '$rating' } } },
+  ])
+  await MovieModel.updateOne(
+    { _id },
+    { $set: { 'stats.reviewCount': agg?.count ?? 0, 'stats.averageRating': Math.round((agg?.avg ?? 0) * 10) / 10 } }
+  )
+}
+```
+
+**3 — Staleness is bounded and known.** Between the review write and the stats update there is a window where the count is old — milliseconds, or a queue cycle if you move it to a job. That window is a documented staleness budget (previous lessons), visible in `docs/architecture.md`, not an accident.
+
+The same three rules apply to any derived data: counters, cached totals, search indexes, read models for dashboards. **Pick the writer, ship the repair, state the lag.**
+
+## Migrations: changing a live schema
+
+MongoDB is schemaless at the database level, which means the schema lives in your application code and its migrations are *your* job. The discipline from the deployment lesson (expand → migrate → contract) applies document by document:
+
+```js
+// expand: new field added, old one kept — both written by the app
+// migrate: backfill existing documents, in batches, idempotently
+// contract: after a safe window, stop writing the old field; drop it later
+```
+
+A backfill that survives a database with real traffic:
+
+```js
+// scripts/migrate-year-to-release-year.js
+const BATCH = 1000
+
+let total = 0
+for (;;) {
+  const docs = await MovieModel.collection
+    .find({ releaseYear: { $exists: false }, year: { $exists: true } })
+    .limit(BATCH)
+    .toArray()
+  if (docs.length === 0) break
+
+  await MovieModel.collection.bulkWrite(
+    docs.map((doc) => ({
+      updateOne: {
+        filter: { _id: doc._id },
+        update: { $set: { releaseYear: doc.year } },
+      },
+    })),
+    { ordered: false }
+  )
+  total += docs.length
+  console.log({ event: 'migration_progress', total })
+}
+console.log({ event: 'migration_done', total })
+```
+
+What each line buys: the **filter** makes re-runs no-ops (idempotent); the **batch** keeps locks short and memory flat; **bulkWrite unordered** pushes through per-document errors instead of stopping; **progress logging** answers "how far did it get" from the deploy log. Run it as a pre-deploy step (previous lesson), never from app startup.
+
+One more migration category often forgotten: **index migrations**. Building an index on a live collection takes time and load; on Atlas, use a rolling index build for large collections, and never drop an index in the same release that first stops using it — watch `$indexStats` show hits fall to zero first.
+
+## Audit logs and soft deletes
+
+Two patterns that belong in the model from the start, because retrofitting them is expensive:
+
+**Audit log** — an append-only collection of who did what, for compliance and debugging:
+
+```js
+const auditLogSchema = new Schema({
+  actor: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+  action: { type: String, required: true },        // 'movie.deleted', 'role.changed'
+  target: { type: String },                         // 'movie:6a3f...'
+  metadata: { type: Schema.Types.Mixed },           // before/after, request id
+  at: { type: Date, default: Date.now },
+})
+
+auditLogSchema.index({ actor: 1, at: -1 })
+auditLogSchema.index({ at: 1 }, { expireAfterSeconds: 365 * 24 * 3600 })   // retention: 1 year
+```
+
+Write it from services on mutating, consequential actions (deletes, permission changes, money) — not every read. The TTL is the retention policy made executable; the request id from the observability lesson makes each entry traceable to its logs.
+
+**Soft delete** — for resources users "delete" but you must be able to restore or audit:
+
+```js
+// status: 'active' | 'deleted'; queries scope to active by default
+movieSchema.index({ owner: 1, createdAt: -1 }, {
+  partialFilterExpression: { status: 'active' },
+})   // the hot list query never touches deleted rows
+
+// service layer enforces the scope
+export function activeOnly(filter = {}) {
+  return { ...filter, status: 'active' }
+}
+```
+
+The rules: default every user-facing query to active-only (usually via the service layer, so no route can forget); block soft-deleted rows from ownership checks and uniqueness constraints where the semantics demand it; make the purge job from the security lesson the only hard delete; and remember backups (previous lessons) make soft delete a *restore* mechanism, not a privacy mechanism — those two goals need separate machinery.
+
+## Try it
+
+<TryIt title="Prove an index changed the plan" hint="Run the explain before and after creating the compound index. totalKeysExamined is the number that should collapse; a COLLSCAN is a full collection scan and the most common reason a query page 'mysteriously' slows down as data grows.">
+```js
+// 1 — seed 50k movies, then explain a realistic query BEFORE the index
+console.time('explain-before')
+const before = await db.collection('movies').find({
+  genres: 'sci-fi',
+  releaseYear: { $gte: 2010 },
+}).sort({ createdAt: -1 }).limit(20).explain('executionStats')
+console.log(before.executionStats.totalKeysExamined, before.executionStats.totalDocsExamined,
+            before.executionStats.executionStages?.stage)
+console.timeEnd('explain-before')
+
+// 2 — create the ESR index
+await db.collection('movies').createIndex({ genres: 1, createdAt: -1, releaseYear: 1 })
+
+// 3 — explain the same query AFTER the index
+const after = await db.collection('movies').find({
+  genres: 'sci-fi',
+  releaseYear: { $gte: 2010 },
+}).sort({ createdAt: -1 }).limit(20).explain('executionStats')
+console.log(after.executionStats.totalKeysExamined, after.executionStats.totalDocsExamined,
+            after.executionStats.executionStages?.stage)
+
+// Record the four numbers. The after-pair should both be ~20, stage should read IXSCAN.
+```
+</TryIt>
+
+## Check your understanding
+
+<Quiz
+  question="A movie document embeds a reviews: [] array that grows with every review. Which failure do you hit first as the app grows?"
+  options={[
+    'MongoDB silently stops accepting reviews at 100',
+    'Every review write rewrites the whole growing document, and the 16MB document ceiling is a hard wall — reviews must become their own collection once growth is unbounded',
+    'Reads get faster because everything is in one place',
+    'The array cannot be indexed'
+  ]}
+  answer={1}
+  explanation="Embedding is a bet that the child side is bounded. Unbounded growth turns every append into a full-document rewrite (contention on a hot document) and marches toward the 16MB limit. The access-pattern board catches this before it ships: R2 only needs the first page of reviews, which is a separate-collection query with its own index."
+/>
+
+<Quiz
+  question="Why does ESR order matter — why does a range field placed before the sort field cause an in-memory sort?"
+  options={[
+    'MongoDB only supports three index fields',
+    'Indexes are sorted by field order; the sort clause can walk the index only while prefix fields are equality matches. A range between them breaks the walk, so the engine must collect and sort the results itself',
+    'Range queries cannot use indexes at all',
+    'Ranges are always faster than sorts'
+  ]}
+  answer={1}
+  explanation="While each leading index field is an equality test, the index is still ordered by the remaining fields, so { genre, createdAt } satisfies a sort on createdAt. Insert a range on releaseYear between them and remaining-order no longer holds — the executor blocks and sorts, which costs memory and grows with result size."
+/>
+
+<Exercise title="Remodel the app for its real access patterns" difficulty="hard">
+Take the movies app from "it works" to "it works at 100k documents," with evidence for every claim.
+
+1. **Write the pattern board:** list the top 5 reads and 3 writes with frequency estimates and growth-over-time notes; keep it in `docs/data-model.md`. Identify each entity's read-together/write-together traits and decide embed/reference/bucket per field, documenting one decision you reversed while writing it.
+2. **Fix the model:** move any unbounded arrays out of parent documents into their own collections with `{ parent: 1, createdAt: -1 }` indexes; add the bucket pattern for one time-series-ish collection (activity, views, events). Seed 50k documents.
+3. **Index to the patterns:** for each of the five reads, write the query, run `explain('executionStats')`, and create the ESR-ordered index that turns every plan into an IXSCAN with `totalKeysExamined ≈ limit`. Record before/after numbers per query in the doc.
+4. **Audit unused indexes:** run the `$indexStats` aggregation; drop anything with zero accesses unless it enforces a constraint (unique), and justify each survivor in one line.
+5. **Transactions where they matter:** implement one real multi-document invariant — for example movie transfer between users, or review creation that also debits a rate limit in another collection — with `withTransaction`, session on every operation, and a 404 for a non-owner. Test the rollback path: make the second write throw and prove the first was rolled back.
+6. **Derived data discipline:** confirm every derived field has one writer, a rebuild script, and a stated staleness budget; run the rebuild script and demonstrate it corrects a deliberately corrupted count.
+7. **Migrate:** write the rename migration (`year` → `releaseYear`) as expand/backfill/contract: backfill script batched and idempotent, a re-run that completes in one pass with zero updates on the second invocation, dual-write window, then the contract release. Include the commands in `docs/data-model.md`.
+8. **Audit and soft delete:** add the audit log for two consequential actions with a TTL retention; convert one delete path to soft delete with active-scoped queries everywhere (grep for unscoped finds); prove a soft-deleted movie stays invisible to lists while recoverable by an admin path.
+</Exercise>
+
+## Summary
+
+- Model by access patterns: list the reads and writes with frequency and growth, then design against them.
+- Embed bounded, co-read, co-written data; reference unbounded or independently accessed data; bucket time-growing data to keep documents bounded.
+- Index with ESR — equality, sort, range — and prove it with `explain()`: IXSCAN, keys examined near returned, no blocking sort. Audit with `$indexStats`; every index is write tax and storage.
+- Transactions are for cross-document invariants and money paths; single-document atomicity and `$inc` handle the rest — prefer models that need transactions least.
+- Denormalize derived fields with three guarantees: one writer, a rebuild script, and a documented staleness budget.
+- Migrate live schemas expand → backfill → contract, with idempotent batched scripts run pre-deploy; index changes follow the same discipline.
+- Audit logs are append-only with TTL retention; soft deletes are restore machinery — never confuse them with the privacy purge.
+
+Architecture module complete. Next: performance — the Node runtime itself, then the database under load, then the bytes delivered to the browser.
+

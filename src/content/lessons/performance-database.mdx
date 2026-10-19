@@ -1,0 +1,311 @@
+The database is where latency goes to hide. A single missing index turns a 5ms endpoint into a 900ms one, and nothing in the Node profiler will ever show you why — the time is spent on a different machine, waiting. This lesson is the database half of performance: reading `explain()` like a diagnosis, designing indexes to order, avoiding N+1 patterns, keeping aggregations efficient, and sizing connections honestly.
+
+## Query-first: shrink every query before optimizing it
+
+The fastest query is the one that returns less. Three moves, in order of payoff:
+
+```js
+// 1 — projection: never fetch fields you do not return
+// ❌ entire documents; body text can be kilobytes each
+const movies = await MovieModel.find({ owner: userId })
+// ✅ only what the list UI renders
+const movies = await MovieModel.find({ owner: userId })
+  .select('title releaseYear genres stats.averageRating poster.url')
+  .lean()                                     // plain objects, no Mongoose documents
+
+// 2 — limit: every list is paginated (the API lesson made this a contract)
+.limit(20)
+
+// 3 — lean follows from 1–2: document hydration (getters, virtuals, change tracking)
+//     costs real CPU per row; reads that do not mutate want plain objects
+```
+
+The effect compounds: fetching 20 rows × 5 fields instead of 20 × 30 fields reduces network bytes, JSON parsing (Node side), and Mongoose hydration (both sides). On list endpoints at hundreds of requests per second, this is often a 2–3× latency cut with no index work at all.
+
+## Reading explain(): scan, seek, sort
+
+Every performance question about a Mongo query has an answer in `explain('executionStats')`:
+
+```js
+const explain = await MovieModel.find({ owner: userId, status: 'published' })
+  .sort({ createdAt: -1 })
+  .limit(20)
+  .lean()
+  .explain('executionStats')
+
+console.log({
+  stage: explain.executionStats.executionStages.stage,
+  keysExamined: explain.executionStats.totalKeysExamined,
+  docsExamined: explain.executionStats.totalDocsExamined,
+  returned: explain.executionStats.nReturned,
+  hasSortStage: JSON.stringify(explain.executionStats).includes('"stage":"SORT"'),
+})
+```
+
+How to read it:
+
+```text
+GOOD signs
+  IXSCAN               → used an index (a seek, not a scan)
+  keysExamined ≈ nReturned ≈ limit        → the index matched the query precisely
+  docsExamined ≈ keysExamined            → no rejected-then-refetched documents
+  no SORT stage                          → the index delivered sort order
+
+BAD signs and their causes
+  COLLSCAN                → no usable index: create one matching the filter+sort
+  keysExamined >> returned → low selectivity: index fields in wrong order, or
+                             filtering on something the index does not cover
+  docsExamined >> returned → over-fetching at the index level (wrong prefix)
+  SORT stage              → blocking in-memory sort: ESR order is wrong (range before sort)
+  "SORT_MERGE"            → index provides order but cannot finish the filter — usually fine
+  "EXPRESS" stages        → $expr/$where bypassing index use entirely — rewrite the query
+```
+
+The debug loop is mechanical: run `explain`, look at the four numbers and the stage, create or fix the index, run `explain` again until `keysExamined ≈ nReturned` and no `SORT` stage appears. That delta — before and after numbers — is also what you put in the pull request; "added an index" without the numbers is faith, not engineering.
+
+## Index design at the next level
+
+The architecture lesson introduced ESR (Equality, Sort, Range); here is the rest of the working toolbox.
+
+**Covered queries** — when the index contains every field you touch, MongoDB answers *from the index alone*, never reading documents:
+
+```js
+userSchema.index({ email: 1 }, { unique: true })
+// find({ email }).select('email name') with index { email: 1, name: 1 }:
+// totalDocsExamined = 0 — the keysExamined are the answer
+```
+
+Coverage is why `.select()` discipline and index design are the same conversation: the fields you fetch decide whether an index can finish the job.
+
+**Multikey and array fields** — filtering on `genres` (an array) gives one index entry per element. Multikey indexes work, but obey rules: they cannot cover queries on the array field, and compound bounds on two multi-key fields of *different* arrays in one document are forbidden. When arrays and filters multiply, an **inverted join** (a separate `$lookup`-able mapping collection) can beat a multikey index — but start with the index and measure.
+
+**Partial indexes** — index a slice, pay for only what you query:
+
+```js
+movieSchema.index({ owner: 1, createdAt: -1 }, { partialFilterExpression: { status: 'published' } })
+// smaller index (only published rows), faster writes on the rest — but the query
+// MUST include status: 'published' or the planner cannot use it
+```
+
+**TTL indexes** — expiry as a database feature, not a cron job (sessions, idempotency keys, audit retention from earlier lessons):
+
+```js
+sessionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 })
+```
+
+**Sort direction compounds** with compound indexes: `{ genre: 1, createdAt: -1 }` serves `sort: { createdAt: -1 }` *within a genre equality* and, reversed field-for-field (`{ genre: -1, createdAt: 1 }`), serves the ascending variant — but a single-field `genres: 1` index cannot serve a two-field sort. The sort clause and the index must agree on the full prefix.
+
+**Two indexes that look redundant but are not:**
+
+```js
+userSchema.index({ email: 1 })
+userSchema.index({ email: 1, createdAt: -1 })
+// The second serves everything the first does (prefix rule) EXCEPT uniqueness.
+// Keep both only if email is unique; otherwise { email: 1 } is pure write tax.
+```
+
+**Shadow indexes for safe swaps** (Atlas): build the new index hidden, confirm after a day of queries that it serves the workload, *then* drop the old one unhidden. Dropping an index in the same release that starts using its replacement is how p99s regress silently.
+
+<KeyPoint>
+Index design is query-shape accounting. For each of your top queries: which fields are equality (prefix), which is the sort (next), which are ranges (last), and do the selected fields fit inside the index (covering)? When the answers do not line up, the query gets slower as data grows — not because anything changed, but because collection scans scale with the collection and seeks do not.
+</KeyPoint>
+
+## N+1: the pattern behind "fast locally, slow in production"
+
+A list of 20 movies, each needing its owner's name, implemented naively:
+
+```js
+// ❌ 1 + 20 queries — invisible at 3 rows, murderous at 50,000 requests/day
+const movies = await MovieModel.find({ owner: userId }).limit(20).lean()
+for (const movie of movies) {
+  movie.owner = await UserModel.findById(movie.owner).select('name').lean()
+}
+```
+
+Three fixes, in the order to try them:
+
+```js
+// ✅ 1 — populate: mongoose batches the referenced fetch into one query
+const movies = await MovieModel.find({ owner: userId })
+  .populate('owner', 'name')          // second query for all 20 owners at once
+  .limit(20)
+  .lean()
+
+// ✅ 2 — manual two-pass: full control, no populate magic; good when you
+// want to cache or shape the related data differently
+const movies = await MovieModel.find({ owner: userId }).limit(20).select('title owner').lean()
+const ownerIds = [...new Set(movies.map((m) => String(m.owner)))]
+const owners = await UserModel.find({ _id: { $in: ownerIds } }).select('name').lean()
+const byId = new Map(owners.map((o) => [String(o._id), o]))
+movies.forEach((m) => { m.owner = byId.get(String(m.owner)) })
+
+// ✅ 3 — $lookup in aggregation, for denormalized joins or computed shapes
+const rows = await MovieModel.aggregate([
+  { $match: { owner: new mongoose.Types.ObjectId(userId) } },
+  { $sort: { createdAt: -1 } },
+  { $limit: 20 },
+  { $lookup: { from: 'users', localField: 'owner', foreignField: '_id', as: 'owner' } },
+  { $unwind: '$owner' },
+  { $project: { title: 1, 'owner.name': 1 } },
+])
+```
+
+Whichever route, the invariants are the same: **query count proportional to pages, not rows** (1 + 1, not 1 + 20), and the related ids fetched with `$in`-style batching. Watch for the N+1 in disguise, too — inside serializers, inside loops over populated docs that then touch `doc.owner.anything`, and in frontend code (`await` inside `map`).
+
+## Aggregations that scale
+
+The same query-first logic applies inside pipelines — order determines cost:
+
+```js
+// ❌ $lookup over the whole collection, then filter — lookups run on 100% of rows
+await ReviewModel.aggregate([
+  { $lookup: { from: 'movies', localField: 'movie', foreignField: '_id', as: 'movie' } },
+  { $match: { 'movie.owner': userId } },
+  { $group: { _id: '$movie.genres', count: { $sum: 1 } } },
+])
+
+// ✅ $match FIRST (uses the index, shrinks the set), then lookup the survivors
+await ReviewModel.aggregate([
+  { $match: { movie: { $in: ownedMovieIds } } },       // set fetched with one indexed query
+  { $lookup: { from: 'movies', localField: 'movie', foreignField: '_id', as: 'movie' } },
+  { $project: { genres: { $first: '$movie.genres' } } },  // project early: never carry fields you drop
+  { $group: { _id: '$genres', count: { $sum: 1 } } },
+  { $sort: { count: -1 } },
+])
+```
+
+Rules the pipeline rewards:
+
+- **`$match` and `$sort` first**, so the **indexes from the design lesson do the heavy lifting** — an aggregation that starts with `$match` on an indexed field can use the index exactly like `find()` (check `explain` again; aggregation explains work the same way).
+- **`$project` early** — every field carried downstream is memory and time; drop early, keep pipelines narrow.
+- **`$lookup` is a join**: it must run on the smallest possible input and should hit an index on `foreignField` (or use the `pipeline` form with its own `$match`). Big `$lookup`s are often better as a **materialized read model**: a precomputed collection rebuilt by the queue worker (the architecture lesson's derived-data rules apply: one writer, repair script, staleness budget).
+- **`$group` and `$sort` on large sets need `allowDiskUse: true`** (or better indexes) — otherwise you meet the 100MB stage limit. Treat hitting it as a design smell, not a config problem: the working set should have shrunk by an earlier `$match`.
+- **`$facet` for multi-part responses** (list + totals + filters) runs branches over the same input; keep each branch as narrow as the input.
+
+## Connection pooling: fewer, reused, tuned
+
+Every query runs over a pooled TCP connection. Two failure modes bookend the tuning:
+
+```js
+// the configuration you actually set, per process
+mongoose.connect(env.MONGODB_URI, {
+  maxPoolSize: 10,            // concurrent connections this process may open
+  minPoolSize: 2,             // keep warm — avoids connect latency on traffic bursts
+  serverSelectionTimeoutMS: 5000,
+  socketTimeoutMS: 45000,
+  maxIdleTimeMS: 30000,       // close idle sockets; serverless-friendly
+})
+```
+
+- **Too few** (defaults in some drivers, or 1 in naive code): queries queue behind each other; p99 grows while the database sits idle. Sizing rule: roughly `(peak queries per second) × (average query duration in seconds)` with headroom — start at 10–20 per process and read the metrics below before exceeding it.
+- **Too many**: total connections across all instances exhaust the server's limit (Atlas tiers cap differently), and each connection costs server memory. Ten API instances × 100 = 1,000 connections is a classic self-inflicted outage. Sum across processes, including workers and the migration job.
+- **Serverless platforms** (Vercel functions): every cold instance wants a pool; use the driver's `maxIdleTimeMS`, a small pool, or the platform's connection proxy. The failure signature is "works locally, times out in production at scale" — the metrics tell you before users do.
+
+The observability dashboard from the ops lesson should carry pool gauges: **pool size vs available**, and **queries waiting** (available drops to zero while ready/checkout queues grow — that is under-provisioning, not a slow query).
+
+## The tools that find slow queries for you
+
+Three levels of detection, cheapest first:
+
+```text
+1 — Atlas Performance Advisor (free on shared tiers): surfaces slow queries
+    with recommended indexes, and tells you when a suggested index is redundant.
+    Check it weekly; it is literally a list of free p99 improvements.
+
+2 — Database profiler: log queries slower than a threshold, per database.
+    db.setProfilingLevel(1, { slowms: 100, sampleRate: 0.5 })
+    db.system.profile.find({ millis: { $gt: 100 } }).sort({ ts: -1 }).limit(20)
+    Turn it on during incident response, off after — it costs I/O.
+    (In dev, run it with slowms: 0 to see everything and understand normal shapes.)
+
+3 — mongostat / mongotop on self-hosted deployments: per-second server-side
+    view of operations, connections, and time spent in each collection.
+```
+
+Workflow for a reported slow endpoint: reproduce it with real-shaped data, `explain` the actual query (copy it from the profiler or add request-id logging around it), fix index or query shape, re-`explain`, then load-test (Node lesson) for p99 before/after. The order matters: never index without an explain, never optimize without a re-measure.
+
+<Callout type="warning" title="The index-you-already-have trap">
+  Missing indexes cause COLLSCANs, but the sneakier problem is the *wrong* index: `{ year: 1 }` when the query filters `genre` first, or `{ a: 1, b: 1 }` when you sort by `b` alone (prefix rule: an index serves queries on its prefix, not its suffix). Check `explain` for the actual query — the planner's choice of index, not the list of indexes, is the ground truth.
+</Callout>
+
+## Try it
+
+<TryIt title="An N+1 you can see in a load test" hint="Run both list endpoints against 50 seeded movies with 5 owners and compare request counts in the logs and p99 under autocannon. The N+1 version shows 51 queries per request in the profiler; the fixed version shows two.">
+```js
+// naive: 1 + N queries
+router.get('/list/naive', async (req, res) => {
+  const movies = await MovieModel.find({ status: 'published' }).limit(50).lean()
+  for (const movie of movies) {
+    const owner = await UserModel.findById(movie.owner).select('name').lean()
+    movie.ownerName = owner?.name ?? null
+  }
+  res.json({ data: movies })
+})
+
+// fixed: two queries regardless of page size
+router.get('/list/fixed', async (req, res) => {
+  const movies = await MovieModel.find({ status: 'published' })
+    .select('title releaseYear owner')
+    .populate('owner', 'name')
+    .limit(50)
+    .lean()
+  res.json({ data: movies })
+})
+
+// autocannon -c 50 -d 10 on each; then compare in the profiler:
+// db.setProfilingLevel(1, { slowms: 0 })
+// db.system.profile.aggregate([{ $group: { _id: '$op', n: { $sum: 1 } } }])
+```
+</TryIt>
+
+## Check your understanding
+
+<Quiz
+  question="An explain shows keysExamined: 8,400, docsExamined: 8,400, nReturned: 20 for a limit-20 query. What is the most likely problem?"
+  options={[
+    'The query has no index at all',
+    'The index is being scanned broadly — the filter/sort fields are not the index prefix, so thousands of entries are walked to find the 20 that match and sort first',
+    'The server needs more RAM',
+    'The limit must be raised for efficiency'
+  ]}
+  answer={1}
+  explanation="A COLLSCAN would show as its own stage; 8,400 examined versus 20 returned means an index exists but does not match the query shape — typically a missing prefix field or a range placed before the sort (ESR violation). Align the index with filter and sort order and the keys examined should collapse toward nReturned."
+/>
+
+<Quiz
+  question="Why must $match and $sort come first in an aggregation pipeline?"
+  options={[
+    'MongoDB requires that order syntactically',
+    'Because later stages process whatever arrives — filtering and sorting early lets indexes shrink the working set, keeping $lookup/$group on as few documents as possible instead of the whole collection',
+    '$lookup cannot run after $match',
+    'Sorting later produces wrong results'
+  ]}
+  answer={1}
+  explanation="Pipelines are executed stage by stage over the flowing documents; each stage's cost multiplies with input size. An index-backed $match first (and $sort that the index can serve) shrinks a million documents to hundreds before any join, and the whole pipeline gets cheap by construction."
+/>
+
+<Exercise title="A measured database performance pass" difficulty="hard">
+Take the movies database to "fast at 100k documents," with explain output and load-test numbers as evidence at every step.
+
+1. **Seed realistically:** 100k movies across 500 users, 300k reviews, genres arrays populated, some long text fields. Record collection sizes with `db.stats()`.
+2. **Query-first audit:** for your five hottest endpoints, list the exact query, apply projection + limit + `.lean()`, and record bytes returned (via `explain`'s size fields or response size) before and after. Tabulate the deltas.
+3. **Explain every hot query:** capture before-plans; fix each to IXSCAN with `keysExamined ≈ nReturned ≈ limit` and no SORT stage; keep the before/after explain JSON in `docs/performance.md`. Include at least one ESR reordering and one covered query.
+4. **Kill the N+1s:** grep for `await` inside loops over query results; convert each to populate, two-pass `$in` fetching, or one `$lookup`. Prove query counts per request via the profiler before and after (aggregate `system.profile` by operation count).
+5. **Aggregate efficiently:** take one report endpoint, reorder the pipeline ($match → $sort → $project → $lookup), add the supporting index, enable `allowDiskUse` only if genuinely needed, and record latency under autocannon before and after. Identify one place a materialized read model (queue-rebuilt collection) would beat live aggregation, and implement it if your access pattern repeats.
+6. **Tune the pool:** instrument mongoose connection events; run a concurrency step-up test (10 → 200 simultaneous requests) and find the point where available connections hit zero and queries queue. Adjust `maxPoolSize` per the sizing rule, re-test, and chart the difference. State your total connection count across all local processes so the "instances × pool" math is explicit.
+7. **Profiler drill:** turn on slow-query profiling at 100ms, generate traffic, list the top five slowest operations, fix the worst one, and confirm it no longer appears above the threshold.
+8. **Report:** final `docs/performance.md` with the seeded sizes, a table per endpoint (baseline p50/p95/p99, change, final numbers), and the three-line summary of what mattered most at this data size — plus what you expect to matter first at 10× the data.
+</Exercise>
+
+## Summary
+
+- Query-first: projection, `.lean()`, limits on every list — the cheapest performance work in the entire stack.
+- `explain()` is the diagnosis: IXSCAN not COLLSCAN, keys and docs examined near returned, no blocking SORT; index fixes are proven by the same numbers re-run.
+- Index toolbox: ESR order, covered queries, multikey rules, partial and TTL indexes, sort-direction compounding, hidden builds for safe swaps — and every index justified by a named query.
+- N+1 queries hide in loops and serializers; fix with populate, two-pass `$in` fetching, or one `$lookup`, and prove query count per request with the profiler.
+- Aggregations scale by ordering: `$match`/`$sort` first, `$project` early, indexed `$lookup` on the smallest input, materialized read models for repeated heavy joins.
+- Connection pools have a correct size: too small queues queries, too large exhausts the server across instances; instrument pool usage and require it on the dashboard.
+- Slow queries get found by tools, not intuition: Performance Advisor weekly, profiler during incidents, `explain` before every index change, load test after.
+
+Next: the last mile — the bytes delivered to the browser, where Core Web Vitals, bundles, images, fonts, and caching decide how fast the app feels.
+

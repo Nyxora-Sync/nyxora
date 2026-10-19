@@ -4,7 +4,7 @@ The curriculum has **30 core lessons** plus **23 mastery lessons** in the develo
 track — **53 unique lessons** total. The developer track reuses the same core lesson
 IDs as the beginner track, so each lesson is authored once.
 
-**Authored: 34 / 53** — all core lessons complete; mastery modules in progress.
+**Authored: 53 / 53** — every unique lesson across both tracks is written. ✅
 
 ## Web Foundations
 
@@ -62,40 +62,40 @@ IDs as the beginner track, so each lesson is authored once.
 
 ### Testing in Depth
 
-- [ ] `testing-strategy` — Testing Strategy & Unit Tests
-- [ ] `testing-api-integration` — API Integration Testing
-- [ ] `testing-react-components` — Testing React Components
-- [ ] `testing-e2e-playwright` — End-to-End Testing with Playwright
+- [x] `testing-strategy` — Testing Strategy & Unit Tests
+- [x] `testing-api-integration` — API Integration Testing
+- [x] `testing-react-components` — Testing React Components
+- [x] `testing-e2e-playwright` — End-to-End Testing with Playwright
 
 ### Security
 
-- [ ] `security-web-fundamentals` — Web Security Fundamentals
-- [ ] `security-express-hardening` — Hardening Express APIs
-- [ ] `security-auth-advanced` — Advanced Authentication
-- [ ] `security-data-protection` — Data Protection & MongoDB Security
+- [x] `security-web-fundamentals` — Web Security Fundamentals
+- [x] `security-express-hardening` — Hardening Express APIs
+- [x] `security-auth-advanced` — Advanced Authentication
+- [x] `security-data-protection` — Data Protection & MongoDB Security
 
 ### DevOps
 
-- [ ] `devops-docker-deep` — Docker & Containers in Depth
-- [ ] `devops-cicd-production` — Production CI/CD
-- [ ] `devops-observability-scaling` — Observability & Scaling
+- [x] `devops-docker-deep` — Docker & Containers in Depth
+- [x] `devops-cicd-production` — Production CI/CD
+- [x] `devops-observability-scaling` — Observability & Scaling
 
 ### Architecture & System Design
 
-- [ ] `architecture-system-design` — System Design for MERN Developers
-- [ ] `architecture-api-evolution` — API Design at Scale
-- [ ] `architecture-data-modeling` — Advanced Data Modeling
+- [x] `architecture-system-design` — System Design for MERN Developers
+- [x] `architecture-api-evolution` — API Design at Scale
+- [x] `architecture-data-modeling` — Advanced Data Modeling
 
 ### Performance Engineering
 
-- [ ] `performance-node-runtime` — Node.js Performance
-- [ ] `performance-database` — Database Performance
-- [ ] `performance-frontend-delivery` — Frontend Delivery & Caching
+- [x] `performance-node-runtime` — Node.js Performance
+- [x] `performance-database` — Database Performance
+- [x] `performance-frontend-delivery` — Frontend Delivery & Caching
 
 ### Master Capstone
 
-- [ ] `capstone-saas-app` — Master Project: Multi-Tenant SaaS
-- [ ] `capstone-portfolio-career` — Portfolio, Open Source & Career
+- [x] `capstone-saas-app` — Master Project: Multi-Tenant SaaS
+- [x] `capstone-portfolio-career` — Portfolio, Open Source & Career
 
 ## Batch plan
 

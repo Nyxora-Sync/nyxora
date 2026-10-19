@@ -1,0 +1,260 @@
+"It works on my machine" ends when the machine itself ships with the code. Containers give your API, its Node version, its system libraries, and its exact dependency tree one immutable artifact — the same bytes run in CI, on your laptop, and on the production host.
+
+This lesson builds the real thing: a multi-stage, non-root, small production image for the API; a Compose stack with MongoDB and Redis; and the workflow that keeps development fast while production stays lean.
+
+## Containers, in one honest paragraph
+
+A container is a normal Linux process wearing three illusions, provided by the kernel: its own filesystem view (the image), its own process tree, and its own network namespace. `chroot`-style isolation is why your app sees `/app` and nothing else; cgroups are why it can be told "2 CPUs, 512 MB". There is no guest OS — that is the entire difference from a VM, and the reason container images are megabytes while VM images are gigabytes, and why they start in milliseconds rather than minutes.
+
+An **image** is a stack of layers: each `Dockerfile` instruction that changes the filesystem adds a layer. Layers are cached and shared — which is why instruction order is a performance decision, not a style one.
+
+## The Dockerfile, line by line
+
+Start with a workable-but-naive API image, then improve it:
+
+```dockerfile
+# Dockerfile — version 0, to be criticized
+FROM node:20
+WORKDIR /app
+COPY . .
+RUN npm install
+CMD ["npm", "start"]
+```
+
+Four problems, each with a fix:
+
+1. **`COPY . .` before installing dependencies** invalidates the layer cache on every source edit, reinstalling everything each build. Copy manifests first:
+   ```dockerfile
+   COPY package.json package-lock.json ./
+   RUN npm ci
+   COPY src ./src
+   ```
+2. **`npm install` is not reproducible.** `npm ci` installs exactly the lockfile, fails if manifest and lock disagree, and never writes to the lock.
+3. **All of `node_modules` — including dev dependencies — ships to production.** Multi-stage solves it (below).
+4. **The process runs as root.** If the app is compromised, the attacker owns the container's root user. Add a non-root user.
+
+```dockerfile
+# Dockerfile — the production shape
+# ---- stage 1: dependencies + build ----
+FROM node:20-alpine AS build
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY . .
+RUN npm run build            # tsc -> dist/, if you use TypeScript
+RUN npm prune --omit=dev     # strip devDependencies from node_modules
+
+# ---- stage 2: runtime ----
+FROM node:20-alpine
+ENV NODE_ENV=production
+WORKDIR /app
+
+# never run as root
+RUN addgroup -S app && adduser -S app -G app
+USER app
+
+# only what runtime needs
+COPY --from=build --chown=app:app /app/node_modules ./node_modules
+COPY --from=build --chown=app:app /app/dist ./dist
+COPY --from=build --chown=app:app /app/package.json ./package.json
+
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=3s --start-period=15s \
+  CMD wget -qO- http://localhost:3000/api/v1/health || exit 1
+
+CMD ["node", "dist/server.js"]
+```
+
+Why each stage earns its place:
+
+- **The build stage** carries compilers and dev dependencies; the runtime stage does not. `npm prune --omit=dev` plus copying only `dist` takes typical images from ~400 MB to under 100 MB — smaller attack surface, faster deploys, cheaper registry.
+- **`--chown=app:app`** on the copies means the app user owns its files; the default root-owned files would force root to run them.
+- **`HEALTHCHECK`** gives orchestrators and Compose a liveness signal that reflects the process, not just the port being open.
+- **`alpine`** shrinks the base image (musl libc caveats are real but rare for pure Node apps; if a native dependency misbehaves, switch to a `-slim` Debian base and keep everything else).
+
+Then a `.dockerignore` — the most underrated file in the repo:
+
+```text
+node_modules
+.git
+.env*
+dist
+*.md
+test
+coverage
+```
+
+Without it, `COPY . .` drags your local `node_modules`, `.git`, and — the classic disaster — `.env` with real credentials into the image.
+
+<KeyPoint>
+Layer order is a contract with the cache: things that change rarely (base image, manifests, `npm ci`) go early; things that change every commit (source) go late. A well-ordered Dockerfile rebuilds in seconds after a code edit and only re-does dependency installation when the lockfile changes.
+</KeyPoint>
+
+## Compose: the whole stack in one file
+
+`docker compose up` should bring up everything a developer needs: API, MongoDB, Redis (the queues and cache from the architecture lessons), and optionally the Vite dev server. Development and production use different Compose files over a shared base.
+
+```yaml
+# docker-compose.yml — the shared base
+services:
+  api:
+    build: ./server
+    environment:
+      NODE_ENV: production
+      MONGODB_URI: mongodb://mongo:27017/app
+      REDIS_URL: redis://redis:6379
+      PORT: 3000
+    ports:
+      - '3000:3000'
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  mongo:
+    image: mongo:7
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ['CMD', 'mongosh', '--eval', "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis-data:/data
+
+volumes:
+  mongo-data:
+  redis-data:
+```
+
+```yaml
+# docker-compose.override.yml — applied automatically in development
+services:
+  api:
+    build:
+      target: build            # stop at the stage with dev deps
+    command: npm run dev       # tsx watch
+    environment:
+      NODE_ENV: development
+    volumes:
+      - ./server/src:/app/src  # live code, no rebuild per edit
+    ports:
+      - '3000:3000'
+
+  mongo-express:
+    image: mongo-express
+    ports: ['8081:8081']
+    environment:
+      ME_CONFIG_MONGODB_URL: mongodb://mongo:27017
+    depends_on: [mongo]
+```
+
+Details worth noticing:
+
+- **`depends_on` with `condition: service_healthy`** is why the healthcheck exists: the API container waits for Mongo to answer a ping rather than crash-looping against a closed port.
+- **Named volumes** (`mongo-data`) keep the database across `docker compose down`; `down -v` is the "delete everything" reset.
+- **The override file** swaps the image's compiled code for a bind mount of source plus `tsx watch` — production behavior stays in the base, developer ergonomics stay local.
+- **Service names are DNS names.** Inside the Compose network, the API reaches `mongodb://mongo:27017` — not `localhost`, which from inside the container means the API container itself. That one gets every newcomer once.
+
+## Registry and roll-out mechanics
+
+Building locally is step one; getting the image onto a server is step two:
+
+```bash
+# build once, tag with something immutable
+docker build -t registry.example.com/movies-api:$(git rev-parse --short HEAD) ./server
+
+# push to the registry
+docker push registry.example.com/movies-api:a1b2c3d
+
+# on the host: pull and swap, keep the old image for rollback
+docker pull registry.example.com/movies-api:a1b2c3d
+docker compose up -d api
+```
+
+Three rules that make this safe:
+
+- **Tag with the commit SHA, never only `latest`.** `latest` cannot be rolled back to a known state and cannot be audited. It is a convenience alias, not a version.
+- **Build for the target platform.** On an Apple Silicon laptop, `docker build` produces `linux/arm64`; most cloud servers are `amd64`. Use `--platform linux/amd64` or buildx multi-arch, or you will deploy an image that exits with "exec format error".
+- **The old image is your rollback.** Deploying the previous SHA tag is a one-command rollback; keep the last few images in the registry.
+
+## Try it
+
+<TryIt title="Containerize the API and prove the size win" hint="Run each step and watch the numbers. The multi-stage image should be several times smaller than the naive one — that delta is layers you are no longer shipping to production.">
+```bash
+# 1 — the naive image, for comparison
+docker build -f Dockerfile.naive -t movies-api:naive ./server
+docker images movies-api:naive --format '{{.Size}}'
+
+# 2 — the multi-stage image from this lesson
+docker build -t movies-api:good ./server
+docker images movies-api:good --format '{{.Size}}'
+
+# 3 — run it against the Compose stack
+docker compose up -d mongo redis api
+docker compose ps
+curl -s http://localhost:3000/api/v1/health
+
+# 4 — prove non-root inside the container
+docker compose exec api whoami          # expect: app
+
+# 5 — prove the container is disposable: kill it, compose restarts, data survives
+docker compose restart api
+docker compose exec mongo mongosh --quiet --eval 'db.movies.countDocuments()'
+```
+</TryIt>
+
+## Check your understanding
+
+<Quiz
+  question="Why does the Dockerfile copy package.json and package-lock.json and run npm ci BEFORE copying the rest of the source?"
+  options={[
+    'npm requires it to resolve peer dependencies',
+    'So the dependency-install layer is cached and only re-runs when the lockfile changes — source edits rebuild in seconds instead of reinstalling everything',
+    'It makes the final image smaller by a few megabytes',
+    'Alpine images cannot install packages after COPY'
+  ]}
+  answer={1}
+  explanation="Docker invalidates every layer after a changed instruction. With manifests copied first, a code change only invalidates the source copy and later layers; with COPY . . first, every edit would bust the cache and re-run npm ci. Ordering is the cache strategy."
+/>
+
+<Quiz
+  question="The api container in Compose connects to mongodb://mongo:27017, while the same code on your laptop uses mongodb://localhost:27017. Why?"
+  options={[
+    'MongoDB rejects localhost connections in production mode',
+    'mongo is the service name, and Compose gives every service a DNS entry on the shared network — localhost inside the api container would mean the api container itself',
+    'The port is remapped by Compose',
+    'Docker requires the scheme mongodb+srv for containers'
+  ]}
+  answer={1}
+  explanation="Compose's embedded DNS resolves service names to their container IPs on the stack network. This is why configuration must come from environment variables: the same image gets a different MONGODB_URI per environment, and hardcoded localhost breaks in exactly one of them."
+/>
+
+<Exercise title="Production-grade containers for the full stack" difficulty="hard">
+Turn the movies app into a Compose-first project with a production-shaped image and a smooth development loop.
+
+1. **API image:** convert the Dockerfile to the two-stage shape from this lesson — alpine base, `npm ci`, build, `npm prune --omit=dev`, non-root user, healthcheck hitting `/api/v1/health`. Add a `.dockerignore` and verify with `docker run --rm movies-api:good ls /app` that no tests, no `.git`, no `.env`, and no dev dependencies are present.
+2. **Size and layers:** record the image size. Rebuild after touching one source file and confirm the `npm ci` layer is cached (build log says CACHED). Change the lockfile once and confirm the opposite.
+3. **Compose base + override:** write the shared `docker-compose.yml` (api, mongo, redis, volumes, healthchecks, depends_on conditions) and a `docker-compose.override.yml` for development (bind-mounted source, `tsx watch`, mongo-express). Prove the loop: edit a route, watch the server restart, `curl` the change without rebuilding.
+4. **Worker service:** add the BullMQ worker as a second service using the same image with a different `command` — both processes share code but scale independently. Confirm jobs enqueued by the API are processed by the worker service.
+5. **Client service (optional):** add the Vite dev server as a Compose service for a single `docker compose up` experience; keep production client hosting as-is (static platform).
+6. **Platform build:** build the API image for `linux/amd64` explicitly, tag it with the commit SHA, push it to a registry, and run it somewhere that is not your laptop if you have a VPS — or load it locally and document the commands you would run on a server.
+7. **Rollback drill:** deploy the image, make a trivial change, build and deploy a second tag, then roll back to the first tag and verify behavior reverted. Record the wall-clock time for each step.
+8. **Document:** a `docs/docker.md` with: build and run commands, the environment variables consumed, where volumes live, and the exact rollback command. Trim anything that is already obvious from reading the Compose file.
+</Exercise>
+
+## Summary
+
+- Containers are processes with a filesystem, process tree, and network view — no guest OS, millisecond starts, layered images.
+- Dockerfile order is a cache strategy: manifests and `npm ci` early, source late; `.dockerignore` keeps secrets, `.git`, and `node_modules` out of the build context.
+- Multi-stage builds keep the production image lean (prune dev deps, copy only dist), run as a non-root user, and expose a real healthcheck.
+- Compose encodes the whole stack with healthcheck-gated startup, named volumes, and service-name DNS; the override file gives developers bind mounts and watch mode without touching production behavior.
+- Tag images with commit SHAs, build for the target platform, and keep previous tags as your rollback path.
+
+Next: turning this into a delivery pipeline — environments, staged CI, database migrations, deployments that can be undone, and secrets that stay out of YAML.
+

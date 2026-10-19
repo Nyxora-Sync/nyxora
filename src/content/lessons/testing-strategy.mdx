@@ -1,0 +1,275 @@
+Tests have one job: tell you fast when you break something, and give you the confidence to change code you did not write. Most suites fail at that job — they are slow, they break when you rename a function instead of when you change behavior, and they were written to hit a coverage number rather than to find bugs. This module teaches the opposite approach, module by module, with the tools you will actually use in a MERN codebase.
+
+This first lesson covers strategy — what to test, at which level, and with what tools — and then builds real unit tests with **Vitest**.
+
+## What tests are actually for
+
+Three legitimate jobs:
+
+1. **Catch regressions** — a change breaks existing behavior and CI tells you in minutes, not users in production.
+2. **Enable refactoring** — you can restructure internals freely because the behavior is pinned by tests.
+3. **Document behavior** — a good test file is the most current specification your code has.
+
+Notice what is missing: “prove the code is correct.” Tests can only show consistency with your expectations. A test suite encodes assumptions; good ones encode the assumptions that matter.
+
+Two properties decide whether a suite survives: **speed** (a slow suite gets skipped) and **stability** (a flaky suite gets ignored). Every strategy decision below serves those two.
+
+## The testing trophy
+
+The classic “pyramid” said: mostly unit tests, some integration, few end-to-end. Modern practice — popularized as the **testing trophy** — shifts the mass to the middle:
+
+| Level | What it does | In a MERN app | Cost |
+|---|---|---|---|
+| Static | Types, lint, schema validation | TypeScript strict, ESLint, Zod schemas | Near zero, instant |
+| Unit | One function/module in isolation | Pricing math, formatters, reducers | Low |
+| **Integration** | Real pipeline, real dependencies | Supertest against Express + in-memory Mongo | **Sweet spot** |
+| E2E | Whole system, real browser | Playwright journeys | Slowest, flakiest |
+
+The argument for the middle: integration tests exercise **how your software is actually used** — a request enters, middleware runs, validation fires, the database answers — while still being fast and deterministic enough to run on every save. Unit tests are perfect for pure logic; E2E earns its cost only for the handful of journeys where a break means the product is broken.
+
+For this curriculum's movie app, that maps to: unit tests for the pricing/sorting/filter helpers, integration tests for every route (auth, validation, ownership), and a few Playwright journeys (register → create → edit → delete).
+
+<KeyPoint>
+Write the test at the lowest level that can catch the bug. A validation rule belongs in a unit test if it is pure logic, an integration test if it lives in middleware, and an E2E test only if only the real browser can bring it out.
+</KeyPoint>
+
+## What to test — and what not to
+
+Test **behavior through the public interface**: given these inputs and this state, here is the observable outcome.
+
+```text
+✅ returns 401 when the token is expired
+✅ applies 10% discount only to members
+✅ rejects a movie with an empty title
+❌ calls validateBody with the right schema        (implementation)
+❌ fetch was called once                           (implementation)
+❌ the private calculateTax function returns 0.21  (internal detail)
+```
+
+Implementation-shaped tests break on renames and refactors even when behavior is identical — exactly when you needed them to stand aside. Behavior tests survive.
+
+Other habits worth building now:
+
+- **One reason to fail.** A test asserting status, body, and database state is fine; a test covering “user can register, login, and create a movie” is three tests wearing a trench coat.
+- **Descriptive names.** The test name should read like the bug report it prevents: `rejects a move to done when the task is already done`.
+- **Arrange–Act–Assert.** Three visible movements; the act is one call.
+- **Edge cases are the value.** Empty input, boundary values (0, exactly the free-shipping threshold), error paths, and unauthorized attempts — not ten happy variants of the middle.
+
+## Vitest: unit tests that stay pleasant
+
+```bash
+npm install -D vitest @vitest/coverage-v8
+```
+
+```json
+{
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  }
+}
+```
+
+```ts
+// vitest.config.ts
+import { defineConfig } from 'vitest/config'
+
+export default defineConfig({
+  test: {
+    coverage: {
+      provider: 'v8',
+      include: ['src/**/*.js'],
+      thresholds: { lines: 70, functions: 70, branches: 60 },
+    },
+  },
+})
+```
+
+Vitest is deliberately Jest-API-compatible — `describe`, `it`, `expect`, `vi.fn()` — so anything you know from Jest transfers, and it runs ESM natively with no transform config. Here is a real unit under test:
+
+```js
+// src/lib/pricing.js
+export function orderTotal(items, { isMember = false } = {}) {
+  const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0)
+  const memberDiscount = isMember ? subtotal * 0.1 : 0
+  const afterDiscount = subtotal - memberDiscount
+  const shipping = afterDiscount === 0 || afterDiscount >= 50 ? 0 : 5.99
+  return Math.round((afterDiscount + shipping) * 100) / 100
+}
+```
+
+```js
+// src/lib/pricing.test.js
+import { describe, it, expect } from 'vitest'
+import { orderTotal } from './pricing.js'
+
+const book = { price: 12.5, quantity: 2 }
+
+describe('orderTotal', () => {
+  it('sums item price times quantity', () => {
+    expect(orderTotal([book])).toBe(25)
+  })
+
+  it('charges flat shipping below the threshold', () => {
+    expect(orderTotal([{ price: 10, quantity: 1 }])).toBe(15.99)
+  })
+
+  it('ships free exactly at the threshold', () => {
+    expect(orderTotal([{ price: 25, quantity: 2 }])).toBe(50)
+  })
+
+  it('charges no shipping on an empty order', () => {
+    expect(orderTotal([])).toBe(0)
+  })
+
+  it('applies the member discount before the shipping decision', () => {
+    // 60 subtotal -> 54 after discount -> still free shipping
+    expect(orderTotal([{ price: 30, quantity: 2 }], { isMember: true })).toBe(54)
+  })
+
+  it('rounds to cents', () => {
+    expect(orderTotal([{ price: 0.1, quantity: 3 }])).toBe(6.29)
+  })
+})
+```
+
+Note what the last two tests are doing: one pins evaluated **order of operations** (discount before shipping) and one pins a boundary of floating-point math. Those are the cases that actually break in production.
+
+For families of similar cases, `it.each` keeps the table shape visible:
+
+```js
+it.each([
+  ['empty title', { title: '', year: 2020 }, false],
+  ['year before film existed', { title: 'Dune', year: 1800 }, false],
+  ['valid movie', { title: 'Dune', year: 2021 }, true],
+])('validates %s', (_label, input, expected) => {
+  expect(movieSchema.safeParse(input).success).toBe(expected)
+})
+```
+
+## Mocks, spies, and fakes
+
+Vitest gives you three primitives:
+
+```js
+import { vi } from 'vitest'
+
+const send = vi.fn().mockResolvedValue({ ok: true })   // spy you control
+vi.spyOn(console, 'error').mockImplementation(() => {}) // intercept a method
+vi.mock('./mailer.js', () => ({ sendWelcome: vi.fn() })) // replace a module
+```
+
+The discipline that separates helpful mocks from harmful ones: **mock at the boundary** — network, clock, randomness, third-party services — and use real code everywhere else.
+
+```js
+// Time is a boundary: fake it instead of waiting
+vi.useFakeTimers()
+vi.setSystemTime(new Date('2026-03-01'))
+expect(isTrialExpired({ startedAt: new Date('2026-02-20') })).toBe(true)
+vi.useRealTimers()
+```
+
+```js
+// A payment provider is a boundary: it costs money and needs the internet
+const payments = { charge: vi.fn().mockResolvedValue({ id: 'pay_1', status: 'succeeded' }) }
+const order = await placeOrder({ items }, { payments })
+expect(order.status).toBe('paid')
+```
+
+What not to do: mock your own functions so the test asserts “we called the thing we just wrote.” That test cannot fail when the logic inside the thing breaks — it is theater.
+
+<Callout type="warning" title="Test-induced damage">
+  When a suite requires a web of mocks to even run, the codebase is being shaped by its tests. Notice the smell early: if adding a feature means updating five mocks, the mocks are testing structure, not behavior. Push the boundary outward instead — a fake in-memory repository beats mocking ten call sites of a real one.
+</Callout>
+
+## Coverage as a signal, not a score
+
+```bash
+npm run test:coverage
+```
+
+Coverage tells you what is **not** tested — files and branches with zero hits are open invitations for bugs. It cannot tell you whether what is tested is tested *meaningfully*; a test that renders a component without asserting anything covers every line it touches.
+
+Practical policy: set modest thresholds (the config above: 70% lines, 60% branches) to stop regression, watch the **uncovered diff** in pull requests, and never chase 100%. If you want a stricter judge, mutation testing (Stryker) changes your code in small ways and fails on mutants your suite does not notice — slow, but brutally honest.
+
+## Try it
+
+<TryIt title="Break it, watch the suite catch it" hint="Run npm test after each step. Then change orderTotal to compute shipping before the discount and watch exactly which tests fail — that selection is the suite working.">
+```js
+// src/lib/slug.test.js
+import { describe, it, expect } from 'vitest'
+import { slugify } from './slug.js'
+
+describe('slugify', () => {
+  it('lowercases and hyphenates words', () => {
+    expect(slugify('Hello World')).toBe('hello-world')
+  })
+
+  it('strips punctuation and collapses repeated separators', () => {
+    expect(slugify('  The   Matrix!!! (1999) ')).toBe('the-matrix-1999')
+  })
+
+  it('transliterates accents', () => {
+    expect(slugify('Amélie')).toBe('amelie')
+  })
+
+  it('returns an empty string for input with no usable characters', () => {
+    expect(slugify('🎬🎬🎬')).toBe('')
+  })
+})
+
+// src/lib/slug.js — write this to make the tests pass,
+// then extend with your own cases (numbers, underscores, emoji at edges).
+```
+</TryIt>
+
+## Check your understanding
+
+<Quiz
+  question="Why is the integration layer called the sweet spot of the testing trophy for API code?"
+  options={[
+    'It is the fastest kind of test',
+    'It exercises the real pipeline — routing, middleware, validation, database — while staying fast and deterministic',
+    'It replaces the need for types',
+    'It mocks the database for speed'
+  ]}
+  answer={1}
+  explanation="Integration tests run the parts that actually fail in practice together (request in, response out, real persistence) at a cost low enough for every commit. Unit tests cannot see wiring bugs, and E2E is reserved for journeys that need a real browser."
+/>
+
+<Quiz
+  question="A test asserts that your own validateBody function was called with a specific schema object. Why is this a weak test?"
+  options={[
+    'Mocks are not allowed in Vitest',
+    'It pins an implementation detail — refactoring can break it while behavior stays correct, and it still passes when the validation logic itself is broken',
+    'It is slow to run',
+    'Schemas cannot be compared in JavaScript'
+  ]}
+  answer={1}
+  explanation="Asserting on your own call chain tests structure, not behavior. The valuable assertion sends a request with an invalid body and expects a 422 — that works no matter how validation is implemented, and fails the moment validation stops working."
+/>
+
+<Exercise title="A unit test suite worth keeping" difficulty="medium">
+Build and defend a unit suite for the pure logic in your movie app — the parts that deserve unit tests before anything integration-shaped exists.
+
+1. **Pick the targets:** extract or identify at least three pure modules — suggestions: `orderTotal`-style pricing, `slugify`, a `parseFilters` that turns query strings into a typed filter object, and a `formatDuration`/`formatDate` helper. Pure means: same input, same output, no I/O.
+2. **Config:** add Vitest with the coverage config from this lesson, including thresholds, and a `test` script.
+3. **Happy paths first:** one `describe` per module; one behavior per `it`; names that read like bug reports.
+4. **Then the edges:** empty inputs, boundary values, zero and negative cases, unicode, and one floating-point rounding case per numeric function.
+5. **Table-driven where it fits:** convert any family of three or more similar cases to `it.each` with a label column.
+6. **Fake one boundary:** add a date-dependent function (for example `isNewRelease(releasedAt)`) and use fake timers to test both sides of the boundary without waiting a year.
+7. **Prove the net:** introduce a small bug into each module on purpose, run the suite, and record which tests catch it. Fix the bug. Any bug that survives gets a new test.
+8. **Uncovered report:** run coverage and find one uncovered branch in your files; either cover it with a test or delete it as dead code. Report which, and why.
+</Exercise>
+
+## Summary
+
+- Tests exist to catch regressions, enable refactoring, and document behavior — speed and stability decide if they survive.
+- The testing trophy puts the weight on integration tests for app code, with unit tests for pure logic and minimal E2E for critical journeys.
+- Test behavior through public interfaces; implementation-shaped tests break on refactors and miss real bugs.
+- Vitest is Jest-compatible, ESM-native, and configured in one file; `it.each` and fake timers handle tables and time.
+- Mock at the boundaries — network, clock, randomness — and use real code everywhere else.
+- Coverage and mutation testing are signals; thresholds prevent regression, and uncovered diffs deserve attention, but 100% is not the goal.
+
+Next: the highest-value layer in practice — integration tests that send real requests through your Express app into a real (in-memory) MongoDB.

@@ -1,0 +1,289 @@
+Every layer so far has been faking something: unit tests fake inputs, integration tests skip the browser, component tests fake the server. End-to-end tests fake nothing. A real browser loads your real client, which calls your real API, which writes to a real database — and a green run means a user could complete that journey, today, on this commit.
+
+That power comes with cost: E2E tests are the slowest and most fragile layer. The craft is in keeping them few, focused on **critical journeys**, and engineered against flakiness. This lesson builds that craft with **Playwright**.
+
+## When E2E earns its keep
+
+The right mental budget for a MERN app: dozens of integration tests, a couple dozen component tests, and **five to fifteen E2E tests**. Each E2E test should represent a journey whose failure means the product is broken:
+
+- A new visitor can register and lands on their dashboard.
+- A logged-in user creates a movie, sees it listed, edits it, deletes it.
+- An expired token sends the user back to login with a message — not a blank screen.
+- Deep links work: opening `/movies/42` in a fresh tab shows the movie (the SPA-rewrite regression from the deployment lesson).
+
+“Every field on the form shows the right error” belongs to component tests. “The SVG logo is 32px” belongs nowhere. E2E asserts **journeys and wiring**, not details.
+
+## Setup
+
+```bash
+npm init playwright@latest
+```
+
+The scaffold creates `playwright.config.ts`, a `tests/` folder, and installs browser binaries. A config tuned for a MERN monorepo:
+
+```ts
+// playwright.config.ts
+import { defineConfig, devices } from '@playwright/test'
+
+export default defineConfig({
+  testDir: './e2e',
+  fullyParallel: true,
+  retries: process.env.CI ? 1 : 0,
+  reporter: process.env.CI ? [['html', { open: 'never' }], ['github']] : 'list',
+
+  use: {
+    baseURL: 'http://localhost:5173',
+    trace: 'on-first-retry',      // record a trace only when a retry happens
+    video: 'retain-on-failure',
+    screenshot: 'only-on-failure',
+  },
+
+  projects: [
+    { name: 'setup', testMatch: /auth\.setup\.ts/ },
+    {
+      name: 'chromium',
+      use: { ...devices['Desktop Chrome'], storageState: 'e2e/.auth/user.json' },
+      dependencies: ['setup'],
+    },
+  ],
+
+  webServer: [
+    {
+      command: 'npm run dev --workspace server',
+      url: 'http://localhost:3000/api/v1/health',
+      reuseExistingServer: !process.env.CI,
+    },
+    {
+      command: 'npm run dev --workspace client',
+      url: 'http://localhost:5173',
+      reuseExistingServer: !process.env.CI,
+    },
+  ],
+})
+```
+
+The `webServer` array is one of Playwright's best features: it starts your API and client, waits for their URLs, and tears them down — locally you reuse a running dev server, in CI it starts fresh. No scripts to remember, no “forgot to start the server” flakes.
+
+## Locators that survive redesigns
+
+Playwright locators are lazy — nothing happens until an action or assertion — and every action **auto-waits** for the element to exist, be visible, be stable, and be enabled. This kills the two classic flake sources: sleeping before clicking and clicking an element that re-renders underneath you.
+
+```ts
+// Prefer user-facing locators, same hierarchy as RTL
+await page.getByRole('button', { name: 'Add to watchlist' }).click()
+await page.getByLabel('Title').fill('Dune')
+await page.getByText('Saved').waitFor()
+
+// Avoid
+await page.locator('.btn-primary').click()          // CSS classes are rename-prone
+await page.locator('#root > div > div:nth-child(2)') // structure is churn
+await page.waitForTimeout(2000)                      // sleeping is a bug, not a fix
+```
+
+Assertions are auto-retrying too — `expect(locator)` polls until it passes or times out:
+
+```ts
+await expect(page.getByRole('heading', { name: 'Dune' })).toBeVisible()
+await expect(page.getByRole('status')).toHaveText('Saved')
+await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled()
+```
+
+The rule that follows: **never assert on anything before it has had a chance to happen** — but also never `waitForTimeout`. If a test needs a sleep to pass, the app has a race the test just hid from you.
+
+## Reusing authentication
+
+Logging in through the UI in every test is slow and multiplies failure points. Playwright's `storageState` lets you authenticate **once** and reuse the saved cookies/localStorage:
+
+```ts
+// e2e/auth.setup.ts
+import { test as setup, expect } from '@playwright/test'
+
+const authFile = 'e2e/.auth/user.json'
+
+setup('authenticate', async ({ page }) => {
+  await page.goto('/login')
+  await page.getByLabel('Email').fill('demo@test.dev')
+  await page.getByLabel('Password').fill('demo-password-123')
+  await page.getByRole('button', { name: 'Log in' }).click()
+  await expect(page).toHaveURL('/dashboard')
+
+  await page.context().storageState({ path: authFile })
+})
+```
+
+Add `e2e/.auth/` to `.gitignore` — it contains a live session token. Tests that must be anonymous (registration flows, logged-out redirects) opt out with `test.use({ storageState: { cookies: [], origins: [] } })`.
+
+## Test data you can predict
+
+The hardest part of E2E is data: the app mutates a real database, so tests must not depend on rows left by other tests.
+
+Two workable strategies:
+
+**Seed via API, assert via UI.** Before each test (or in a fixture), call your API to create exactly what you need:
+
+```ts
+test('owner sees their private movie, others do not', async ({ page, request }) => {
+  // Arrange via API — faster and clearer than clicking through setup flows
+  const response = await request.post('/api/v1/movies', {
+    headers: { Authorization: `Bearer ${process.env.E2E_TOKEN}` },
+    data: { title: 'Test Movie', year: 2024, genres: ['drama'] },
+  })
+  expect(response.ok()).toBeTruthy()
+
+  // Act and assert via the UI — this is the part users experience
+  await page.goto('/movies')
+  await expect(page.getByRole('heading', { name: 'Test Movie' })).toBeVisible()
+})
+```
+
+**Unique data per run.** Append a run id (`test-${Date.now()}`) to emails and titles so parallel workers and retries never collide on unique indexes.
+
+<Callout type="warning" title="E2E runs against a dedicated database">
+  Never point Playwright at production, and do not let it share your development database either — a suite that deletes movies will eventually delete yours. Stand up `app-e2e` (local or CI service) and seed a known demo user, exactly as the deployment lesson's service container does.
+</Callout>
+
+## Handling the network — surgically
+
+You *can* mock the network with `page.route`, and for two cases you should: third-party services (payment providers, email) that you refuse to call in tests, and error-path coverage (make the API return 500 and assert the UI degrades gracefully).
+
+```ts
+test('shows a friendly error when the API is down', async ({ page }) => {
+  await page.route('**/api/v1/movies', (route) =>
+    route.fulfill({ status: 500, json: { error: { code: 'INTERNAL', message: 'Database is down' } } })
+  )
+
+  await page.goto('/movies')
+  await expect(page.getByRole('alert')).toContainText('Database is down')
+})
+```
+
+What not to do: mock **everything**, which turns your E2E suite into a slow component suite — the entire reason you pay the browser cost is to exercise the real stack.
+
+## Debugging without guessing
+
+When an E2E test fails, resist adding logs and re-running blindly — use the artifacts:
+
+- **`npx playwright test --ui`** — time-travel through the test with a DOM snapshot per step; the fastest way to see *where* it diverged.
+- **Trace viewer** — `trace: 'on-first-retry'` records actions, network, console, and snapshots; `npx playwright show-trace test-results/…/trace.zip` (or click in the HTML report) replays the failure.
+- **HTML report** — `npx playwright show-report` after a CI run; screenshots and videos of failures are attached.
+- **`--debug`** — headed mode with the Playwright Inspector, stepping action by action.
+
+The discipline: fix the **test or the app**, never the wait. If you catch yourself adding `waitForTimeout` to make something pass, you have found a race your users can hit too.
+
+## CI
+
+```yaml
+# .github/workflows/e2e.yml
+name: E2E
+on: [pull_request]
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    services:
+      mongo:
+        image: mongo:7
+        ports: ['27017:27017']
+    env:
+      MONGODB_URI: mongodb://localhost:27017/app-e2e
+      JWT_SECRET: ci-e2e-secret-1234
+      CLIENT_URL: http://localhost:5173
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+      - run: npm ci
+      - run: npm run seed:e2e --workspace server
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+```
+
+Two details worth copying: `install --with-deps` gets browser binaries plus system libraries onto a bare runner, and the artifact upload with `if: !cancelled()` attaches the report even when tests fail — which is exactly when you need it.
+
+## Try it
+
+<TryIt title="A smoke test for your app" hint="From your client workspace: npx playwright test --ui after saving this file in the e2e/ folder. Adjust the URL and heading text to match your app.">
+```ts
+// e2e/smoke.spec.ts
+import { test, expect } from '@playwright/test'
+
+test('home page loads and links to the catalog', async ({ page }) => {
+  await page.goto('/')
+
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+  await page.getByRole('link', { name: /movies/i }).click()
+
+  await expect(page).toHaveURL(/\/movies/)
+  await expect(page.getByRole('heading', { name: /movies/i })).toBeVisible()
+})
+
+test('unknown routes show a not-found page, not a blank screen', async ({ page }) => {
+  await page.goto('/definitely/not/a/page')
+
+  await expect(page.getByText(/not found/i)).toBeVisible()
+})
+```
+</TryIt>
+
+## Check your understanding
+
+<Quiz
+  question="Why is waitForTimeout(2000) usually the wrong fix for a flaky Playwright test?"
+  options={[
+    'It is slower than waiting for the element',
+    'It hides the race instead of solving it: the assertion could still run before or after the right moment, and real users experience the underlying timing bug',
+    'Playwright forbids it in CI',
+    'It only works in headed mode'
+  ]}
+  answer={1}
+  explanation="Auto-waiting assertions poll until the condition holds, which is deterministic in both directions. A fixed sleep is a guess that grows with every slow CI machine — and when it passes, it has merely covered up a race your users can still hit."
+/>
+
+<Quiz
+  question="Why split auth into a setup project with storageState instead of logging in through the UI in each test?"
+  options={[
+    'Playwright cannot type into login forms twice',
+    'It removes the slowest, most duplicated steps from every test, and if login breaks, one setup failure explains all downstream failures',
+    'storageState encrypts the session',
+    'UI login does not work in headless mode'
+  ]}
+  answer={1}
+  explanation="Authenticating once and reusing the saved state cuts minutes off a suite and keeps tests focused on their actual journey. It also concentrates login breakage into the setup step — much easier to diagnose than 40 mysterious redirects to /login."
+/>
+
+<Exercise title="An end-to-end suite for the critical journeys" difficulty="hard">
+Build the five-to-ten test E2E suite that protects your movie app's core journeys, wired into CI with artifacts.
+
+1. **Bootstrap:** install Playwright, add the config from this lesson with `webServer` for both workspaces, and a dedicated `app-e2e` database with a seed script creating a demo user and a few movies.
+2. **Auth setup:** implement the `setup` project and `storageState`; confirm a logged-in test starts on `/dashboard` without visiting `/login`.
+3. **Journeys (each one test):**
+   - register a new user (anonymous, unique email per run) and land on the dashboard
+   - log out, log back in, still see your movies
+   - create a movie via the form, see it in the list, edit its title, see the update
+   - delete a movie and confirm it disappears
+   - open an invalid id directly (`/movies/does-not-exist`) and get the not-found experience
+   - deep-link reload: open a nested route in a **fresh page context** and confirm it renders — your SPA rewrite guard
+4. **Failure path:** route `**/api/v1/movies` to a 500 and assert the UI shows the error state with a retry that refetches successfully (flip the route to the real handler after the first failure).
+5. **Data discipline:** arrange via API calls, assert via UI; ensure every test that writes uses a run-unique name and is safe to re-run and parallelize.
+6. **Stability pass:** run the suite three times locally and once in CI. Any test that flakes gets fixed at the source — find the race with `--ui` instead of adding waits.
+7. **CI wiring:** add the workflow with browser install, seeded database, and report artifact; make it a required check on pull requests.
+8. **Budget check:** total E2E runtime under five minutes on CI. If it is slower, cut a low-value test rather than speeding up setup — E2E is the layer where every test must earn its keep.
+</Exercise>
+
+## Summary
+
+- E2E tests fake nothing and should cover only critical journeys — a handful that would each be a “product is broken” incident.
+- Playwright locators are user-facing and auto-waiting; assertions retry; `waitForTimeout` is a bug-hider, not a fix.
+- `webServer` starts and stops your API and client; a `setup` project plus `storageState` authenticates once and reuses the session.
+- Arrange data via API calls, assert via the UI, make every write run-unique, and keep a dedicated E2E database.
+- Mock only third-party services and error paths; everything else runs real.
+- Debug with the UI mode, traces, and reports — fix the race, never extend the wait.
+- CI runs browsers with `--with-deps` and uploads the report as an artifact even on failure.
+
+Next module: security — thinking like an attacker, from XSS and CSRF through API hardening, advanced auth, and protecting your data layer.

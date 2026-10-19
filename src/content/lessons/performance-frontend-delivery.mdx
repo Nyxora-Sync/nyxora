@@ -1,0 +1,316 @@
+A fast API still feels slow if the browser spends three seconds downloading JavaScript before rendering anything. Frontend performance is delivery performance: which bytes arrive, in what order, and how soon the user sees and can touch something real. The targets are the **Core Web Vitals** — LCP, INP, CLS — and this lesson covers the levers in the order they usually matter: bundle size, images, fonts, caching, and measurement that goes to production.
+
+## The vitals, translated
+
+```text
+LCP  Largest Contentful Paint   → how soon the main content is visible     good ≤ 2.5s
+INP  Interaction to Next Paint  → how soon interactions respond            good ≤ 200ms
+CLS  Cumulative Layout Shift    → how much content jumps while loading     good ≤ 0.1
+```
+
+Each maps to a different kind of work:
+
+- **LCP** is mostly a delivery question: how many blocking bytes (script, CSS) stand between HTML arriving and the hero image/text painting. Fix with smaller critical bundles, preloaded hero resources, and not rendering the page behind a client-side data waterfall.
+- **INP** is a JavaScript question: long tasks on the main thread. A 200ms synchronous render (a giant list, a heavy dependency running at module scope) delays the next interaction by exactly that much. Fix with splitting, virtualization, and moving work off the interaction path.
+- **CLS** is a layout discipline: reserved space for images (`width`/`height` or `aspect-ratio`), no font-swap jumps, no banners injected above content after load.
+
+Measure in both worlds — **lab** (Lighthouse, local, deterministic) for debugging and budgets, and **field** (real users, via CrUX in PageSpeed Insights or your own `web-vitals` reporting) for truth. They disagree because field includes real devices, networks, and data; when they do, field wins.
+
+## Bundles: the biggest single lever
+
+Start by looking at what you are actually shipping:
+
+```bash
+npm install -D rollup-plugin-visualizer   # Vite is Rollup under the hood
+```
+
+```ts
+// vite.config.ts
+import { visualizer } from 'rollup-plugin-visualizer'
+
+export default defineConfig({
+  plugins: [react(), visualizer({ gzipSize: true, brotliSize: true, filename: 'dist/stats.html' })],
+  build: { sourcemap: true },
+})
+```
+
+Open `stats.html` after a build and read it like a diagnosis: the treemap shows each module's size *including what it dragged in*. The recurring findings:
+
+```text
+moment/lodash/underscore imported whole      → import three functions or use date-fns per-function imports
+charts library on the landing page           → only the dashboard route needs it; split by route
+two date libraries (both in the graph)       → pick one; the second arrived via a dependency
+your own code dominating the bundle           → the finding is code-splitting, not tree-shaking
+```
+
+Then apply the three splitting moves, cheapest first:
+
+**1 — Route-level splitting** (the default everything else builds on):
+
+```tsx
+// each route becomes its own chunk; the landing page never downloads the dashboard
+const Dashboard = lazy(() => import('./routes/dashboard'))
+const MovieDetail = lazy(() => import('./routes/movie-detail'))
+
+<Suspense fallback={<RouteSkeleton />}>
+  <Routes>
+    <Route path="/" element={<Landing />} />
+    <Route path="/dashboard" element={<Dashboard />} />
+    <Route path="/movies/:id" element={<MovieDetail />} />
+  </Routes>
+</Suspense>
+```
+
+**2 — Component-level splitting for heavy, below-the-fold or interaction-gated pieces:**
+
+```tsx
+// the editor costs 200KB and only 2% of visitors open it
+const Editor = lazy(() => import('./components/markdown-editor'))
+
+{editing && (
+  <Suspense fallback={<EditorSkeleton />}>
+    <Editor />
+  </Suspense>
+)}
+```
+
+**3 — Prefetch on intent**, so the split costs nothing at click time:
+
+```tsx
+// warm the chunk when the user hovers the link that needs it
+<Link to="/dashboard" onMouseEnter={() => import('./routes/dashboard')}>
+  Dashboard
+</Link>
+```
+
+The budget discipline that keeps this from regressing: set explicit thresholds in CI (for example, main entry ≤ 200KB gzipped, initial route total ≤ 300KB) and fail the build on breach — `rollup-plugin-visualizer`'s output or a size-limit check. Without a budget, one import of `moment` undoes a quarter of work.
+
+<KeyPoint>
+Bundle work is subtractive: the goal is not to make code faster but to stop sending code the page never runs. Every route's ideal bundle contains only that route's code plus the shared shell; anything heavier should earn its bytes on the specific interaction that needs it.
+</KeyPoint>
+
+## Images: usually the LCP, usually fixable
+
+Images dominate LCP on most content pages, and three properties decide their cost: **format, dimensions, and priority.**
+
+**Format** — serve modern codecs, keep a fallback nobody requests:
+
+```tsx
+<picture>
+  <source srcSet="/hero.avif 1200w, /hero-800.avif 800w" sizes="(max-width: 800px) 100vw, 800px" type="image/avif" />
+  <source srcSet="/hero.webp 1200w, /hero-800.webp 800w" sizes="(max-width: 800px) 100vw, 800px" type="image/webp" />
+  <img src="/hero.jpg" alt="Featured movie" width={1200} height={675} />
+</picture>
+```
+
+The `srcSet`/`sizes` pair is what stops the 4000px original from arriving on a 375px phone. If you already use a transformation CDN (Cloudinary in this curriculum), generate the variants in the URL instead of hand-building them:
+
+```ts
+// transformation URLs beat static src sets: one source, CDN does the resizing
+export function posterUrl(publicId: string, width: number) {
+  return `https://res.cloudinary.com/demo/image/upload/q_auto,f_auto,w_${width},c_fill/${publicId}`
+}
+
+<img
+  src={posterUrl(id, 400)}
+  srcSet={`${posterUrl(id, 400)} 400w, ${posterUrl(id, 800)} 800w, ${posterUrl(id, 1200)} 1200w`}
+  sizes="(max-width: 600px) 100vw, 400px"
+  width={400}
+  height={600}
+  loading="lazy"        // below the fold
+  decoding="async"
+  alt={movie.title}
+/>
+```
+
+**Dimensions** — always set `width`/`height` (or `aspect-ratio` in CSS). Without them the browser cannot reserve space, the image arrives, the layout jumps, and CLS pays for it. This is also the cheapest fix in the entire lesson.
+
+**Priority** — the hero image is the LCP element, so it deserves the opposite treatment from everything else:
+
+```tsx
+// LCP image: high priority, fetched in parallel with the bundle
+<img src={hero.url} fetchPriority="high" decoding="sync" width={1200} height={675} alt="" />
+<link rel="preload" as="image" href={hero.url} fetchPriority="high" />
+```
+
+The rule of three, then: **above the fold = eager + high priority + dimensions; below the fold = `loading="lazy"`; everything = modern format + correct size.** Lazy-loading the LCP image is the single most common self-own in this area — it delays the very thing being measured.
+
+## Fonts: invisible, but they set the tone
+
+Web fonts block text paint unless handled, and they cause layout shift when the fallback is swapped out. Five settings do most of the work:
+
+```css
+@font-face {
+  font-family: 'Inter';
+  src: url('/fonts/inter-var.woff2') format('woff2');
+  font-display: swap;          /* show fallback immediately, swap when ready */
+  font-weight: 100 900;        /* one variable file instead of five weights */
+  font-style: normal;
+}
+```
+
+```html
+<!-- preload the one font used above the fold; do not preload the rest -->
+<link rel="preload" href="/fonts/inter-var.woff2" as="font" type="font/woff2" crossorigin />
+```
+
+Reasoning per item:
+
+- **Variable fonts** replace N weight files with one (often smaller total), and `font-display: swap` makes text visible immediately — INP and LCP both benefit.
+- **Self-host** rather than loading a third-party font CSS: one fewer DNS/TLS round trip, no third-party availability in your critical path, and no privacy question. (Or accept the CDN for convenience — a valid trade, made explicitly.)
+- **Subset** if you can (`unicode-range` or a subsetting build step): a Latin-only subset of a large font can be 60–80% smaller.
+- **Match the fallback metrics** so the swap does not reflow: pick a similar system font and, where supported, use `size-adjust`/`ascent-override` on the fallback `@font-face` — this is what keeps `font-display: swap` from reintroducing CLS.
+
+## Caching and the CDN: the cheapest speed
+
+Two caching layers do most of the work, and getting the headers right makes both automatic.
+
+**Hashed assets — cache forever:**
+
+```text
+/assets/index-a1b2c3d4.js         Cache-Control: public, max-age=31536000, immutable
+/fonts/inter-var.woff2            Cache-Control: public, max-age=31536000, immutable
+```
+
+Vite (and every modern bundler) writes content hashes into filenames: the URL changes when the content changes, so `immutable` + one-year max-age is safe and removes repeat downloads entirely.
+
+**HTML — short and revalidatable:**
+
+```text
+/                                 Cache-Control: no-cache
+```
+
+`no-cache` does not mean "do not cache" — it means "revalidate before using." The HTML shell is tiny; keep it fresh so new deploys are picked up immediately, and let it reference the new hashed assets.
+
+**The CDN in front** turns your origin into a warm cache near every user. On Vercel/Render this exists by default for static output; the discipline is to keep it effective:
+
+```text
+✅ static assets: long max-age + immutable → cached at the edge, origin untouched
+✅ images: transformation CDN with its own cache headers, versioned by transform params
+✅ public API GETs: short s-maxage + stale-while-revalidate
+      Cache-Control: public, s-maxage=60, stale-while-revalidate=300
+   → edge serves up to 60s old instantly and refreshes in the background —
+     the same staleness budget vocabulary as the Redis layer, one hop earlier
+❌ user-specific API responses: never publicly cacheable (Authorization header
+   responses must be private/no-store — a shared cache keyed on URL alone
+   would serve one user's data to another)
+```
+
+That last line is the security-adjacent trap of caching: **shared caches key on the URL**. Anything that varies by user must say `private` (browser-only) or `no-store`, and anything that varies by a header must advertise `Vary` correctly. When in doubt for API responses, do not cache at the CDN; cache in Redis (which knows the user) instead.
+
+## Measuring from production
+
+Lab scores are a debugging tool; production is the scoreboard. The `web-vitals` library reports the real numbers from real sessions:
+
+```bash
+npm install web-vitals
+```
+
+```ts
+// src/lib/vitals.ts
+import { onLCP, onINP, onCLS, type Metric } from 'web-vitals'
+
+function report(metric: Metric) {
+  const body = JSON.stringify({
+    name: metric.name,        // 'LCP' | 'INP' | 'CLS'
+    value: metric.value,
+    rating: metric.rating,    // 'good' | 'needs-improvement' | 'poor'
+    path: location.pathname,
+    release: import.meta.env.VITE_RELEASE_SHA,
+  })
+  navigator.sendBeacon('/api/v1/vitals', body)   // survives page unload
+}
+
+onLCP(report)
+onINP(report)
+onCLS(report)
+```
+
+Server side, aggregate by path and release: **p75 per metric per route, split by release SHA.** p75 is the standard (average hides the slow tail; 75% of visits under threshold is the "good" bar). Splitting by release is what turns a regression from a mystery into "LCP p75 went from 1.8s to 2.9s on /movies in release a1b2c3d" — attributable to a deploy, fixable before the next one. Ship a budget check in CI for the lab number and this dashboard for the field number; together they catch both "we shipped something heavy" and "real users are on slow phones."
+
+<Callout type="tip" title="Order of operations for a slow page">
+  1) Run Lighthouse (lab) → which metric is bad. 2) For LCP: check the bundle treemap and the hero image (format/priority/size) first — that is 80% of cases. For INP: look for long tasks and heavy interaction handlers. For CLS: images without dimensions and font swaps. 3) Fix one thing, re-run lab, deploy, read the field p75 for that route and release. Performance work without this loop is decoration.
+</Callout>
+
+## Try it
+
+<TryIt title="Split one route and watch the numbers" hint="Build before and after the dynamic import and compare the bundle output plus Lighthouse's LCP on the landing page. The heaviest dependency you move out of the initial chunk is usually a dashboard or chart — import it in the lazy route only.">
+```tsx
+// Before: the chart library loads on every visit
+// import { BigChart } from './components/big-chart'   // 180KB gzipped, used on /dashboard only
+
+// After: split to the route that needs it
+import { lazy, Suspense } from 'react'
+
+const Dashboard = lazy(() => import('./routes/dashboard'))
+
+// routes/dashboard.tsx
+import { BigChart } from '../components/big-chart'    // now in the dashboard chunk
+
+export default function DashboardRoute() {
+  return (
+    <Suspense fallback={<p>Loading dashboard…</p>}>
+      <BigChart data={data} />
+    </Suspense>
+  )
+}
+
+// Then run:
+// npm run build && open dist/stats.html      → confirm a separate dashboard chunk
+// npx lighthouse http://localhost:4173/ --view → compare LCP and total bytes
+//   before/after on the LANDING page (the dashboard route gets slightly slower
+//   first-visit, the landing page faster — that trade is the point)
+```
+</TryIt>
+
+## Check your understanding
+
+<Quiz
+  question="Why is lazy-loading the hero image (the LCP element) a mistake, while lazy-loading below-fold images is correct?"
+  options={[
+    'Lazy images are lower resolution',
+    'loading=lazy defers the request until the image nears the viewport; for the hero, that postpones the very paint LCP measures — the hero needs eager loading and high priority instead',
+    'Lazy loading breaks srcset selection',
+    'Below-fold images are already cached'
+  ]}
+  answer={1}
+  explanation="LCP is the timestamp when the largest element paints. Deferring the hero's download adds that deferral directly to LCP. The correct split is priority-aware: fetch the hero immediately (fetchPriority=high, preload), lazy-load everything the user has not scrolled to."
+/>
+
+<Quiz
+  question="A public CDN is caching your API responses. Which response is unsafe to serve from that cache?"
+  options={[
+    'GET /api/v1/movies — the public movie list',
+    'GET /api/v1/me — the logged-in user profile, which varies per Authorization header and must be private or no-store',
+    'GET /assets/main-a1b2c3d4.js',
+    'GET /fonts/inter-var.woff2'
+  ]}
+  answer={1}
+  explanation="Shared caches key on the URL by default. /me returns different data per user, so a shared entry would leak one user's profile to another. User-specific responses need private/no-store (and correct Vary), or caching belongs in Redis where the key can include the user."
+/>
+
+<Exercise title="A frontend delivery pass with before/after numbers" difficulty="hard">
+Take the client from its current state to budgeted, measured delivery — recording numbers at every step.
+
+1. **Baseline:** build for production (`npm run build && npm run preview`); run Lighthouse (mobile preset) on the landing page and one data-heavy route; record LCP, INP/TBT, CLS, total transferred bytes, and the three largest chunks from the build output. Screenshot or write down the numbers; they are the spine of this exercise.
+2. **Bundle triage:** open the visualizer output; list the five largest modules and classify each: needed initially / needed on a route / not needed at all. Remove one unneeded dependency outright; split one route via `lazy()`; convert one heavy component to interaction-gated loading with hover prefetch on its entry link. Rebuild and record the initial-chunk size change.
+3. **Budget:** add a CI size check (size-limit or a custom script comparing the main-entry gzip size against a committed threshold); set it to the post-fix number so future regressions fail the build. Prove it fails by temporarily importing a large library into the entry.
+4. **Images:** convert one image pipeline to transformation URLs or srcset variants; ensure every `img` has `width`/`height` or an aspect-ratio box; add `fetchPriority="high"` + preload to the hero; lazy-load everything else. Re-run Lighthouse: record the LCP and CLS deltas and state which change caused each.
+5. **Fonts:** self-host one font as a variable woff2 with `font-display: swap` and a preload; remove any render-blocking font CSS import; adjust fallback metrics if a swap-induced shift is measurable. Record CLS before/after.
+6. **Caching:** inspect your deployed headers for hashed assets, HTML, and one public API route; set them per this lesson (`immutable` for hashed, `no-cache` for HTML, `s-maxage`+`stale-while-revalidate` for the public list, `private`/`no-store` for anything user-specific). Verify with `curl -sI` against production, and add an assertion script to CI that flags a user-specific route served with a public cache header.
+7. **Field measurement:** install `web-vitals`, report to an endpoint that stores path/release/rating, and aggregate p75 by route and release. Deploy, let it collect (or simulate with a few devices/throttling), and record the field numbers next to the lab numbers. Explain any divergence (device/network/real data).
+8. **Report:** one page: baseline table, changes with attributed deltas, final table, and the two budgets you will monitor (initial bundle gzip, LCP p75 per top route) with their alert thresholds and where they are enforced.
+</Exercise>
+
+## Summary
+
+- Core Web Vitals map to distinct work: LCP is delivery (bundle, hero image, waterfalls), INP is main-thread JavaScript (long tasks, splitting, virtualization), CLS is reserved space (dimensions, fonts).
+- Lab tools debug; field data (CrUX, `web-vitals` at p75 per route per release) is the scoreboard — attribute regressions to releases.
+- Bundles shrink by subtraction: visualizer first, then route splitting, interaction-gated loading, hover prefetch, and CI budgets that fail the build.
+- Images: modern formats, correct dimensions via srcSet/sizes or transform URLs, explicit priority — hero eager and preloaded, everything else lazy; dimensions prevent CLS.
+- Fonts: variable woff2, `font-display: swap`, preload only the above-fold font, self-host or consciously accept a CDN, match fallback metrics.
+- Caching: hashed assets immutable for a year, HTML revalidated, edge `s-maxage` + stale-while-revalidate for public data, and never a shared cache for user-specific responses.
+- Every change lands with a before/after number, or it is decoration.
+
+Performance module complete. Final stretch: the two capstones — a full multi-tenant SaaS build, and packaging everything into a portfolio, open source presence, and interview-ready story.
+

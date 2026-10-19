@@ -1,0 +1,335 @@
+Every feature you have built so far fit in one process, and that is a feature. Most production incidents in small systems come from premature distribution — three services where one would do, to solve a scaling problem the team does not have. The architectural skill that matters is not "microservices"; it is knowing where the seams are, keeping them clean inside a single deployable, and splitting only when a specific pressure demands it.
+
+This lesson builds that skill: module boundaries in the monolith, the honest criteria for extraction, background jobs, caching, and the consistency trade-offs you get when you take them.
+
+## The modular monolith
+
+The default architecture for this stack is one Express app, one deployable, internally organized **by domain, not by layer**:
+
+```text
+server/src/
+├── modules/
+│   ├── movies/
+│   │   ├── movie.model.js
+│   │   ├── movie.schemas.js       # Zod: the module's public contract
+│   │   ├── movie.service.js       # all business logic lives here
+│   │   ├── movie.routes.js        # thin: parse -> call service -> respond
+│   │   └── movie.test.js
+│   ├── users/
+│   │   ├── user.model.js
+│   │   ├── user.service.js
+│   │   └── ...
+│   ├── notifications/
+│   │   └── notification.service.js
+│   └── billing/
+├── lib/                           # logger, metrics, db, redis
+├── middleware/
+└── app.js
+```
+
+Compare with the layered alternative (`controllers/`, `models/`, `services/` at the root) and the failure mode becomes obvious: the movies controller imports the users service imports the billing model, and twelve months later every file imports every folder. Domain folders with enforced rules — **a module talks to another module only through its service and schemas** — keep the monolith decoupled enough to split later if the need ever arrives.
+
+The layering rule that makes this work, one sentence per layer:
+
+```text
+routes      → HTTP concerns only: status codes, request parsing, calling services
+service     → business logic: rules, validation beyond shape, orchestration
+model       → persistence: schema, indexes, queries
+schemas     → the module's contract with the outside world (and other modules)
+```
+
+```js
+// modules/movies/movie.routes.js — thin by design
+router.post('/', requireAuth, validateBody(createMovieSchema), async (req, res) => {
+  const movie = await movieService.create(req.user.id, req.body)
+  res.status(201).json({ data: movieService.toPublic(movie) })
+})
+```
+
+```js
+// modules/movies/movie.service.js — where the logic lives
+export async function create(userId, input) {
+  const count = await MovieModel.countDocuments({ owner: userId })
+  if (count >= planLimits(userId).movies) {
+    throw new AppError(402, 'LIMIT_REACHED', 'Upgrade to add more movies')
+  }
+
+  const movie = await MovieModel.create({ ...input, owner: userId })
+  await notificationsService.movieCreated(userId, movie)   // cross-module via service
+  return movie
+}
+```
+
+Why the discipline pays off even without ever splitting: the service layer is where business rules are *testable* without HTTP (the testing module's unit layer), the schemas are the contract shared with the client (the TypeScript module's shared package), and a future extraction is "move the folder, replace the in-process call with an HTTP call at the same seam" — a boring refactor instead of an archaeological dig.
+
+<KeyPoint>
+Communicate through module services, never by reaching into another module's model. The rule costs one import today and buys every future option — extraction, testing in isolation, replacing an implementation — because every crossing is already an explicit function call at an agreed boundary.
+</KeyPoint>
+
+## When splitting into services is actually justified
+
+Extraction is justified by one of three pressures — and only these three:
+
+1. **Independent scaling.** The image-resize workload needs 8 workers; the API needs 2. Below the architectural lesson's own confines, this is better handled by a separate *worker process* (same codebase, different entry point) than by a separate service.
+2. **Independent deployment cadence.** The payments module changes daily under a different team with a different compliance bar; the API changes weekly. Separate deployable = separate deploy risk.
+3. **Fault or resource isolation.** A memory-hungry recommendation engine can OOM the box it shares with the API. A service boundary makes the blast radius its own.
+
+What extraction costs, always, no exceptions:
+
+```text
+network failures between what used to be function calls   → retries, timeouts, idempotency
+distributed transactions                                  → sagas or eventual consistency
+version skew between services                              → client contracts, deploy ordering
+~2x operational surface: two deploys, two dashboards, two alerts, two on-call stories
+```
+
+For the movies app — or most applications its size — the correct answer for the next year is almost always: **stay modular monolith; extract the worker; revisit when one of the three pressures is real and measurable.**
+
+## Background jobs: the async module
+
+Anything that takes more than ~200ms and the user does not need *now* — sending email, resizing images, generating PDFs, calling slow third parties, processing webhooks — belongs in a queue. The user gets a fast response; the work happens reliably, retried on failure.
+
+**BullMQ** on Redis is the standard for this stack:
+
+```bash
+npm install bullmq
+```
+
+```js
+// src/lib/queues.js
+import { Queue } from 'bullmq'
+import { redis } from './redis.js'
+
+export const emailQueue = new Queue('email', {
+  connection: redis,
+  defaultJobOptions: {
+    attempts: 5,
+    backoff: { type: 'exponential', delay: 2000 },   // 2s, 4s, 8s, 16s, 32s
+    removeOnComplete: { age: 24 * 3600, count: 1000 },
+    removeOnFail: { age: 7 * 24 * 3600 },
+  },
+})
+```
+
+```js
+// modules/users/user.service.js — enqueue, do not do
+export async function register(input) {
+  const user = await UserModel.create({ ...input, passwordHash: await hashPassword(input.password) })
+  await emailQueue.add('welcome', { userId: user.id, email: user.email })
+  return user
+}
+```
+
+```js
+// src/worker.js — a separate process: node src/worker.js
+import { Worker } from 'bullmq'
+import { emailQueue } from './queues.js'
+import { sendWelcomeEmail } from './modules/notifications/email.service.js'
+
+new Worker(
+  'email',
+  async (job) => {
+    switch (job.name) {
+      case 'welcome':
+        await sendWelcomeEmail(job.data)
+        break
+      default:
+        throw new Error(`Unknown job: ${job.name}`)
+    }
+  },
+  {
+    connection: redis,
+    concurrency: 5,
+    limiter: { max: 10, duration: 1000 },   // respect provider rate limits
+  }
+)
+```
+
+The properties that make this production-grade rather than a fancy setTimeout:
+
+- **Retries with exponential backoff** handle the 90% of failures that are transient (SMTP timeout, API 503).
+- **Idempotent handlers** are your responsibility and non-negotiable: a retried "send welcome email" must not send two emails. Dedupe with a deterministic `jobId` (for example `welcome-<userId>`, passed in the job options) and/or record what was sent.
+- **The failed set plus a dead-letter view** is your operational surface: jobs that exhaust retries wait in `failed` for inspection and manual replay, not silently disappear.
+- **Workers are separate processes**, scaled independently (the previous lesson), deploying the same image with a different entrypoint.
+
+API enqueues, worker consumes, Redis is the buffer. The user request never waits on email again.
+
+<Callout type="warning" title="Queues reorder everything">
+  Enqueueing is not happening: the welcome page can render before the welcome email exists, and a "created" object can be listed before its attached record is processed. Design the UI states for it — “we're preparing your X” beats a blank panel — rather than assuming enqueue order equals completion order.
+</Callout>
+
+## Caching: the cache-aside pattern
+
+The rule of caching: **cache the expensive read that happens often and changes rarely**. Saved-time caches are okay (public movie list: read 10,000x/hour, written rarely); user-specific data with per-request freshness requirements is where cached bugs live.
+
+The pattern that fits this stack — Redis in front of Mongo, application-managed:
+
+```js
+// src/lib/cache.js
+import { redis } from './redis.js'
+
+export async function cacheAside(key, ttlSeconds, load) {
+  const hit = await redis.get(key)
+  if (hit) return JSON.parse(hit)
+
+  const value = await load()                              // the expensive query
+  await redis.set(key, JSON.stringify(value), 'EX', ttlSeconds)
+  return value
+}
+```
+
+```js
+// modules/movies/movie.service.js
+export async function listPublic({ genre, limit = 20 }) {
+  const key = `movies:public:${genre ?? 'all'}:${limit}`
+  return cacheAside(key, 60, () =>
+    MovieModel.find({ genre }).sort({ createdAt: -1 }).limit(limit).lean()
+  )
+}
+```
+
+The three invalidation strategies, weakest to strongest:
+
+1. **TTL expiry** — short TTLs (30–120s) make staleness bounded and simple; perfect for feeds where “a minute old” is fine. The default choice.
+2. **Explicit invalidation** — on write, delete the affected keys:
+
+```js
+export async function create(userId, input) {
+  const movie = await MovieModel.create({ ...input, owner: userId })
+  await redis.del(`movies:public:${movie.genre}:20`, 'movies:public:all:20')
+  return movie
+}
+```
+
+   Works only if you can enumerate every key a write affects — which is exactly the assumption that breaks as features grow.
+
+3. **Versioned keys** — write operations bump a version; readers compose keys from it:
+
+```js
+const version = (await redis.get('movies:version')) ?? '1'
+const key = `movies:public:${version}:${genre}:${limit}`
+
+// on write:
+await redis.incr('movies:version')   // every cached key is now stale, no deletion sweep needed
+```
+
+   O(1) invalidation, natural TTL cleanup of orphans. The cost: any write invalidates everything. That is often exactly right for read-heavy public data.
+
+Cache metrics worth watching (they come free from the previous lesson's instrumentation): **hit rate** (below ~70% and the cache is mostly adding latency), **memory used** (Redis eviction turning into misses), and **stampede evidence** — a spike of simultaneous misses on one key after a popular entry expires. The stampede fix is a short mutex or jittered TTLs: `ttl + Math.floor(Math.random() * 30)`.
+
+## Consistency: what the queue and cache cost you
+
+Both mechanisms trade **consistency** (every reader sees the same thing now) for **availability and speed** — and the trade is invisible until you design for it:
+
+```text
+after a vote is cast:
+  - counter in Mongo updated instantly      → "read your writes": user sees their vote immediately
+  - cached totals refreshed within 60s      → other users see a 60-second-old number (fine!)
+  - notification enqueued                    → email arrives in seconds (fine!)
+
+after account deletion:
+  - user row deleted instantly               → login fails immediately (must be true)
+  - cached profile (TTL 300s) still readable → ⚠️ design decision: purge keys on delete or accept
+```
+
+The discipline: for every async or cached path, write down the staleness budget — "up to 60 seconds," "up to one worker retry cycle" — and check the product decision fits it. A follower count that lags a minute is a non-issue; a password change that lags is a security bug. Same machinery, different budgets.
+
+## Worked evolution: the movies app earns its architecture
+
+Putting the pieces together on a concrete request — "public movie lists are slow at 5,000 movies" — in the order a sensible team would try:
+
+```text
+Step 0  measure: explain() shows a COLLSCAN; p95 for GET /movies is 900ms at 5k docs
+Step 1  index: compound index on { genre: 1, createdAt: -1 }; p95 drops to ~15ms
+        (the database lesson goes deeper — do this before anything below)
+Step 2  cache: still 200 hits/sec hammering Mongo for identical lists;
+        cacheAside with 60s TTL + versioned keys on write; Mongo load -95%
+Step 3  jobs: poster thumbnails run inline on upload, holding requests for 2s;
+        move to BullMQ; upload responds in 120ms, worker handles variants
+Step 4  scale: two API instances behind the balancer with Redis-backed
+        rate limits (previous lesson) — the app was already stateless
+Step 5  only now ask: does anything justify a service split? (Almost never.
+        If thumbnails became a 10-vCPU workload, THAT is a worker, not a service.)
+```
+
+Notice the arc: index, cache, queue, scale — every step is cheap and reversible, and each was chosen from measurements, not vibes. A team that had started with microservices would have paid the distributed-systems tax before discovering a single index mattered more than all of it.
+
+## Try it
+
+<TryIt title="Enqueue a slow job and watch the request get fast" hint="With Redis running, register the queue, make an endpoint sleep in-process, then move the sleep into a job. Compare response times and note where the work really happened — worker logs, not the request.">
+```js
+// 1 — the slow way: work inline, request waits
+router.post('/slow-report', async (req, res) => {
+  await new Promise((r) => setTimeout(r, 2000))   // pretend: generating a report
+  res.json({ data: { status: 'done' } })
+})
+
+// 2 — the queue way: request returns immediately, worker does the work
+import { reportQueue } from '../lib/queues.js'
+
+router.post('/fast-report', async (req, res) => {
+  const job = await reportQueue.add('generate', { userId: req.user.id })
+  res.status(202).json({ data: { jobId: job.id, status: 'queued' } })
+})
+
+// 3 — status endpoint (the 202 pattern from the API lesson)
+router.get('/report-status/:jobId', async (req, res) => {
+  const job = await reportQueue.getJob(req.params.jobId)
+  const state = await job.getState()
+  res.json({ data: { state, result: job.returnvalue ?? null } })
+})
+
+// Compare: curl -w '%{time_total}\n' against both endpoints.
+// Then run: node src/worker.js and watch the job complete.
+```
+</TryIt>
+
+## Check your understanding
+
+<Quiz
+  question="Which of these is a legitimate reason to split a module out of the monolith into its own service?"
+  options={[
+    'The codebase has more than 20 files',
+    'The workload needs to scale independently (for example, 10x worker capacity for image processing) or has a genuinely different deploy cadence or fault profile',
+    'Microservices are more modern than monoliths',
+    'The database collection has more than 100,000 documents'
+  ]}
+  answer={1}
+  explanation="Extraction is bought with network failure modes, distributed consistency, and doubled operational surface — so it must be paid for by a concrete pressure: independent scaling, deploy cadence, or fault isolation. Worker processes in the same codebase solve the first one for free in most cases."
+/>
+
+<Quiz
+  question="Why is the versioned-key strategy (bump movies:version on write) often better than deleting individual cache keys after a write?"
+  options={[
+    'It uses less Redis memory',
+    'One increment invalidates every derived key at once, with no need to enumerate every key a write might affect — orphaned keys simply expire',
+    'It keeps the cache warm with the old data',
+    'It avoids JSON serialization'
+  ]}
+  answer={1}
+  explanation="Explicit deletion requires knowing every key a write touches — a list that grows with every feature and fails silently when incomplete. Versioning moves the problem: readers mint fresh keys, writers bump one counter, old entries age out via TTL. Broader invalidation is the trade, and for public read-heavy data it is usually the right one."
+/>
+
+<Exercise title="Architecture pass on the movies app" difficulty="hard">
+Apply the three mechanisms — module boundaries, queues, caching — and write down every consistency trade-off you accept.
+
+1. **Restructure into modules:** reorganize the server into `modules/<domain>/` with model, schemas, service, and routes per domain; keep rules: no controller reaches into another module's model, cross-module calls go through services only. Run the full test suite after the move — it is a pure refactor and must stay green.
+2. **Extract the async work:** install BullMQ; move two slow operations (suggestions: welcome email + poster processing or report generation) into jobs with retries, backoff, and `jobId` deduplication. Add the 202-plus-status-endpoint pattern for one of them. Run the worker as its own process with `SIGTERM` handling.
+3. **Prove idempotency:** write a test that delivers the same job twice (call the handler twice) and asserts the side effect happened once — dedupe check or a sent-marker in the database. This test is the queue's safety contract.
+4. **Cache a hot read:** wrap the public movie list in `cacheAside` with versioned keys; measure p95 before and after at 1,000 seeded movies with a simple load script; record hit rate by calling the endpoint repeatedly.
+5. **Invalidation drill:** create a movie through the API and verify the cached list reflects it within your stated staleness budget; then deliberately introduce a stale-cache bug (forget to bump the version) and describe which test would have caught it — then add that test.
+6. **Consistency budget:** write a short table in `docs/architecture.md`: feature → mechanism (sync/queued/cached) → staleness budget → why the product tolerates it. Include one row where you deliberately chose immediate (votes on your own post, or login state) and say so.
+7. **The split memo:** one page arguing for or against extracting any module into a service right now, using the three legitimate pressures. If the answer is “no,” state the measurable trigger that would change your mind (for example: “if thumbnail processing exceeds 4 vCPU-hours/day, extract the worker as a dedicated service”).
+</Exercise>
+
+## Summary
+
+- Default to a modular monolith: domain folders, thin routes, logic in services, cross-module communication through service APIs only.
+- Split services only under independent scaling, deploy cadence, or fault isolation — and count the costs: network failures, distributed consistency, doubled operations. Usually, extract a worker, not a service.
+- Background jobs (BullMQ + Redis) keep requests fast and make slow work reliable: retries with backoff, idempotent handlers, dedupe job ids, and a dead-letter surface.
+- Cache expensive, frequent, slowly-changing reads: cache-aside with TTLs, explicit invalidation when enumerable, versioned keys for O(1) invalidation; watch hit rate and stampedes.
+- Every async or cached path needs a written staleness budget; the machinery is the same for a follower count and a password change, but the budgets must differ.
+- Evolve with measurements: index, cache, queue, scale — in that order, each reversible, before considering distribution.
+
+Next: APIs as products — versioning, pagination, idempotency, webhooks, and long-running operations done right.
+

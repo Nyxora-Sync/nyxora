@@ -1,0 +1,289 @@
+Continuous integration is not "we have a YAML file." It is the property that every change is automatically verified in isolation, and continuous delivery is the property that the verified artifact reaches production through a process — not a ritual. Together they turn deployment from an event people schedule around into a boring background process.
+
+This lesson builds the pipeline end to end: stages that fail fast, caching that keeps it under ten minutes, environments that mirror production, deploy strategies that survive traffic, and the expansion-contract discipline that keeps schema changes invisible to running code.
+
+## Environments: three, consistently
+
+```text
+Local        → on your machine; seeded fake data; delete-and-recreate freely
+Preview/Dev  → one per pull request (Vercel gives this free for the client); talks to a preview database
+Staging      → mirrors production topology; runs the same migrations first; the dress rehearsal
+Production   → real users; deploys only what already passed staging
+```
+
+Two rules make environments useful rather than ceremonial:
+
+- **Same shape everywhere.** If production is Docker + Atlas + Redis, staging is Docker + Atlas + Redis (smaller tiers), not a laptop with a different Mongo version. "Works on staging" is only evidence if staging resembles production.
+- **Configuration, not code, differs.** `MONGODB_URI`, `JWT_SECRET`, `CLIENT_URL` come from the environment; one image, many environments. This is the twelve-factor rule that makes every other practice here possible.
+
+## The pipeline
+
+A GitHub Actions workflow for this stack, annotated:
+
+```yaml
+# .github/workflows/ci.yml
+name: CI
+on:
+  push: { branches: [main] }
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true        # a new push cancels the old run — never test stale code
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      mongo:
+        image: mongo:7
+        ports: ['27017:27017']
+        options: >-
+          --health-cmd "mongosh --eval 'db.adminCommand(\"ping\")'"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+
+    env:
+      MONGODB_URI: mongodb://localhost:27017/app-test
+      JWT_SECRET: ci-only-secret-that-is-long-enough-123456
+      NODE_ENV: test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm               # caches ~/.npm keyed by lockfile
+
+      - run: npm ci
+
+      - name: Lint and typecheck
+        run: |
+          npm run lint --workspace server --workspace client
+          npm run typecheck --workspace server --workspace client
+
+      - name: Server tests
+        run: npm test --workspace server -- --coverage
+
+      - name: Client tests
+        run: npm test --workspace client
+
+      - name: Build
+        run: |
+          npm run build --workspace server
+          npm run build --workspace client
+
+  e2e:
+    needs: verify                    # only run after the fast jobs pass
+    uses: ./.github/workflows/e2e.yml
+```
+
+Design notes that keep pipelines fast and trustworthy:
+
+- **Order by cost.** Lint and typecheck take seconds and catch a large class of errors; run them before the tests that take minutes. The cheapest failure should happen first.
+- **`cancel-in-progress`** means the pipeline always reflects the newest commit. Without it, three queued runs test two dead versions.
+- **Service containers** give real MongoDB and Redis to integration tests — the same shape as the memory-server harness locally, with production-identical query semantics.
+- **The build job is the artifact.** What you build here (or in a subsequent release job) is what gets deployed. Never rebuild inside the deploy step: a rebuild can pick up different transitive dependencies and ship something untested.
+- **Required checks.** Configure the verify and e2e jobs as required on `main`; a pipeline whose failure does not block a merge is decoration.
+
+<KeyPoint>
+Promote artifacts, do not rebuild them. Test the image or bundle produced by commit X, then deploy that same image to staging and production. Every rebuild is a chance for the deployed bytes to differ from the tested bytes — which quietly invalidates the entire pipeline.
+</KeyPoint>
+
+## Database migrations in the pipeline
+
+Schema changes are where deployments break, because code and data change at different moments in time. The discipline is **expand → migrate → contract**, so every intermediate state works with both the old and the new code:
+
+```text
+1. EXPAND     deploy code that writes BOTH shapes:
+              e.g. keep writing `title`, also write `normalizedTitle`
+
+2. MIGRATE    run a backfill job (batched, idempotent) to fill `normalizedTitle`
+              for existing rows; the app already reads both, preferring the new one
+
+3. SWITCH     deploy code that reads ONLY `normalizedTitle` (writes still both)
+
+4. CONTRACT   after a safe window, deploy code that stops writing `title`,
+              then a final migration drops the field and any old index
+```
+
+Each of the four steps is independently deployable and rollback-safe, which is the entire point: at no moment is a running process presented with a shape it does not understand. The opposite approach — a single migration that drops and renames while the old code is still serving traffic — produces the classic incident where half the requests 500 during the deploy window.
+
+Practical mechanics:
+
+```js
+// scripts/migrate.js — run as a pre-deploy step, never in the app boot path
+import mongoose from 'mongoose'
+import { env } from '../src/config/env.js'
+
+const BATCH = 500
+
+async function backfillNormalizedTitles() {
+  let processed = 0
+  for (;;) {
+    const docs = await mongoose.connection.collection('movies')
+      .find({ normalizedTitle: { $exists: false }, title: { $exists: true } })
+      .limit(BATCH)
+      .toArray()
+    if (docs.length === 0) break
+
+    await mongoose.connection.collection('movies').bulkWrite(
+      docs.map((doc) => ({
+        updateOne: {
+          filter: { _id: doc._id },
+          update: { $set: { normalizedTitle: doc.title.trim().toLowerCase() } },
+        },
+      }))
+    )
+    processed += docs.length
+    console.log(`backfilled ${processed}`)
+  }
+  console.log('backfill complete')
+}
+
+await mongoose.connect(env.MONGODB_URI)
+await backfillNormalizedTitles()
+await mongoose.disconnect()
+```
+
+Rules the script encodes: **idempotent** (re-running finds nothing on the second pass), **batched** (no multi-minute locks), **outside app startup** (a crash-looping app never blocks its own migration), and **logged with counts** so the deploy log answers "how far did it get" without investigation.
+
+Migrations also need a **compatibility matrix** in your head during the switch window:
+
+```text
+            writes old   writes both   writes new
+reads old        ✓           ✓            ✓  (new field ignored)
+reads both       ✓           ✓            ✓
+reads new        ✗           ✓            ✓
+```
+
+`reads new + writes old` is the single cell that must never exist — new code reading a field that the still-running old code has not written. Expand-contract exists to keep that cell empty at every moment.
+
+## Deploy strategies
+
+How new code replaces old code while requests keep flowing:
+
+| Strategy | Mechanics | Downtime | Rollback | When |
+|---|---|---|---|---|
+| Recreate | Stop old, start new | Seconds | Redeploy old tag | Solo projects, internal tools |
+| Rolling | Replace instances one at a time, wait for health | None | Roll the old image back | Most platforms' default; good general answer |
+| Blue-green | Full new environment; flip traffic at the load balancer | None | Flip back instantly | When instant rollback matters most |
+| Canary | New version gets 1–5% of traffic; watch metrics; ramp | None | Shift traffic off | Higher-stakes changes; needs monitoring to be real |
+
+Rolling is the right default; the healthcheck from the Docker lesson is what makes it safe — the router only sends traffic to an instance that answers `/health` with 200. Two rules for whichever you choose:
+
+- **Wait for readiness, then verify.** After the deploy, run a smoke check against production (`GET /health`, one authenticated read). A deploy that opens the circuit but serves 500s is not a successful deploy.
+- **Canary without monitoring is theater.** Ramping traffic needs error-rate and latency comparison between versions; otherwise you are just deploying slowly.
+
+## Rollbacks and feature flags
+
+Rollback capability is a design property, not a button. Three requirements, in order:
+
+1. **The previous artifact still exists and still runs.** Keep the last N images (Docker lesson) or releases (platform). A rollback to an artifact you deleted last Tuesday is a rebuild — with different bytes than production ran.
+2. **The database accepts the old code.** This is why migrations are expand-contract and additive within a release: the old code must keep working against the new schema for the duration of the rollback window. A migration that drops a column in the same release removes your rollback path.
+3. **Someone has practiced it.** Run a rollback in staging (or, once, in production during low traffic). An untested rollback is a plan, not a capability.
+
+```bash
+# the rollback you should be able to run without a document open
+kubectl rollout undo deployment/api          # Kubernetes
+# or
+docker compose up -d --pull always api       # compose with the previous tag
+# or
+vercel rollback                              # platform-managed
+```
+
+For changes you are unsure about, decouple **deploy** from **release** with a feature flag:
+
+```js
+// a settings document, not a code constant — flipped without a deploy
+const flags = await getFlags()   // cached; invalidated on change
+if (flags.notesEnabled) {
+  router.use('/api/v1/notes', notesRouter)
+}
+```
+
+Now a rollback of a risky feature is a toggle, not a deploy, and a partial rollout (10% of users) is a percentage change rather than a canary configuration. Keep the flag inventory small and delete flags within a release or two of full rollout — a codebase of stale flags is a maze.
+
+## Secrets in CI
+
+The pipeline itself needs production access — deploy tokens, database credentials for migrations. Handling that badly is how CI becomes the weakest link:
+
+- **GitHub Secrets / environment secrets:** store credentials as repository or environment secrets; **environment secrets** (staging vs production) can require reviewer approval before the job runs — the deploy to production waits for a human click when policy demands it.
+- **Least-privilege tokens:** the deploy token can deploy, not administer. If the platform offers scoped tokens, scope them to the specific project.
+- **Never echo secrets.** GitHub masks registered secret values in logs, but interpolated mutations (`echo "$TOKEN" | base64`) can leak. Avoid printing env in debug steps entirely.
+- **OIDC over long-lived keys** where supported: GitHub can request a short-lived token from your cloud provider directly, removing stored credentials altogether. The setup is a one-time trust configuration.
+
+<Callout type="danger" title="Deploy jobs run arbitrary code from the pushed branch">
+  A compromised dependency or a malicious PR can exfiltrate any secret available to the job. Scope production secrets to the production deploy job only (never the test job), require approval for the production environment, and rotate anything that was exposed to a workflow you no longer trust.
+</Callout>
+
+## Try it
+
+<TryIt title="Break the pipeline on purpose, then watch it guard the door" hint="Push a commit that fails lint, then a commit with a failing test, then one with a broken migration — each stage should fail at the cheapest possible point, and none should reach deploy.">
+```bash
+# 1 — lint failure: cheapest gate fires first
+echo 'const unused = 42' >> server/src/app.js
+git commit -am 'chore: trigger lint gate' && git push
+
+# 2 — test failure: the verify job stops before deploy
+# (revert lint first), then break an assertion in a test
+
+# 3 — migration failure on staging: pipeline halts before production
+# run the migrate script against a broken connection string in staging env
+
+# After each: GitHub → Actions shows the failing job; fix, push,
+# watch the green run proceed through to deploy.
+```
+</TryIt>
+
+## Check your understanding
+
+<Quiz
+  question="Why must you not run the database migration for a destructive change (renaming title to normalizedTitle and dropping title) in the same release as the code that reads the new field?"
+  options={[
+    'MongoDB cannot rename fields in one operation',
+    'Because for the duration of the deploy window, old code is still running against the new schema — if reads-new and writes-old ever coexist, requests break; expand-contract keeps every intermediate state compatible',
+    'Migrations are slower than deploys',
+    'Dropping fields requires cluster admin rights'
+  ]}
+  answer={1}
+  explanation="Deploys are not instantaneous: some instances run old code while others run new. A destructive migration executed at deploy time forces the schema to its final shape while old code is still writing it. Expand first, switch code, contract later — each step safe with both versions live."
+/>
+
+<Quiz
+  question="What does promoting the tested artifact (instead of rebuilding per environment) actually guarantee?"
+  options={[
+    'Faster builds',
+    'The exact bytes that passed staging are the bytes serving production — no transitive dependency can drift in during a rebuild',
+    'Smaller container images',
+    'Migrations run automatically'
+  ]}
+  answer={1}
+  explanation="A rebuild resolves dependencies again: a patch release published in between can change code that nobody tested. Promotion makes the pipeline's evidence valid for production by construction, at the cost of treating images (or bundles) as immutable, versioned artifacts."
+/>
+
+<Exercise title="A pipeline with staging, production, and a practiced rollback" difficulty="hard">
+Build the full delivery path for the movies app: verify on every PR, deploy to staging on main, promote to production, and roll back on command.
+
+1. **CI:** implement the workflow from this lesson: service containers for Mongo and Redis, npm cache, lint/typecheck/test/build order, `cancel-in-progress`, coverage artifacts. Configure verify and e2e as required checks on main.
+2. **Image pipeline:** add a job that builds the API image only after verify passes, tags it with the commit SHA, and pushes it to your registry; the client deploys to your static host on the same trigger.
+3. **Staging:** deploy the image to staging automatically on main: run migrations first (pre-deploy step against the staging database), then start the new version, then run a smoke script (health check + one authenticated read) before marking the deploy green.
+4. **Production:** gate the production deploy behind a GitHub environment with required reviewers; deploy the same tagged image staging received; run migrations against production; run the same smoke script; announce failures to a webhook channel.
+5. **Expand-contract drill:** implement one real migration pair in the app — add a field (expand) with dual writes, backfill it, switch reads, then a follow-up release removes the old field (contract). Run the whole cycle through the pipeline; the app must serve traffic throughout.
+6. **Rollback drill:** create an incident scenario — deploy a release that introduces a visible bug, then roll back to the previous SHA and confirm recovery. Record: time to detect, time to decide, time to roll back, whether any data was written by the bad version that the old version mishandles.
+7. **Feature flag:** add one flag around a non-trivial feature, wire it to a settings document (cache invalidated on change), and demonstrate turning it off in production without a deploy.
+8. **Write the runbook:** `docs/deploy.md` with the pipeline diagram (in text), where secrets live, how to deploy, how to roll back, how to run a migration by hand in an emergency, and who to wake. If the answer to any of those is only in your head, the exercise is not done.
+</Exercise>
+
+## Summary
+
+- Environments come in three consistent shapes; only configuration differs — one artifact, many environments.
+- Pipelines order gates by cost: lint and typecheck before tests; service containers provide real MongoDB and Redis; `cancel-in-progress` keeps runs current; required checks make failures blocking.
+- Promote artifacts — test the image, deploy that image; never rebuild between staging and production.
+- Database changes follow expand to migrate to contract, keeping reads-new-with-writes-old impossible at every instant.
+- Rolling deploys are the safe default; blue-green buys instant rollback; canary requires real monitoring. Rollback needs the old artifact, schema compatibility, and practice.
+- Feature flags decouple deploy from release; keep the inventory small.
+- CI secrets are least-privilege, scoped to the jobs that need them, gated by reviewers for production, and OIDC-preferred over long-lived keys.
+
+Next: keeping all of this visible in production — structured logs, correlation ids, metrics, error tracking, alerting, and scaling past one process.
+

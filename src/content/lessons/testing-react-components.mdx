@@ -1,0 +1,298 @@
+A component test that renders `MovieCard`, asserts three divs exist, and checks a CSS class is worthless — it breaks when you restyle and misses the bug where the button no longer triggers `onSelect`. The alternative is to drive components **the way a user does**: find the “Select” button by its role and name, click it, and assert what a person would observe.
+
+That is the React Testing Library (RTL) philosophy, and with **MSW** mocking the network at the HTTP boundary, your component tests stay honest without being slow. This lesson builds that stack with Vitest.
+
+## Setup
+
+```bash
+npm install -D vitest jsdom @testing-library/react @testing-library/user-event @testing-library/jest-dom msw
+```
+
+```ts
+// vite.config.ts
+/// <reference types="vitest/config" />
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+export default defineConfig({
+  plugins: [react()],
+  test: {
+    environment: 'jsdom',
+    setupFiles: ['./src/test/setup.ts'],
+    globals: true,
+  },
+})
+```
+
+```ts
+// src/test/setup.ts
+import '@testing-library/jest-dom/vitest'
+import { cleanup } from '@testing-library/react'
+import { afterEach } from 'vitest'
+
+afterEach(() => cleanup())
+```
+
+The `jest-dom/vitest` import adds the matchers you will use constantly — `toBeInTheDocument`, `toBeDisabled`, `toHaveTextContent`. Keeping `globals: true` makes `describe`/`it`/`expect` available without imports; if you prefer explicit imports, drop the flag and import from `vitest`.
+
+## Querying like a user
+
+RTL's query hierarchy, best first:
+
+1. **`getByRole`** — what assistive technology sees. This is the query to default to: buttons, links, headings, textboxes, list items.
+2. **`getByLabelText`** — form fields by their visible label. If a field has no label, users of screen readers cannot find it either — the test failing is the point.
+3. **`getByPlaceholderText`** — last-resort for forms; placeholders are not labels.
+4. **`getByText`** — static content, headings, paragraphs.
+5. **`getByTestId`** — escape hatch only, when nothing user-visible can identify the element.
+
+```tsx
+// Bad: couples to structure
+container.querySelector('.btn-primary')
+
+// Good: couples to what the user sees and does
+screen.getByRole('button', { name: /add to watchlist/i })
+```
+
+Every getter has async siblings — `findByRole`, `findByText` — which retry until a timeout and auto-wait for elements that appear after a fetch. Use them instead of sprinkling `waitFor`:
+
+```tsx
+// Renders after the fetch resolves — findBy waits for it
+expect(await screen.findByRole('heading', { name: 'Dune' })).toBeInTheDocument()
+```
+
+## Interacting with user-event
+
+`fireEvent` dispatches a single DOM event. `user-event` simulates a real user: clicking focuses, typing fires keydown/press/input changes, and events fire in the order a browser would.
+
+```tsx
+import userEvent from '@testing-library/user-event'
+
+it('filters the list as the user types', async () => {
+  const user = userEvent.setup()
+  render(<MovieList movies={movies} />)
+
+  await user.type(screen.getByRole('searchbox', { name: /search movies/i }), 'dune')
+
+  expect(screen.getByText('Dune')).toBeInTheDocument()
+  expect(screen.queryByText('Arrival')).not.toBeInTheDocument()
+})
+```
+
+`userEvent.setup()` per test is the current API; `await user.type(...)` types character by character, which also means controlled React inputs behave exactly as they do in a browser.
+
+## Testing the four states of a data component
+
+With TanStack Query and a typed API client, every data screen has four states: loading, error, empty, and ready. A test for each is a test for the UI contract:
+
+```tsx
+import { render, screen } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MovieList } from './movie-list'
+
+function renderWithProviders(ui: React.ReactElement) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>)
+}
+
+it('shows a loading state, then the movies', async () => {
+  renderWithProviders(<MovieList />)
+
+  expect(screen.getByRole('status')).toHaveTextContent(/loading/i)
+  expect(await screen.findByRole('heading', { name: 'Dune' })).toBeInTheDocument()
+})
+```
+
+Two details matter. `retry: false` keeps a failing query from taking 30 seconds to fail — test clients should fail fast. And `getByRole('status')` works because the loading element carries `role="status"` (or `aria-busy` on its container), which is also what screen readers announce: accessible markup makes for easy, meaningful queries.
+
+## Mocking the network with MSW
+
+You could `vi.mock('../lib/api')` — but then your tests never exercise the real `api.ts` layer, and a bug in URL construction or header handling sails through. **MSW (Mock Service Worker)** intercepts at the network level instead: your fetch, axios, and TanStack Query code all run for real; only the server is fake.
+
+```ts
+// src/test/mocks/handlers.ts
+import { http, HttpResponse } from 'msw'
+
+export const handlers = [
+  http.get('/api/v1/movies', () =>
+    HttpResponse.json({
+      data: [
+        { id: '1', title: 'Dune', year: 2021, genres: ['sci-fi'] },
+        { id: '2', title: 'Arrival', year: 2016, genres: ['sci-fi'] },
+      ],
+    })
+  ),
+]
+```
+
+```ts
+// src/test/setup.ts (extended)
+import { setupServer } from 'msw/node'
+import { handlers } from './mocks/handlers'
+
+export const server = setupServer(...handlers)
+beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
+afterEach(() => server.resetHandlers())
+afterAll(() => server.close())
+```
+
+`onUnhandledRequest: 'error'` is a deliberate strictness: a component fetching a URL you did not mock fails loudly instead of getting a mysterious `undefined`. Per-test overrides express error states:
+
+```tsx
+import { server } from '../../test/setup'
+import { http, HttpResponse } from 'msw'
+
+it('shows the server error message when the list fails', async () => {
+  server.use(
+    http.get('/api/v1/movies', () =>
+      HttpResponse.json({ error: { code: 'INTERNAL', message: 'Database is down' } }, { status: 500 })
+    )
+  )
+
+  renderWithProviders(<MovieList />)
+
+  expect(await screen.findByRole('alert')).toHaveTextContent('Database is down')
+})
+```
+
+The handler file doubles as living documentation of the API contract; when the API genuinely changes, these handlers change with it, and every component test re-verifies against the new shape.
+
+<Callout type="tip" title="Reuse handlers between test layers">
+  The same `handlers.ts` can serve Storybook, local development (via the MSW browser worker), and component tests. One file describing the API’s behavior in several contexts is a fantastic return on a small investment.
+</Callout>
+
+## Testing forms: validation, submission, errors
+
+Forms are where component tests pay for themselves — they are pure interaction logic:
+
+```tsx
+it('shows validation errors and does not submit an empty form', async () => {
+  const onSubmit = vi.fn()
+  const user = userEvent.setup()
+  render(<MovieForm onSubmit={onSubmit} />)
+
+  await user.click(screen.getByRole('button', { name: /save/i }))
+
+  expect(await screen.findByText(/title is required/i)).toBeInTheDocument()
+  expect(onSubmit).not.toHaveBeenCalled()
+})
+
+it('submits the typed values', async () => {
+  const onSubmit = vi.fn().mockResolvedValue(undefined)
+  const user = userEvent.setup()
+  render(<MovieForm onSubmit={onSubmit} />)
+
+  await user.type(screen.getByLabelText(/title/i), 'Dune')
+  await user.clear(screen.getByLabelText(/year/i))
+  await user.type(screen.getByLabelText(/year/i), '2021')
+  await user.click(screen.getByRole('button', { name: /save/i }))
+
+  expect(onSubmit).toHaveBeenCalledWith(
+    expect.objectContaining({ title: 'Dune', year: 2021 }),
+    expect.anything()
+  )
+})
+```
+
+Because the form uses the shared Zod schema (from the TypeScript lessons), these tests also pin the validation rules at the UI level — the same schema the server enforces separately.
+
+<KeyPoint>
+Test the contract, not the implementation: the form’s job is “invalid input blocks submission and shows a message; valid input calls onSubmit with that data.” Whether it uses React Hook Form, a custom reducer, or hand-rolled state tomorrow must not matter to these tests.
+</KeyPoint>
+
+## What not to do
+
+Three anti-patterns that make component suites expensive and useless:
+
+- **Snapshot-everything.** A snapshot of a large tree changes on every styling commit and is skimmed, never read. Snapshots earn limited use for tiny pure helpers; skip them for components.
+- **Asserting on internal state or hooks.** If checking “errors.length === 1” requires reaching into the component, you are testing implementation. Assert the visible message.
+- **`act()` warnings treated as noise.** They usually mean a state update happened outside React's awareness — often a missed `await`. Fix the async flow instead of suppressing the warning.
+
+## Try it
+
+<TryIt title="Your first component test: the search box" hint="Create a SearchBox component with a labeled input and an onChange prop; then write the test below and watch it pass, then break the component on purpose (drop the label) and watch the test fail.">
+```tsx
+// search-box.tsx
+export function SearchBox({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <div>
+      <label htmlFor="q">Search movies</label>
+      <input
+        id="q"
+        type="search"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      />
+    </div>
+  )
+}
+
+// search-box.test.tsx
+import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { describe, it, expect, vi } from 'vitest'
+import { SearchBox } from './search-box'
+
+describe('SearchBox', () => {
+  it('emits each typed value', async () => {
+    const onChange = vi.fn()
+    const user = userEvent.setup()
+    render(<SearchBox value="" onChange={onChange} />)
+
+    await user.type(screen.getByRole('searchbox', { name: /search movies/i }), 'dune')
+
+    expect(onChange).toHaveBeenCalled()
+    expect(onChange).toHaveBeenLastCalledWith('dune')
+  })
+})
+```
+</TryIt>
+
+## Check your understanding
+
+<Quiz
+  question="Why does the test suite prefer screen.getByRole('button', { name: /save/i }) over container.querySelector('.btn-save')?"
+  options={[
+    'getByRole is faster to execute',
+    'Role and name reflect what users and assistive technology perceive, so the test fails when the UI becomes unusable even if the markup still exists',
+    'CSS classes are removed after build',
+    'querySelector does not work in jsdom'
+  ]}
+  answer={1}
+  explanation="Role-based queries test the accessible interface: a button that loses its label or stops being a button fails the test, which is exactly the kind of regression users experience. Class selectors stay green through unusable states and break on styling refactors."
+/>
+
+<Quiz
+  question="What does MSW intercept that vi.mock('../lib/api') would not be able to verify?"
+  options={[
+    'Nothing — they are equivalent',
+    'The real fetch calls made by your API client layer: URL construction, headers, query strings, and how responses flow into components',
+    'Server-side code',
+    'The React render tree'
+  ]}
+  answer={1}
+  explanation="MSW sits at the network boundary, so everything above it runs for real — if the client builds the wrong URL or forgets a header, the handler will not match and the test fails. Module mocks replace the layer under test, hiding exactly those bugs."
+/>
+
+<Exercise title="Component-test the movie screens" difficulty="hard">
+Build a component suite for the list and form screens of your movie client, with MSW as the only fake.
+
+1. **Setup:** add Vitest jsdom config, RTL, user-event, jest-dom matchers, and the MSW server with `onUnhandledRequest: 'error'`; create a `renderWithProviders` helper that wraps children in QueryClient (retry off) and your router if needed.
+2. **List — four states:** tests for loading (assert the `role="status"` element), error (override the handler with a 500 and assert the `role="alert"` message), empty (handler returns `[]` and the empty-state copy shows), and ready (both movies render as headings).
+3. **Search interaction:** type into the search box; assert the list narrows. If search is server-side, assert the request query string via an MSW handler that records `request.url` — this is the test that pins your query-string contract.
+4. **Form — validation:** submit empty; assert the required error appears and `onSubmit` was not called. Then fill title and year and assert both appear.
+5. **Form — server error:** mock a 422 response with a field-level message; assert the message displays next to the right field, not as a generic banner.
+6. **Accessibility spot checks:** every interactive element is reachable by role and name; the error message uses `role="alert"`; the loading indicator uses `role="status"`. Add `@testing-library/jest-dom` assertions for each.
+7. **No implementation leakage:** grep your tests for `container`, `querySelector`, and `.class` — replace any usage with user-facing queries, or justify why it cannot be done.
+8. **Run it all:** `npm test` in the client workspace must be green, and the same command in CI. Record the suite runtime; keep it under 15 seconds by avoiding real timers and sleeping.
+</Exercise>
+
+## Summary
+
+- RTL tests drive components the way users do: role-and-name queries first, test IDs last; anything user-invisible is not worth asserting.
+- user-event simulates real interactions (focus, typing, clicks) and pairs with `findBy*` queries for async renders.
+- Test the four data states — loading, error, empty, ready — for every screen that fetches; accessible `role="status"`/`role="alert"` markup makes this both easier and more meaningful.
+- MSW mocks at the network boundary so your real API client code runs; `onUnhandledRequest: 'error'` turns missing handlers into loud failures, and shared handler files double as contract documentation.
+- Form tests pin behavior: invalid input blocks submission with a message; valid input calls `onSubmit` with the typed data.
+- Skip snapshots of large trees, internal-state assertions, and swallowed `act()` warnings.
+
+Next: the last layer — full end-to-end coverage with a real browser and Playwright.

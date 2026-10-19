@@ -1,0 +1,278 @@
+Knowing the attacks is half the job; the other half is wiring the defences so they hold under real traffic. Express gives you almost nothing by default — no security headers, no rate limits, no body size caps — and express's minimalism is precisely the point: every layer you add is one an attacker must get past.
+
+This lesson hardens the API in six passes: headers, rate limiting, request boundaries, mass assignment, secrets, and dependency hygiene — each with code you can paste, and each provable with a test.
+
+## Pass 1: security headers with helmet
+
+```bash
+npm install helmet
+```
+
+```js
+// src/app.js
+import helmet from 'helmet'
+
+app.use(helmet())
+```
+
+One line sets a dozen headers. What matters for a MERN setup:
+
+- `X-Content-Type-Options: nosniff`, `X-Frame-Options`, `Referrer-Policy`, `Strict-Transport-Security` — as covered in the previous lesson, free from here on.
+- **CSP**: helmet's default policy is built for server-rendered HTML. A JSON API serving no HTML can send the strictest possible policy — and should, to make any accidental HTML response inert.
+- **`crossOriginResourcePolicy`**: defaults to `same-origin`, which blocks your Vercel-hosted frontend from loading API-served images (if you serve any through Express). If you have none — Cloudinary serves files — leave the default.
+
+```js
+app.use(
+  helmet({
+    // API-focused hardening: no HTML is ever intentionally served
+    contentSecurityPolicy: {
+      directives: { 'default-src': ["'none'"], 'frame-ancestors': ["'none'"] },
+    },
+  })
+)
+```
+
+<Callout type="tip" title="Verify, don't assume">
+  `curl -sI http://localhost:3000/api/v1/health | grep -i strict` proves the header is actually on the wire. A middleware installed after a route, or an early `res.send` that bypasses `app.use`, are the classic reasons a header silently never lands.
+</Callout>
+
+## Pass 2: rate limiting
+
+Bots brute-force login forms at thousands of attempts per minute, and unauthenticated endpoints let anyone run up your compute bill. Rate limiting turns both into a slow, noisy, quittable exercise.
+
+```bash
+npm install express-rate-limit
+```
+
+```js
+// src/middleware/rate-limit.js
+import { rateLimit } from 'express-rate-limit'
+
+// Broad shield: fair-use cap for every request
+export const globalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 300,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: { code: 'RATE_LIMITED', message: 'Too many requests, try again shortly' } },
+})
+
+// Narrow shield: auth endpoints get a strict cap
+export const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  skipSuccessfulRequests: true,     // only failed attempts count toward the limit
+  keyGenerator: (req) => `${req.ip}:${String(req.body?.email ?? '').toLowerCase()}`,
+  message: { error: { code: 'RATE_LIMITED', message: 'Too many login attempts, try again in 15 minutes' } },
+})
+```
+
+```js
+// src/app.js — order matters: limiter before routes, after body parsing
+app.set('trust proxy', 1)   // behind Render/Vercel/nginx: use the real client IP
+app.use(globalLimiter)
+app.post('/api/v1/auth/login', authLimiter, authController.login)
+app.post('/api/v1/auth/register', authLimiter, authController.register)
+```
+
+Four details that decide whether this actually protects anything:
+
+- **`trust proxy` must be set correctly.** Behind a load balancer, `req.ip` is the proxy unless you trust exactly one hop (`app.set('trust proxy', 1)`). Getting this wrong either lumps all users into one bucket or lets attackers spoof IPs via headers.
+- **Keying by IP + email** stops an attacker from rotating IPs to spread attempts against one account — both must stay under the bar.
+- **`skipSuccessfulRequests`** avoids locking out a user who simply logged in often; failures are the signal.
+- **In-memory stores forget on restart and don't share across instances.** With more than one API process, point `express-rate-limit` at Redis (`rate-limit-redis`) — the scaling lesson returns to this.
+
+## Pass 3: the request boundary
+
+Every layer of the request must be shaped before it reaches your logic. Four moves:
+
+```js
+// 1 — cap the body size (JSON bombing protection)
+app.use(express.json({ limit: '100kb' }))
+
+// 2 — validate params, not just bodies
+const paramsSchema = z.object({ id: z.string().regex(/^[0-9a-f]{24}$/) })
+
+export function validateParams(schema) {
+  return (req, res, next) => {
+    const result = schema.safeParse(req.params)
+    if (!result.success) {
+      return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Resource not found' } })
+    }
+    next()
+  }
+}
+
+// 3 — strict schemas: reject unknown keys instead of silently dropping them
+const createMovieSchema = z
+  .object({
+    title: z.string().trim().min(1).max(200),
+    year: z.number().int().min(1888),
+    genres: z.array(z.string()).max(10).default([]),
+  })
+  .strict()   // { title, year, isAdmin: true } => 422, not ignored
+
+// 4 — query strings get schemas too
+const listQuerySchema = z
+  .object({
+    page: z.coerce.number().int().min(1).default(1),
+    limit: z.coerce.number().int().min(1).max(50).default(20),
+    q: z.string().trim().max(100).optional(),
+  })
+  .strict()
+```
+
+Why `.strict()` matters more than it looks: without it, Zod **strips** unknown keys — which sounds safe, until you remember the strip happens after you have decided what to do with the value. With it, a request that tries to smuggle unexpected fields gets a loud 422, and your tests can prove the boundary.
+
+## Pass 4: mass assignment
+
+The classic Express-to-Mongo vulnerability: spreading request data straight into a model.
+
+```js
+// ❌ catastrophically wrong: attacker sends { "role": "admin", "owner": "someone-else" }
+const movie = await Movie.create({ ...req.body, owner: req.user.id })
+
+// ✅ picker: only these fields can ever be written by a request
+const input = createMovieSchema.parse(req.body)   // strict — nothing extra survived
+const movie = await Movie.create({
+  title: input.title,
+  year: input.year,
+  genres: input.genres,
+  owner: req.user.id,        // server-controlled field, never client-supplied
+})
+```
+
+Two rules make it airtight:
+
+1. **Server-owned fields are never client-settable**: `owner`, `role`, `isAdmin`, `xp`, `createdAt`, `publishedAt`. They are set explicitly in code, never spread.
+2. **Update endpoints restrict fields per operation.** A `PATCH /movies/:id` accepts `updateMovieSchema`; an admin-only `PATCH /users/:id/role` accepts only `{ role }` and checks `req.user.isAdmin` first. Different operations, different schemas — never one catch-all.
+
+```js
+// update controller — explicit allowlist
+const updates = updateMovieSchema.parse(req.body)   // partial + strict
+const movie = await Movie.findOneAndUpdate(
+  { _id: req.params.id, owner: req.user.id },
+  { $set: updates },                                 // only validated fields
+  { new: true, runValidators: true }
+)
+```
+
+Note the update filter itself: `{ _id, owner: req.user.id }` — the ownership scope lives in the query, so there is no read-then-check window and no path where a wrong owner matches.
+
+## Pass 5: secrets and configuration
+
+```js
+// src/config/env.js — boot-time validation (from the architecture lesson)
+import { z } from 'zod'
+
+const envSchema = z.object({
+  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  PORT: z.coerce.number().int().positive().default(3000),
+  MONGODB_URI: z.string().startsWith('mongodb'),
+  JWT_SECRET: z.string().min(32),
+  CLIENT_URL: z.string().url(),
+})
+
+export const env = envSchema.parse(process.env)
+```
+
+Practices that keep secrets secret:
+
+- **`.env` in `.gitignore`, always** — and a `git check-ignore .env` assertion in your own muscle memory. If a secret ever hits git, treat it as burned: rotate it, don't rewrite history and hope.
+- **Rotation is scheduled, not emergency-only.** Rotate `JWT_SECRET` periodically; the advanced-auth lesson covers doing it without logging everyone out (multiple accepted secrets during overlap).
+- **Least-privilege platform credentials.** The CI deploy token should deploy, not administer the account; the database user writes to one database, not the cluster.
+- **Scan dependencies and history in CI:** `npm audit --audit-level=high` fails the build on known-bad packages; `npx gitleaks detect` (or GitHub's built-in scan) catches committed secrets.
+
+## Pass 6: dependency hygiene and safe logging
+
+Your lockfile is a supply chain. Rules:
+
+- Commit `package-lock.json`; install with `npm ci` everywhere (CI gets exactly what you tested).
+- Enable Dependabot or Renovate; review bumps weekly, not yearly — the jump from 12 patch versions behind is where breakage lives.
+- Before adding any package: check weekly downloads, last publish date, and whether you could write the 30 lines yourself. Every dependency is code you ship but did not read.
+
+Logging, meanwhile, is where secrets leak without anyone noticing:
+
+```js
+// ❌ leaks credentials into log aggregators forever
+console.log('login attempt', req.body)
+
+// ✅ explicit, shaped, redacted
+logger.info({ event: 'login_failed', email: input.email, ip: req.ip }, 'login failed')
+```
+
+Errors returned to clients get the same treatment: the error handler maps internal details to `{ error: { code, message } }` while logging the stack server-side. Database errors, stack traces, and query shapes stay out of responses — they are a map for attackers.
+
+<KeyPoint>
+Login failures must not reveal whether an email exists: same status (401), same message ("Invalid email or password") for both wrong-email and wrong-password. Registration is the one place you cannot fully hide enumeration (it must tell the user the email is taken) — rate-limit it and move on: that trade-off, not perfect obscurity, is the industry norm.
+</KeyPoint>
+
+## Try it
+
+<TryIt title="Prove the hardening with three curls" hint="Start a server with helmet, the limiters, and the 100kb body cap. Each command should trigger a distinct defense.">
+```bash
+# 1 — headers are on the wire
+curl -sI http://localhost:3000/api/v1/health | grep -iE "x-content-type|frame-options|strict-transport"
+
+# 2 — body cap rejects a 1MB payload (413 or 500->map it in your error handler)
+node -e "console.log(JSON.stringify({ title: 'x'.repeat(1_000_000) }))" > /tmp/big.json
+curl -s -X POST http://localhost:3000/api/v1/movies \
+  -H 'Content-Type: application/json' --data @/tmp/big.json | head -c 200
+
+# 3 — the auth limiter counts failed attempts (run 12 times, watch for 429)
+for i in $(seq 1 12); do
+  curl -s -o /dev/null -w "%{http_code} " -X POST http://localhost:3000/api/v1/auth/login \
+    -H 'Content-Type: application/json' -d '{"email":"nobody@test.dev","password":"wrong"}'
+done; echo
+```
+</TryIt>
+
+## Check your understanding
+
+<Quiz
+  question="A create endpoint spreads req.body into Movie.create() and the request runs through a Zod schema that does not use .strict(). What can an attacker still write?"
+  options={[
+    'Nothing — Zod strips unknown keys before the spread',
+    'Any field the schema does not mention still passes through the original req.body if the spread uses raw input rather than parsed data',
+    'Only fields with the same name as schema keys',
+    'Extra fields cause a 422 automatically'
+  ]}
+  answer={1}
+  explanation="Validation only protects what flows through it. If the handler spreads req.body (unparsed) instead of the schema's parsed output, unknown keys like role or owner ride straight into the model. The fix is structural: build the create object explicitly from parsed fields, with server-owned fields set in code."
+/>
+
+<Quiz
+  question="Why set app.set('trust proxy', 1) on Render or behind any load balancer?"
+  options={[
+    'To enable HTTPS',
+    'So Express reads the real client IP from X-Forwarded-For — otherwise every request appears to come from the proxy and rate limiting collapses into one shared bucket',
+    'To enable compression',
+    'It is required by helmet'
+  ]}
+  answer={1}
+  explanation="With a proxy in front, the socket IP is the proxy's. Trusting exactly one hop makes req.ip the real client address; trusting too many (or zero) either blends all users together or lets clients spoof their IP header. Both break IP-keyed limits and any audit log that stores IPs."
+/>
+
+<Exercise title="A hardened API with tests that prove it" difficulty="hard">
+Run all six passes over the movies API and pin each one with an integration test. The tests are the exercise's real deliverable — hardening without proof decays with the next refactor.
+
+1. **Headers:** install helmet with the API CSP from this lesson; add a test asserting `x-content-type-options: nosniff` and the CSP header are present on a live response.
+2. **Limits:** add the global and auth limiters; write tests that fire `limit + 1` failed logins and assert the final attempt gets 429 with your error envelope; assert a successful login does **not** count toward the limit (`skipSuccessfulRequests`).
+3. **Boundary:** add the 100kb body cap plus `validateParams` and strict body/query schemas on every route; tests: oversized payload rejected, unknown key rejected with 422, malformed id rejected with 404 (not 500), and `limit=500` on the list endpoint coerced down to the max.
+4. **Mass assignment:** write the attack tests — POST with `{ ..., "role": "admin" }` and PATCH with `{ "owner": "<other-user-id>" }` — both must leave the stored document unchanged; assert the database, not just the response.
+5. **Secrets:** add the env schema; confirm the app refuses to boot with a missing `JWT_SECRET` (test by spawning with it unset or by unit-testing the schema); add `npm audit --audit-level=high` and gitleaks to CI.
+6. **Logging:** audit every `console.log`/logger call for raw request bodies, tokens, or headers; redact or remove. Add a request logger that records method, path, status, duration, and a request id — nothing else.
+7. **Enumeration:** ensure login returns identical bodies for unknown email and wrong password; add a test comparing the two responses byte for byte.
+8. **Report:** list each pass, the test that proves it, and anything you deliberately left weaker (with the reason) in `SECURITY-AUDIT.md`.
+</Exercise>
+
+## Summary
+
+- Helmet sets the security headers in one middleware; verify them on the wire and tailor CSP to a JSON-only API.
+- Rate limiting works only with correct `trust proxy`, combined IP + identity keys, and a shared store (Redis) once you run multiple instances.
+- Validate every part of the request — params, body, query — with strict schemas, cap body size, and reject unknown keys loudly.
+- Mass assignment is prevented structurally: parse first, build explicit objects, and keep server-owned fields out of client reach.
+- Secrets live in the environment, rotate on a schedule, and are guarded by env-schema validation, `npm audit`, and secret scanning in CI.
+- Log shaped events, never raw requests; keep internal error details server-side; return identical login failures to prevent enumeration.
+
+Next: authentication in depth — refresh token rotation, session revocation, two-factor, OAuth, and role-based access control.

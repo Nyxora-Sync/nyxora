@@ -1,0 +1,334 @@
+Node's performance model is simple to state and easy to violate: **one thread runs your JavaScript, and everything that block it stops every request.** A CPU-heavy loop, a synchronous file read, or an accidental O(n²) in a hot path does not slow down one user — it slows down all of them, for the duration. This lesson teaches you to find those moments and fix them, then to measure whether the fix worked.
+
+## The event loop, precisely enough to debug with
+
+The phases that matter in practice, in order:
+
+```text
+timers        → setTimeout / setInterval callbacks whose time has come
+pending       → system-level callbacks (TCP errors etc.)
+poll          → incoming I/O: network, file callbacks — where "waiting" happens
+check         → setImmediate callbacks
+close         → close-event callbacks
+
+between every phase:
+  microtasks  → promise callbacks, queueMicrotask, process.nextTick
+```
+
+Three consequences you will actually debug with:
+
+1. **Microtasks starve everything.** A promise chain that never yields (a `while` loop awaiting a resolved promise) blocks timers and I/O forever — the event loop never reaches the next phase.
+2. **Synchronous anything is a stall.** `readFileSync` in a request handler is downtime for every other request; `bcrypt.hashSync` blocks the thread for the full hashing time (~100ms at cost 12 — hundreds of dropped requests per second under load).
+3. **A callback that takes 200ms costs 200ms for everyone behind it.** Latency is not per-request; it queues.
+
+The measurable version of "blocked" is **event loop lag** — how late timers fire. `prom-client`'s `collectDefaultMetrics` exposes `nodejs_eventloop_lag_p99_seconds`; watch that gauge before and after every performance change.
+
+## Catastrophic patterns and their fixes
+
+Five recurring offenders in MERN code, each with a drop-in replacement:
+
+```js
+// 1 — sync crypto in a request path
+// ❌ blocks ~100ms per call
+const hash = bcrypt.hashSync(password, 12)
+// ✅ async: the CPU work moves off the event loop internals
+const hash = await bcrypt.hash(password, 12)
+
+// 2 — sync file/JSON work
+// ❌ whole-file read on every request
+const config = JSON.parse(fs.readFileSync('./data/seed.json', 'utf8'))
+// ✅ read once at startup / cache the parsed result; async reads for per-request files
+const config = JSON.parse(await fs.promises.readFile('./data/seed.json', 'utf8'))
+
+// 3 — CPU loops in handlers
+// ❌ 500ms of work per request: image hashing, CSV building, diffing
+function buildReport(rows) { /* tight loops over 100k rows */ }
+// ✅ off the request path entirely: queue it (architecture lesson) or worker_threads
+
+// 4 — catastrophic regex backtracking
+// ❌ (a+)+$ against 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaX' — exponential burn
+const evil = /^(a+)+$/
+// ✅ rewrite with clear structure + anchors and test with malicious inputs
+//    (the `safe-regex` lint rule / eslint-plugin-regexp help here)
+
+// 5 — unbounded concurrency
+// ❌ 10,000 simultaneous outbound requests exhausts sockets and memory
+await Promise.all(ids.map((id) => fetch(url(id))))
+// ✅ bounded: five at a time
+import pLimit from 'p-limit'
+const limit = pLimit(5)
+await Promise.all(ids.map((id) => limit(() => fetch(url(id)))))
+```
+
+That last one deserves emphasis: `Promise.all` over thousands of items is the most common "Node ran out of memory" in production code. The fixes are p-limit (concurrency cap), `for await` with awaits (serial, when one-by-one is fine), or the queue (when the work can be asynchronous anyway).
+
+## Measuring: numbers before opinions
+
+```bash
+# load test: a modern replacement for ab/wrk, tiny and scriptable
+npm install -g autocannon
+
+# the simplest meaningful test: 100 connections for 10 seconds
+autocannon -c 100 -d 10 http://localhost:3000/api/v1/movies
+
+# reading the output (the parts that matter):
+#   Latency p50/p99 — p99 is where the pain lives
+#   Req/Sec        — throughput
+#   Errors         — any non-2xx counts against you
+```
+
+For CPU-heavy hot paths, the profiler is built in:
+
+```bash
+# record 30 seconds of CPU under load
+node --cpu-prof --cpu-prof-dir .profiles src/server.js &
+autocannon -c 50 -d 30 http://localhost:3000/api/v1/movies
+kill %1
+# open .profiles/*.cpuprofile in Chrome DevTools → Performance tab (flame chart)
+# the widest bar that is YOUR code (not node internals) is the fix target
+
+# zero-dependency alternative: built-in V8 sampling profiler
+node --prof src/server.js
+# ...load it, then:
+node --prof-process isolate-*.log | head -40
+```
+
+Read the flame chart like this: **width = time, and your code should be narrow.** If 60% of the chart is one function, that is the workload; if it is V8 garbage collection, you are allocating too much per request (often from mapping/parsing large arrays — projection and `lean()` from the database lesson fix it).
+
+For anything trickier, `clinic` gives whole-system pictures (`clinic doctor` for event loop and GC, `clinic flame` for the flame chart with better context), and `0x` is a modern profiling alternative; both are worth knowing by name.
+
+<KeyPoint>
+Optimize only what a profile says is hot, and re-measure after every change. Intuition about performance is wrong often enough that acting without numbers is as likely to slow things down as speed them up — and a fix you cannot measure is one you cannot defend in a review.
+</KeyPoint>
+
+## Memory: leaks and their usual suspects
+
+Node's heap grows to fit live data and periodically collects it. A **leak** is data that stays reachable after it is logically dead — and in long-running servers, leaks do not crash things today; they crash things after a deploy and a weekend.
+
+The three leaks that account for most incidents:
+
+```js
+// 1 — listeners that are never removed
+// ❌ every request adds a listener; each holds a reference to that request's context
+app.get('/stream', (req, res) => {
+  emitter.on('update', () => res.write('tick'))
+})
+// ✅ register once with a reference you can detach; or per-connection with cleanup
+const onChange = () => res.write('tick')
+emitter.on('update', onChange)
+res.on('close', () => emitter.off('update', onChange))
+
+// 2 — caches without bounds
+// ❌ this Map grows forever; each user is a permanent allocation
+const userCache = new Map()   // Map.set on every request, never deleted
+// ✅ bounded LRU with TTL (lru-cache) or Redis (with its own eviction policy)
+
+// 3 — accidentally captured scope
+// ❌ the closure keeps the whole 50MB buffer alive for one string
+const preview = () => buffer.toString('utf8').slice(0, 200)
+// ✅ slice first, then close over only what escapes
+const text = hugeBuffer.toString('utf8').slice(0, 200)
+const preview = () => text
+```
+
+Find them with heap snapshots rather than guesses:
+
+```bash
+# capture, exercise the suspected leak, capture again, compare
+node --heapsnapshot-near-heap-limit=1 src/server.js   # or via the inspector:
+# node --inspect src/server.js → Chrome DevTools → Memory → take snapshots A, B, C
+# Diff B against A: retained size per constructor. Arrays/Maps/strings growing
+# linearly with request count are your leak.
+```
+
+While you are there, tune the ceiling: `--max-old-space-size=512` (or ~75% of the container memory limit) makes the process die predictably instead of being OOM-killed by the orchestrator mid-request. Pair it with the graceful shutdown from the observability lesson so a restart is invisible.
+
+## Streams: data larger than memory
+
+Any endpoint that builds a large payload in memory before sending is a memory incident waiting for scale:
+
+```js
+// ❌ 500k rows buffered twice — as documents (lean) and as a JSON string
+router.get('/export', async (req, res) => {
+  const movies = await MovieModel.find({ owner: req.user.id }).lean()   // 300MB
+  res.json({ data: movies })                                            // + more for the string
+})
+
+// ✅ stream rows out as they arrive: flat memory, first bytes faster
+import { stringify } from 'csv-stringify'
+
+router.get('/export', async (req, res) => {
+  res.setHeader('Content-Type', 'text/csv')
+  res.setHeader('Content-Disposition', 'attachment; filename="movies.csv"')
+
+  const csv = stringify({ header: true, columns: ['title', 'releaseYear', 'genres'] })
+  csv.pipe(res)
+
+  const cursor = MovieModel.find({ owner: req.user.id })
+    .select('title releaseYear genres')
+    .lean()
+    .cursor()                                    // batches of ~100 docs, never all at once
+
+  for await (const doc of cursor) {
+    csv.write({ ...doc, genres: doc.genres.join('|') })
+  }
+  csv.end()
+})
+```
+
+The same shape applies to file downloads (`fs.createReadStream(...).pipe(res)`), uploads (`busboy`/`multer` streams), and any transform you can express as read → map → write. Node's `stream.pipeline` (from `node:stream/promises`) wires the error handling so one failure tears down the chain instead of leaking handles — use it instead of manual `.pipe` chains in new code.
+
+## Worker threads and cluster: buying parallelism
+
+One thread is Node's model, but the machine has eight cores. Two tools exploit them, with different jobs:
+
+**worker_threads** — move CPU work off the main loop within one process:
+
+```js
+// src/workers/thumbnail.worker.js — runs in its own thread, own heap
+import { parentPort, workerData } from 'node:worker_threads'
+import sharp from 'sharp'
+
+const output = await sharp(workerData.input)
+  .resize(320, 320, { fit: 'inside' })
+  .webp({ quality: 78 })
+  .toBuffer()
+
+parentPort.postMessage({ output })
+```
+
+```js
+// src/workers/run-thumbnail.js — the main-thread wrapper
+import { Worker } from 'node:worker_threads'
+
+export function makeThumbnail(input) {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL('./thumbnail.worker.js', import.meta.url), {
+      workerData: { input },
+    })
+    worker.once('message', resolve)
+    worker.once('error', reject)
+  })
+}
+```
+
+Rules: workers are for **CPU** work (image/PDF/CSV processing, hashing at scale), they transfer data by copy by default (structured clone), and they are not free — spawning one per item is a leak of threads; use a small pool or — more practically — put this behind the BullMQ queue from the architecture lesson and let worker *processes* do it. Which is the second tool:
+
+**cluster / multiple processes** — full-process parallelism behind the same port:
+
+```bash
+# the platform-level answer, no code:
+pm2 start src/server.js -i max        # one process per CPU core
+
+# or with the container approach: more replicas behind the load balancer
+docker compose up -d --scale api=4    # with Nginx/HAProxy in front
+```
+
+Multi-process is the better default at this scale: state is already externalized (the earlier lessons), the process manager restarts crashed workers, and rolling deploys are per-process. Worker threads remain the right tool for a single hot CPU task inside one process — resize-on-upload in a self-hosted environment, for example — while cluster/replicas are the right answer for overall throughput.
+
+## The practical win list
+
+Before reaching for any of the above, check these — in order, each is cheap and common:
+
+```text
+1. Every await in a hot path is actually async (no *Sync, no hashSync, no execSync)
+2. Bounded concurrency on fan-out (p-limit) — no Promise.all over unbounded lists
+3. .lean() and .select() on read paths (the database lesson) — less JSON parsing, less GC
+4. No JSON.parse(JSON.stringify(x)) deep clones in handlers (use structuredClone or plain spreads)
+5. Logging at info with full objects on fast paths — pino is fast, but formatting 10KB per request is not
+6. Compression handled at the edge/CDN, not by a per-request zlib stream in Node
+7. Node LTS + current deps: runtime versions carry real perf gains; `node --version` aging for two years is itself a finding
+```
+
+<Callout type="tip" title="p99 is the number users feel">
+  Averages hide the pain: p50 of 20ms with p99 of 800ms means 1 in 100 requests — dozens per hour for a busy app — feels broken. Report p50, p95, and p99 from your load tests, and set the budget on p99. The observability lesson's latency histogram makes this permanent in production.
+</Callout>
+
+## Try it
+
+<TryIt title="Catch the event loop red-handed" hint="Two endpoints, same output, one blocking. Run the lag monitor while hammering each and watch the report. The blocking version stalls every concurrent request — exactly what the p99 would show under real traffic.">
+```js
+import express from 'express'
+import bcrypt from 'bcrypt'
+import { monitorEventLoopDelay } from 'node:perf_hooks'
+
+const app = express()
+const histogram = monitorEventLoopDelay({ resolution: 10 })
+histogram.enable()
+
+app.get('/hash/blocking', (req, res) => {
+  const hash = bcrypt.hashSync('secret-password', 12)   // ~100ms on the event loop
+  res.json({ hash: `${hash.slice(0, 12)}…` })
+})
+
+app.get('/hash/async', async (req, res) => {
+  const hash = await bcrypt.hash('secret-password', 12) // off the loop
+  res.json({ hash: `${hash.slice(0, 12)}…` })
+})
+
+app.get('/lag', (req, res) => {
+  res.json({
+    p50Ms: +(histogram.percentile(50) / 1e6).toFixed(2),
+    p99Ms: +(histogram.percentile(99) / 1e6).toFixed(2),
+  })
+})
+
+app.listen(3000)
+
+// Terminal 1: node server.js
+// Terminal 2: autocannon -c 50 -d 10 http://localhost:3000/hash/blocking
+// Terminal 3: curl localhost:3000/lag        → p99 in the hundreds of ms
+// Repeat with /hash/async                    → p99 a few ms
+```
+</TryIt>
+
+## Check your understanding
+
+<Quiz
+  question="Under load, an endpoint that calls bcrypt.hashSync inside the handler destroys throughput for ALL requests. Why?"
+  options={[
+    'bcrypt is always slow regardless of mode',
+    'hashSync burns CPU on the single event-loop thread, so every other request waits behind it — 100ms blocks the whole process, not just one request',
+    'Sync functions use more memory',
+    'bcrypt blocks the thread pool'
+  ]}
+  answer={1}
+  explanation="Node runs your JavaScript on one thread. Synchronous CPU work is a stop-the-world pause for the process: at 100 concurrent requests, one 100ms stall delays all of them. The async version moves the work where the loop can continue — which is why *Sync variants are effectively banned inside request paths."
+/>
+
+<Quiz
+  question="What does measuring event loop lag (nodejs_eventloop_lag_p99) actually reveal?"
+  options={[
+    'How much memory the process uses',
+    'How late timers fire — a direct signal that synchronous work or microtask storms are blocking the loop, which is the root of request latency spikes',
+    'The number of active connections',
+    'The database query time'
+  ]}
+  answer={1}
+  explanation="Lag is the difference between when a timer was due and when it ran. Near-zero means the loop is responsive; hundreds of milliseconds means something held the thread. It is the single best runtime-level metric because it captures every blocking cause without needing to know which one it is."
+/>
+
+<Exercise title="Profile, fix, and prove it" difficulty="hard">
+Run a full performance pass on the API: measure, find, fix, re-measure — with numbers for every claim.
+
+1. **Baseline:** run `autocannon -c 100 -d 15` on the movies list endpoint; record req/sec, p50, p99, and any errors. Also record event loop lag p99 via the `/lag` pattern from Try-it.
+2. **Deliberate hot spot:** add a realistic CPU-heavy endpoint (server-side CSV/report building over 100k seeded rows, synchronous, in the handler). Baseline it; confirm the lag gauge spikes during load.
+3. **Profile:** capture a `--cpu-prof` flame chart during load; screenshot or note the widest frames attributable to your code. Identify whether the cost is CPU work, JSON/serialization, or GC.
+4. **Fix, three ways:** (a) move report generation to a BullMQ job + worker process; (b) stream one large export endpoint with `csv-stringify` + cursor instead of buffering; (c) remove one `*Sync` call and one `Promise.all` fan-out (p-limit). Re-run the same autocannon tests for each and tabulate before/after.
+5. **Leak hunt:** introduce the listener leak from this lesson behind a debug flag; drive 10k requests; take heap snapshots A and B; identify the growing retainer in the diff; fix with proper `close` cleanup; confirm the retainer is flat between snapshots C and D after the fix.
+6. **Bound the memory:** set `--max-old-space-size` to ~75% of your local container limit; run the large export without streaming and observe the predictable failure; restore streaming and confirm completion. Document the ceiling in `docs/performance.md`.
+7. **Concurrency cap proof:** hit a fan-out endpoint with 1,000 ids with and without p-limit; record peak memory (process.memoryUsage().rss) and socket errors.
+8. **Report:** one page: baseline table, changes made, final table, and the two sentences you would say in a review to justify each change. Numbers or it did not happen.
+</Exercise>
+
+## Summary
+
+- One thread runs your JavaScript; synchronous work, microtask storms, and long callbacks stall every request — event loop lag is the measurable symptom.
+- Ban `*Sync` in request paths, bound fan-out concurrency, rewrite catastrophic regexes, and never leave the request path for CPU-heavy work.
+- Measure with autocannon (p50/p95/p99) and the built-in profilers (`--cpu-prof`, `--prof-process`, clinic/0x); optimize only what profiles show, then re-measure.
+- Leaks come from un-removed listeners, unbounded caches, and captured scope; find them with heap snapshot diffs, cap the heap size, and shut down gracefully.
+- Stream anything larger than memory (cursor + transform + pipe); reach for worker_threads for a single hot CPU task and multi-process (PM2/cluster/replicas) for throughput across cores.
+- Check the cheap wins first: async everywhere, `.lean()`/`.select()`, bounded concurrency, no deep-clone idioms, edge compression.
+
+Next: the database under load — explain plans, index design, aggregation efficiency, connection pooling, and the numbers that prove each one.
+
