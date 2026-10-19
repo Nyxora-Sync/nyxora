@@ -14,6 +14,15 @@ const nextConfig: NextConfig = {
       },
     },
   },
+  async redirects() {
+    return [
+      {
+        source: "/showcase",
+        destination: "/community/showcase",
+        permanent: true,
+      },
+    ];
+  },
 };
 
 const withMDX = createMDX({

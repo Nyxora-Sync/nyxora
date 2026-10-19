@@ -1,63 +1,57 @@
 import Link from 'next/link'
 import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { CommunityStats } from '@/components/community/community-stats'
 import {
   Users, MessageCircle, Rocket, Heart, Star,
-  ArrowRight, ExternalLink, Code2, Award, HandHeart,
+  ArrowRight, ExternalLink, Code2, HandHeart,
 } from 'lucide-react'
-import { GithubIcon, DiscordIcon } from '@/components/icons/brand'
+import { GithubIcon } from '@/components/icons/brand'
 import { cn, getAccent } from '@/lib/utils'
 
 export const metadata = {
   title: 'Community',
-  description: 'Join the MERN Learn community: Discord, GitHub Discussions, project showcase, and study groups.',
+  description: 'Learn MERN alongside other developers: lesson discussions, project showcase, and open-source contribution.',
 }
-
-const communityStats = [
-  { value: '5,000+', label: 'Discord Members' },
-  { value: '1,200+', label: 'GitHub Stars' },
-  { value: '350+', label: 'Projects Shared' },
-  { value: '24/7', label: 'Peer Support' },
-]
 
 const channels = [
   {
-    name: 'Discord Server',
-    description: 'Real-time chat, voice study rooms, code help, and weekly events.',
-    icon: DiscordIcon,
-    color: 'indigo',
-    cta: 'Join Discord',
-    href: 'https://discord.gg/mern-learn',
-    external: true,
-  },
-  {
-    name: 'GitHub Discussions',
-    description: 'Q&A, show your work, feature requests, and lesson discussions.',
-    icon: GithubIcon,
-    color: 'slate',
-    cta: 'Browse Discussions',
-    href: 'https://github.com/mern-learn/mern-learn/discussions',
-    external: true,
-  },
-  {
     name: 'Project Showcase',
-    description: 'Share your MERN projects, get feedback, and find inspiration.',
+    description: 'Real apps built by learners. Ask how they work, leave feedback, or share your own.',
     icon: Rocket,
     color: 'emerald',
-    cta: 'View Showcase',
+    cta: 'Browse projects',
     href: '/community/showcase',
     external: false,
   },
   {
-    name: 'Study Groups',
-    description: 'Find study buddies at your level. Weekly accountability check-ins.',
-    icon: Users,
-    color: 'violet',
-    cta: 'Find a Group',
-    href: '/community/study-groups',
+    name: 'Lesson Discussions',
+    description: 'Every lesson has a thread for questions, corrections, and the context that did not fit in the lesson.',
+    icon: MessageCircle,
+    color: 'blue',
+    cta: 'Open a lesson',
+    href: '/learn',
+    external: false,
+  },
+  {
+    name: 'GitHub Discussions',
+    description: 'Longer questions, feature ideas, and show-and-tell that outgrow a single lesson.',
+    icon: GithubIcon,
+    color: 'slate',
+    cta: 'Browse discussions',
+    href: 'https://github.com/mern-learn/mern-learn/discussions',
+    external: true,
+  },
+  {
+    name: 'Contribute',
+    description: 'Fix a typo, add a resource, write a lesson, or review someone else\'s pull request.',
+    icon: HandHeart,
+    color: 'rose',
+    cta: 'Start contributing',
+    href: '/contribute',
     external: false,
   },
 ]
@@ -66,16 +60,16 @@ const guidelines = [
   { title: 'Be kind', description: 'Everyone was a beginner once. No question is too basic.' },
   { title: 'Be specific', description: 'Share code snippets, error messages, and what you\'ve tried.' },
   { title: 'Give back', description: 'Answer questions once you\'ve learned something. Teaching cements learning.' },
-  { title: 'No spam', description: 'No self-promotion, ads, or recruiting without permission.' },
+  { title: 'No spam', description: 'Share projects in the showcase; don\'t drop links in every thread.' },
   { title: 'Stay on topic', description: 'Keep discussions related to web development and MERN.' },
   { title: 'Credit sources', description: 'Link to tutorials and docs you reference.' },
 ]
 
 const waysToContribute = [
-  { icon: Code2, title: 'Contribute Lessons', description: 'Write or improve lesson content via pull request.', color: 'emerald' },
-  { icon: ExternalLink, title: 'Submit Resources', description: 'Found an amazing free resource? Add it to the directory.', color: 'blue' },
-  { icon: Star, title: 'Star the Repo', description: 'Help others discover the project on GitHub.', color: 'amber' },
-  { icon: HandHeart, title: 'Translate', description: 'Help translate lessons into Spanish, Portuguese, Hindi, and more.', color: 'rose' },
+  { icon: Code2, title: 'Contribute Lessons', description: 'Write or improve lesson content via pull request.', color: 'emerald', href: '/contribute' },
+  { icon: ExternalLink, title: 'Submit Resources', description: 'Found an amazing free resource? Add it to the directory.', color: 'blue', href: '/contribute#resources' },
+  { icon: Star, title: 'Star the Repo', description: 'Help others discover the project on GitHub.', color: 'amber', href: 'https://github.com/mern-learn/mern-learn' },
+  { icon: HandHeart, title: 'Translate', description: 'Help translate lessons into Spanish, Portuguese, Hindi, and more.', color: 'rose', href: '/contribute#translate' },
 ]
 
 export default function CommunityPage() {
@@ -96,7 +90,8 @@ export default function CommunityPage() {
               </span>
             </h1>
             <p className="mt-4 max-w-2xl mx-auto text-lg text-muted-foreground">
-              You don&apos;t have to learn alone. Join thousands of developers helping each other master the MERN stack.
+              Learning alone is slower. Ask questions under lessons, share what you build, and help
+              the next person over the wall.
             </p>
           </div>
         </section>
@@ -104,21 +99,14 @@ export default function CommunityPage() {
         {/* Stats */}
         <section className="py-10 border-b border-border/50 bg-muted/30">
           <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-            <div className="grid grid-cols-2 gap-6 sm:grid-cols-4">
-              {communityStats.map((stat) => (
-                <div key={stat.label} className="text-center">
-                  <p className="text-3xl font-bold">{stat.value}</p>
-                  <p className="text-sm text-muted-foreground mt-1">{stat.label}</p>
-                </div>
-              ))}
-            </div>
+            <CommunityStats />
           </div>
         </section>
 
         {/* Channels */}
         <section className="py-12 sm:py-16">
           <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-            <h2 className="text-2xl font-bold tracking-tight mb-8">Where to Find Us</h2>
+            <h2 className="text-2xl font-bold tracking-tight mb-8">Where the community lives</h2>
             <div className="grid gap-6 sm:grid-cols-2">
               {channels.map((channel) => (
                 <Card key={channel.name} className="hover:shadow-lg transition-shadow">
@@ -133,14 +121,14 @@ export default function CommunityPage() {
                         <h3 className="font-semibold">{channel.name}</h3>
                         <p className="mt-1 text-sm text-muted-foreground">{channel.description}</p>
                         <Button variant="outline" size="sm" className="mt-4" asChild>
-                          <a
+                          <Link
                             href={channel.href}
                             target={channel.external ? '_blank' : undefined}
                             rel={channel.external ? 'noopener noreferrer' : undefined}
                           >
                             {channel.cta}
                             <ArrowRight className="ml-2 h-3.5 w-3.5" aria-hidden="true" />
-                          </a>
+                          </Link>
                         </Button>
                       </div>
                     </div>
@@ -185,17 +173,29 @@ export default function CommunityPage() {
             </div>
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
               {waysToContribute.map((way) => (
-                <Card key={way.title}>
-                  <CardContent className="pt-6">
-                    <div
-                      className={cn('flex h-11 w-11 items-center justify-center rounded-xl mb-4', getAccent(way.color).icon)}
-                    >
-                      <way.icon className="h-5 w-5" aria-hidden="true" />
-                    </div>
-                    <h3 className="font-semibold text-sm">{way.title}</h3>
-                    <p className="mt-1 text-xs text-muted-foreground">{way.description}</p>
-                  </CardContent>
-                </Card>
+                <Link
+                  key={way.title}
+                  href={way.href}
+                  target={way.href.startsWith('http') ? '_blank' : undefined}
+                  rel={way.href.startsWith('http') ? 'noopener noreferrer' : undefined}
+                  className="group"
+                >
+                  <Card className="h-full transition-shadow group-hover:shadow-md">
+                    <CardContent className="pt-6">
+                      <div
+                        className={cn('flex h-11 w-11 items-center justify-center rounded-xl mb-4', getAccent(way.color).icon)}
+                      >
+                        <way.icon className="h-5 w-5" aria-hidden="true" />
+                      </div>
+                      <h3 className="font-semibold text-sm">{way.title}</h3>
+                      <p className="mt-1 text-xs text-muted-foreground">{way.description}</p>
+                      <span className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-primary">
+                        Learn more
+                        <ArrowRight className="h-3 w-3 transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
+                      </span>
+                    </CardContent>
+                  </Card>
+                </Link>
               ))}
             </div>
           </div>
@@ -206,20 +206,20 @@ export default function CommunityPage() {
           <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 text-center">
             <h2 className="text-2xl font-bold tracking-tight">Ready to join?</h2>
             <p className="mt-3 text-muted-foreground max-w-xl mx-auto">
-              The Discord server is the fastest way to get help and meet other learners.
+              Share what you built, ask the question you are stuck on, or help the next learner.
             </p>
             <div className="mt-6 flex flex-col items-center justify-center gap-4 sm:flex-row">
               <Button size="lg" asChild className="gap-2">
-                <a href="https://discord.gg/mern-learn" target="_blank" rel="noopener noreferrer">
-                  <DiscordIcon className="h-5 w-5" aria-hidden="true" />
-                  Join Discord Server
-                </a>
+                <Link href="/community/showcase">
+                  <Rocket className="h-5 w-5" aria-hidden="true" />
+                  Explore the showcase
+                </Link>
               </Button>
               <Button size="lg" variant="outline" asChild className="gap-2">
-                <a href="https://github.com/mern-learn/mern-learn/discussions" target="_blank" rel="noopener noreferrer">
-                  <GithubIcon className="h-5 w-5" aria-hidden="true" />
-                  GitHub Discussions
-                </a>
+                <Link href="/learn">
+                  <ArrowRight className="h-5 w-5" aria-hidden="true" />
+                  Start a lesson
+                </Link>
               </Button>
             </div>
           </div>

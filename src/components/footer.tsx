@@ -28,7 +28,7 @@ const footerLinks: FooterColumn = {
   community: [
     { name: 'Discord', href: 'https://discord.gg/mern-learn', external: true, icon: DiscordIcon },
     { name: 'GitHub Discussions', href: 'https://github.com/mern-learn/mern-learn/discussions', external: true, icon: GithubIcon },
-    { name: 'Project Showcase', href: '/showcase' },
+    { name: 'Project Showcase', href: '/community/showcase' },
     { name: 'Contribute', href: '/contribute' },
     { name: 'Code of Conduct', href: '/code-of-conduct' },
   ],

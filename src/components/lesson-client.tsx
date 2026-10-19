@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { Textarea } from '@/components/ui/textarea'
+import { CommentThread } from '@/components/community/comment-thread'
 import {
   CheckCircle2, Circle, ExternalLink, Play, FileText, BookOpen, Code2,
   ChevronLeft, ChevronRight, Zap, Bookmark, BookmarkCheck, Lightbulb, StickyNote,
@@ -262,6 +263,15 @@ export function LessonClient({ lesson, track, moduleKey, prev, next, children }:
           </div>
         </CardContent>
       </Card>
+
+      {/* Discussion */}
+      <Separator />
+      <CommentThread
+        targetType="lesson"
+        targetId={lesson.id}
+        title="Lesson discussion"
+        description="Stuck on a step, spotted an error, or found a better way? Leave it here for the next learner."
+      />
 
       {/* Prev/Next Navigation */}
       <Separator />
