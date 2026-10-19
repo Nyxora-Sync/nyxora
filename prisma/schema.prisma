@@ -266,3 +266,27 @@ model Resource {
 
   @@index([lessonId])
 }
+
+// Newsletter - one row per address. Unsubscribing deletes the row.
+model NewsletterSubscriber {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  source    String   @default("site") // footer, newsletter, site page
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+// Private contact messages. Stored first, then a best-effort email notification.
+model ContactMessage {
+  id        String   @id @default(cuid())
+  name      String?
+  email     String
+  topic     String   @default("general") // general, bug, content, conduct, privacy, security
+  message   String   @db.Text
+  handled   Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([handled])
+}

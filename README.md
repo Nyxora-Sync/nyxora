@@ -188,12 +188,12 @@ Any Node host works (Render, Railway, Fly.io). Requirements: Node 20+, build com
 - Never commit `.env.local` (it's gitignored)
 - Generate a fresh `AUTH_SECRET` for production
 - OAuth callback URLs: `https://your-domain/api/auth/callback/github` (and `/google`)
-- Progress data is local-first; server sync is an upcoming feature
+- Progress data is local-first and syncs to the signed-in account when enabled
 
 ## 📄 License
 
-- **Code:** MIT
-- **Content:** CC BY-SA 4.0
+- **Code:** MIT (see `LICENSE`)
+- **Content:** CC BY-SA 4.0 (see `LICENSE-CONTENT`)
 
 ## 🙏 Acknowledgements
 

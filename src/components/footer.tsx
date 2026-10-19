@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { Mail, Heart, Code2 } from 'lucide-react'
 import { GithubIcon, XIcon } from '@/components/icons/brand'
-import { cn } from '@/lib/utils'
+import { NewsletterForm } from '@/components/newsletter-form'
 
 interface FooterLink {
   name: string
@@ -21,7 +21,7 @@ const footerLinks: FooterColumn = {
   learn: [
     { name: 'Beginner Track', href: '/learn/beginner' },
     { name: 'Developer Track', href: '/learn/developer' },
-    { name: 'All Modules', href: '/learn/modules' },
+    { name: 'All Lessons', href: '/learn' },
     { name: 'Resources', href: '/resources' },
     { name: 'Roadmap', href: '/roadmap' },
   ],
@@ -50,15 +50,15 @@ const footerLinks: FooterColumn = {
 const socialLinks: FooterLink[] = [
   { name: 'GitHub', href: 'https://github.com/Nyxora-Sync/mern-learn', icon: GithubIcon },
   { name: 'Twitter', href: 'https://twitter.com/mernlearn', icon: XIcon },
-  { name: 'Email', href: 'mailto:hello@mern-learn.dev', icon: Mail },
+  { name: 'Contact', href: '/contact', icon: Mail },
 ]
 
 export function Footer() {
   return (
     <footer className="border-t border-border/50 bg-muted/30" role="contentinfo">
       <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8 lg:py-16">
-        <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-5">
-          <div className="lg:col-span-2">
+        <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-6">
+          <div className="md:col-span-2 lg:col-span-2">
             <Link href="/" className="flex items-center gap-2" aria-label="MERN Learn Home">
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500 to-violet-600">
                 <Code2 className="h-5 w-5 text-white" aria-hidden="true" />
@@ -139,26 +139,11 @@ export function Footer() {
           <div>
             <h3 className="font-semibold">Stay Updated</h3>
             <p className="mt-2 text-sm text-muted-foreground">
-              Get new lessons, resources, and community updates delivered to your inbox.
+              Occasional updates when a new module or major resource ships. No spam.
             </p>
-            <form className="mt-4 flex gap-2" action="/newsletter" method="POST">
-              <label htmlFor="email" className="sr-only">
-                Email address
-              </label>
-              <input
-                type="email"
-                id="email"
-                name="email"
-                placeholder="Enter your email"
-                className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
-                required
-              />
-              <button type="submit" className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors">
-                Subscribe
-              </button>
-            </form>
+            <NewsletterForm compact />
             <p className="mt-3 text-xs text-muted-foreground">
-              No spam. Unsubscribe anytime.{' '}
+              Unsubscribe anytime.{' '}
               <a href="/privacy" className="underline hover:text-foreground">Privacy Policy</a>
             </p>
           </div>
@@ -167,7 +152,7 @@ export function Footer() {
         <div className="mt-12 flex flex-col items-center justify-between gap-4 border-t border-border/50 pt-8 sm:flex-row">
           <p className="text-sm text-muted-foreground">
             Built with{' '}
-            <span className="flex items-center gap-1.5">
+            <span className="inline-flex items-center gap-1.5">
               <Heart className="h-3.5 w-3.5 text-rose-500" aria-hidden="true" />
               <Code2 className="h-3.5 w-3.5" aria-hidden="true" />
             </span>{' '}

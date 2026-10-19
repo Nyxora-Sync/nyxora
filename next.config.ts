@@ -21,6 +21,11 @@ const nextConfig: NextConfig = {
         destination: "/community/showcase",
         permanent: true,
       },
+      {
+        source: "/learn/modules",
+        destination: "/learn",
+        permanent: true,
+      },
     ];
   },
 };

@@ -55,7 +55,11 @@ export const metadata: Metadata = {
     creator: '@mernlearn',
   },
   icons: {
-    icon: '/favicon.ico',
+    icon: [
+      { url: '/favicon.ico', sizes: 'any' },
+      { url: '/icon.svg', type: 'image/svg+xml' },
+      { url: '/favicon-32x32.png', sizes: '32x32', type: 'image/png' },
+    ],
     shortcut: '/favicon-16x16.png',
     apple: '/apple-touch-icon.png',
   },
