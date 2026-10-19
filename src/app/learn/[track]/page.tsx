@@ -1,10 +1,13 @@
 import { notFound } from 'next/navigation'
+import type { Metadata } from 'next'
 
 export const instant = false
 import Link from 'next/link'
 import { getTrack, tracks, getTotalXP, getTotalMinutes } from '@/lib/curriculum'
 import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
+import { JsonLd } from '@/components/structured-data'
+import { absoluteUrl, pageMetadata } from '@/lib/seo'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { TrackProgressClient } from '@/components/track-progress-client'
@@ -20,6 +23,26 @@ export function generateStaticParams() {
   return tracks.map((track) => ({ track: track.key }))
 }
 
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ track: string }>
+}): Promise<Metadata> {
+  const { track: trackKey } = await params
+  const track = getTrack(trackKey)
+
+  if (!track) {
+    return { title: 'Track not found', robots: { index: false, follow: false } }
+  }
+
+  return pageMetadata({
+    title: track.name,
+    description: track.description,
+    path: `/learn/${track.key}`,
+    keywords: [track.name, 'MERN curriculum', 'learn MERN', 'MongoDB', 'Express', 'React', 'Node.js'],
+  })
+}
+
 export default async function TrackPage({ params }: { params: Promise<{ track: string }> }) {
   const { track: trackKey } = await params
   const track = getTrack(trackKey)
@@ -32,8 +55,48 @@ export default async function TrackPage({ params }: { params: Promise<{ track: s
   const totalLessons = track.modules.reduce((sum, m) => sum + m.lessons.length, 0)
   const isBeginner = track.key === 'beginner'
 
+  const trackPath = `/learn/${track.key}`
+  const courseSchema = {
+    '@context': 'https://schema.org',
+    '@type': 'Course',
+    name: `${track.name} — MERN Learn`,
+    description: track.description,
+    url: absoluteUrl(trackPath),
+    provider: {
+      '@type': 'Organization',
+      name: 'MERN Learn',
+      url: absoluteUrl('/'),
+    },
+    isAccessibleForFree: true,
+    inLanguage: 'en',
+    educationalLevel: isBeginner ? 'Beginner' : 'Beginner to advanced',
+    teaches: track.modules.map((module) => module.name),
+    offers: {
+      '@type': 'Offer',
+      category: 'Free',
+      price: 0,
+      priceCurrency: 'USD',
+      availability: 'https://schema.org/InStock',
+    },
+    hasCourseInstance: {
+      '@type': 'CourseInstance',
+      courseMode: 'online',
+      courseWorkload: `PT${totalHours}H`,
+    },
+  }
+  const breadcrumbSchema = {
+    '@context': 'https://schema.org',
+    '@type': 'BreadcrumbList',
+    itemListElement: [
+      { '@type': 'ListItem', position: 1, name: 'Home', item: absoluteUrl('/') },
+      { '@type': 'ListItem', position: 2, name: 'Learn', item: absoluteUrl('/learn') },
+      { '@type': 'ListItem', position: 3, name: track.name, item: absoluteUrl(trackPath) },
+    ],
+  }
+
   return (
     <div className="flex min-h-screen flex-col">
+      <JsonLd data={[breadcrumbSchema, courseSchema]} />
       <Header />
       <main className="flex-1">
         {/* Track Header */}

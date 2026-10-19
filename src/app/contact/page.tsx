@@ -18,12 +18,14 @@ import {
   Users,
 } from 'lucide-react'
 import { GithubIcon } from '@/components/icons/brand'
+import { pageMetadata } from '@/lib/seo'
 
-export const metadata: Metadata = {
+export const metadata: Metadata = pageMetadata({
   title: 'Contact',
   description:
     'Contact the MERN Learn maintainers: lesson corrections, bugs, privacy requests, code of conduct reports, and security concerns.',
-}
+  path: '/contact',
+})
 
 export default function ContactPage() {
   return (

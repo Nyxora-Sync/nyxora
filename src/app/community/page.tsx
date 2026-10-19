@@ -11,11 +11,14 @@ import {
 } from 'lucide-react'
 import { GithubIcon } from '@/components/icons/brand'
 import { cn, getAccent } from '@/lib/utils'
+import { pageMetadata } from '@/lib/seo'
 
-export const metadata = {
+export const metadata = pageMetadata({
   title: 'Community',
-  description: 'Learn MERN alongside other developers: lesson discussions, project showcase, and open-source contribution.',
-}
+  description: 'Learn MERN alongside other developers: lesson discussions, project showcase, public profiles, and open-source contribution.',
+  path: '/community',
+  keywords: ['MERN community', 'developer showcase', 'learn to code with others'],
+})
 
 const channels = [
   {

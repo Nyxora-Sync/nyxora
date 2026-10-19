@@ -11,6 +11,7 @@ import {
   Rocket, Smartphone, Brain,
 } from 'lucide-react'
 import { cn, getAccent } from '@/lib/utils'
+import { pageMetadata } from '@/lib/seo'
 
 const beginnerRoadmap = [
   {
@@ -140,10 +141,12 @@ function RoadmapPhase({ phase, index, color }: { phase: typeof beginnerRoadmap[0
   )
 }
 
-export const metadata = {
+export const metadata = pageMetadata({
   title: 'Full MERN Roadmap',
-  description: 'Complete visual roadmap for learning the MERN stack, from beginner to mastery, with estimated timelines.',
-}
+  description: 'Complete visual roadmap for learning the MERN stack, from beginner foundations to production mastery, with estimated timelines.',
+  path: '/roadmap',
+  keywords: ['MERN roadmap', 'full stack roadmap', 'learn MERN', 'web developer roadmap'],
+})
 
 export default function RoadmapPage() {
   return (

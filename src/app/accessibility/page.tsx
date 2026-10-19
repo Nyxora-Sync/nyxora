@@ -1,12 +1,13 @@
-import type { Metadata } from 'next'
 import Link from 'next/link'
 import { LegalPage } from '@/components/legal-page'
+import { pageMetadata } from '@/lib/seo'
 
-export const metadata: Metadata = {
+export const metadata = pageMetadata({
   title: 'Accessibility',
   description:
     'MERN Learn aims for WCAG 2.2 AA. What works today, the known gaps, and how to report an accessibility barrier.',
-}
+  path: '/accessibility',
+})
 
 export default function AccessibilityPage() {
   return (

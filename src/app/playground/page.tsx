@@ -3,11 +3,14 @@ import { Footer } from '@/components/footer'
 import { PlaygroundClient } from '@/components/playground-client'
 import { Badge } from '@/components/ui/badge'
 import { Code2 } from 'lucide-react'
+import { pageMetadata } from '@/lib/seo'
 
-export const metadata = {
+export const metadata = pageMetadata({
   title: 'Interactive Playground',
-  description: 'Write and run HTML, CSS, and JavaScript directly in your browser. Launch Node.js, Express, and React environments with one click.',
-}
+  description: 'Write and run HTML, CSS, and JavaScript directly in your browser. Launch Node.js, Express, React, and MongoDB environments with one click.',
+  path: '/playground',
+  keywords: ['HTML playground', 'JavaScript playground', 'React playground', 'Node.js playground'],
+})
 
 export default function PlaygroundPage() {
   return (

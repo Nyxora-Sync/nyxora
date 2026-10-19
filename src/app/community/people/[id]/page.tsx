@@ -6,6 +6,7 @@ import { ProfileClient } from '@/components/community/profile-client'
 export const metadata: Metadata = {
   title: 'Learner Profile',
   description: 'A MERN Learn community profile: shared projects, discussions, and learning progress.',
+  robots: { index: false, follow: true },
 }
 
 // The profile id is only known at request time; render the shell on demand.

@@ -8,6 +8,7 @@ import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
 import { cn, getAccent } from '@/lib/utils'
 import { tracks as curriculumTracks } from '@/lib/curriculum'
+import { pageMetadata } from '@/lib/seo'
 
 const trackIcons: Record<string, typeof BookOpen> = {
   beginner: BookOpen,
@@ -30,25 +31,25 @@ const features = [
   {
     icon: Zap,
     title: 'Interactive Playgrounds',
-    description: 'Run Node.js, React, and MongoDB code directly in your browser. No setup required.',
+    description: 'Run HTML, CSS, JavaScript, React, Node, and Express examples directly in your browser.',
     color: 'amber',
   },
   {
     icon: Trophy,
     title: 'Progress Tracking & Badges',
-    description: 'Track completion, earn XP, unlock badges, and get verifiable certificates for your portfolio.',
+    description: 'Track completion, earn XP, unlock badges, and keep your streak in sync across devices.',
     color: 'rose',
   },
   {
     icon: Users,
     title: 'Community Support',
-    description: 'Discord community, GitHub Discussions on every lesson, project showcase, and study buddies.',
+    description: 'Lesson discussions, a project showcase, and public learner profiles. No invite-only chat required.',
     color: 'blue',
   },
   {
     icon: Database,
     title: 'Project-Based Learning',
-    description: 'Build real apps: Todo → Blog → E-commerce → Real-time chat. Portfolio-ready projects.',
+    description: 'Build a portfolio site, a blog, an e-commerce app, and a multi-tenant SaaS capstone.',
     color: 'indigo',
   },
 ]
@@ -71,29 +72,39 @@ const tracks = curriculumTracks.map((track) => {
   }
 })
 
-const totalLessons = tracks.reduce((sum, t) => sum + t.lessons, 0)
-const totalResources = curriculumTracks.reduce(
-  (sum, t) =>
-    sum + t.modules.reduce((s, m) => s + m.lessons.reduce((n, l) => n + l.resources.length, 0), 0),
-  0
-)
-const projectCount = curriculumTracks.reduce(
-  (sum, t) =>
-    sum +
-    t.modules.reduce(
-      (s, m) =>
-        s + m.lessons.filter((l) => l.resources.some((r) => r.type === 'project')).length,
-      0
-    ),
-  0
-)
+const lessonIds = new Set<string>()
+const resourceUrls = new Set<string>()
+const projectLessonIds = new Set<string>()
+
+for (const track of curriculumTracks) {
+  for (const mod of track.modules) {
+    for (const lesson of mod.lessons) {
+      lessonIds.add(lesson.id)
+      for (const resource of lesson.resources) resourceUrls.add(resource.url)
+      if (lesson.resources.some((resource) => resource.type === 'project')) {
+        projectLessonIds.add(lesson.id)
+      }
+    }
+  }
+}
+
+const totalLessons = lessonIds.size
+const totalResources = resourceUrls.size
+const projectCount = projectLessonIds.size
 
 const stats = [
   { value: '100%', label: 'Free Forever' },
-  { value: `${totalLessons}`, label: 'Curated Lessons' },
-  { value: `${totalResources}+`, label: 'Free Resources' },
-  { value: `${projectCount}`, label: 'Real Projects' },
+  { value: `${totalLessons}`, label: 'Written Lessons' },
+  { value: `${totalResources}`, label: 'Free Resources' },
+  { value: `${projectCount}`, label: 'Project Lessons' },
 ]
+
+export const metadata = pageMetadata({
+  title: 'MERN Learn — Master the MERN Stack for Free',
+  description: `Learn MongoDB, Express, React, and Node.js with ${totalLessons} free written lessons, playgrounds, progress tracking, and a full roadmap from beginner to production.`,
+  path: '/',
+  keywords: ['MERN stack', 'learn MERN', 'MongoDB', 'Express', 'React', 'Node.js', 'free coding curriculum'],
+})
 
 export default function HomePage() {
   return (

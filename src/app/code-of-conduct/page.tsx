@@ -1,12 +1,13 @@
-import type { Metadata } from 'next'
 import Link from 'next/link'
 import { LegalPage } from '@/components/legal-page'
+import { pageMetadata } from '@/lib/seo'
 
-export const metadata: Metadata = {
+export const metadata = pageMetadata({
   title: 'Code of Conduct',
   description:
     'The rules for participating in MERN Learn: lesson discussions, the project showcase, profiles, GitHub, and every community space.',
-}
+  path: '/code-of-conduct',
+})
 
 export default function CodeOfConductPage() {
   return (

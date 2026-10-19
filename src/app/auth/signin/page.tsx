@@ -1,10 +1,12 @@
-import type { Metadata } from 'next'
 import { SignInClient } from './signin-client'
+import { pageMetadata } from '@/lib/seo'
 
-export const metadata: Metadata = {
+export const metadata = pageMetadata({
   title: 'Sign In',
   description: 'Sign in to MERN Learn to sync your progress across devices.',
-}
+  path: '/auth/signin',
+  noIndex: true,
+})
 
 export default function SignInPage() {
   const enabled = {

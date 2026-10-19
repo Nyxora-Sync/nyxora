@@ -5,11 +5,14 @@ import { DashboardClient } from '@/components/dashboard-client'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Trophy, BookOpen, Zap, Flame, Target, TrendingUp } from 'lucide-react'
+import { pageMetadata } from '@/lib/seo'
 
-export const metadata = {
+export const metadata = pageMetadata({
   title: 'My Progress',
   description: 'Track your MERN learning journey: lessons completed, XP earned, badges unlocked, and streaks.',
-}
+  path: '/dashboard',
+  noIndex: true,
+})
 
 export default function DashboardPage() {
   return (

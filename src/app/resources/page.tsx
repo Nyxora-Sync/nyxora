@@ -3,11 +3,14 @@ import { Footer } from '@/components/footer'
 import { ResourcesClient } from '@/components/resources-client'
 import { Badge } from '@/components/ui/badge'
 import { resourcesData } from '@/lib/resources-data'
+import { pageMetadata } from '@/lib/seo'
 
-export const metadata = {
+export const metadata = pageMetadata({
   title: 'Free Resource Directory',
-  description: 'A curated directory of 200+ free resources for learning the MERN stack: videos, articles, docs, courses, and interactive tutorials.',
-}
+  description: `A curated directory of ${resourcesData.length} free resources for learning the MERN stack: videos, articles, docs, courses, and interactive tutorials.`,
+  path: '/resources',
+  keywords: ['free MERN resources', 'MongoDB tutorials', 'Express tutorials', 'React tutorials', 'Node.js tutorials'],
+})
 
 export default function ResourcesPage() {
   return (
@@ -16,7 +19,7 @@ export default function ResourcesPage() {
       <main className="flex-1">
         <section className="py-12 sm:py-16 border-b border-border/50">
           <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 text-center">
-            <Badge variant="outline" className="mb-4">{resourcesData.length}+ curated resources</Badge>
+            <Badge variant="outline" className="mb-4">{resourcesData.length} curated resources</Badge>
             <h1 className="text-3xl font-bold tracking-tight sm:text-4xl lg:text-5xl">
               Free Resource{' '}
               <span className="bg-gradient-to-r from-emerald-500 to-violet-500 bg-clip-text text-transparent">

@@ -1,12 +1,13 @@
-import type { Metadata } from 'next'
 import Link from 'next/link'
 import { LegalPage } from '@/components/legal-page'
+import { pageMetadata } from '@/lib/seo'
 
-export const metadata: Metadata = {
+export const metadata = pageMetadata({
   title: 'Privacy Policy',
   description:
     'What MERN Learn stores, where it lives, why it exists, and how to remove it. Local-first progress, optional accounts, no ads or trackers.',
-}
+  path: '/privacy',
+})
 
 export default function PrivacyPage() {
   return (

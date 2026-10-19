@@ -1,4 +1,5 @@
 import { notFound } from 'next/navigation'
+import type { Metadata } from 'next'
 
 export const instant = false
 import type { ComponentType } from 'react'
@@ -6,6 +7,8 @@ import Link from 'next/link'
 import { getTrack, getModule, getLesson, tracks } from '@/lib/curriculum'
 import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
+import { JsonLd } from '@/components/structured-data'
+import { absoluteUrl, canonicalLearnPath, canonicalTrackForModule, pageMetadata } from '@/lib/seo'
 import { LessonClient } from '@/components/lesson-client'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
@@ -22,6 +25,31 @@ export function generateStaticParams() {
     }
   }
   return params
+}
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ track: string; module: string; lesson: string }>
+}): Promise<Metadata> {
+  const { track: trackKey, module: moduleKey, lesson: lessonId } = await params
+  const track = getTrack(trackKey)
+  const mod = getModule(trackKey, moduleKey)
+  const lesson = getLesson(trackKey, moduleKey, lessonId)
+
+  if (!track || !mod || !lesson) {
+    return { title: 'Lesson not found', robots: { index: false, follow: false } }
+  }
+
+  const canonicalTrack = getTrack(canonicalTrackForModule(track.key, mod.key)) ?? track
+
+  return pageMetadata({
+    title: lesson.title,
+    description: `${lesson.description} A free ${lesson.difficulty} lesson in the ${mod.name} module of the ${canonicalTrack.name} on MERN Learn.`,
+    path: canonicalLearnPath(track.key, mod.key, lesson.id),
+    type: 'article',
+    keywords: [lesson.title, mod.name, track.name, 'MERN lesson', 'free coding lesson'],
+  })
 }
 
 export default async function LessonPage({
@@ -56,8 +84,48 @@ export default async function LessonPage({
     LessonContent = null
   }
 
+  const lessonPath = `/learn/${track.key}/${mod.key}/${lesson.id}`
+  const canonicalPath = canonicalLearnPath(track.key, mod.key, lesson.id)
+  const canonicalTrackKey = canonicalTrackForModule(track.key, mod.key)
+  const canonicalTrack = getTrack(canonicalTrackKey) ?? track
+  const breadcrumbSchema = {
+    '@context': 'https://schema.org',
+    '@type': 'BreadcrumbList',
+    itemListElement: [
+      { '@type': 'ListItem', position: 1, name: 'Home', item: absoluteUrl('/') },
+      { '@type': 'ListItem', position: 2, name: 'Learn', item: absoluteUrl('/learn') },
+      { '@type': 'ListItem', position: 3, name: track.name, item: absoluteUrl(`/learn/${track.key}`) },
+      { '@type': 'ListItem', position: 4, name: mod.name, item: absoluteUrl(`/learn/${track.key}/${mod.key}`) },
+      { '@type': 'ListItem', position: 5, name: lesson.title, item: absoluteUrl(lessonPath) },
+    ],
+  }
+  const learningResourceSchema = {
+    '@context': 'https://schema.org',
+    '@type': 'LearningResource',
+    name: lesson.title,
+    description: lesson.description,
+    url: absoluteUrl(canonicalPath),
+    learningResourceType: 'Lesson',
+    educationalLevel: lesson.difficulty,
+    isAccessibleForFree: true,
+    inLanguage: 'en',
+    timeRequired: `PT${lesson.estimatedMinutes}M`,
+    teaches: lesson.keyTakeaways,
+    isPartOf: {
+      '@type': 'Course',
+      name: canonicalTrack.name,
+      url: absoluteUrl(`/learn/${canonicalTrackKey}`),
+    },
+    provider: {
+      '@type': 'Organization',
+      name: 'MERN Learn',
+      url: absoluteUrl('/'),
+    },
+  }
+
   return (
     <div className="flex min-h-screen flex-col">
+      <JsonLd data={[breadcrumbSchema, learningResourceSchema]} />
       <Header />
       <main className="flex-1">
         <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 py-10 sm:py-14">

@@ -1,12 +1,14 @@
-import type { Metadata } from 'next'
 import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
 import { SettingsClient } from '@/components/settings/settings-client'
+import { pageMetadata } from '@/lib/seo'
 
-export const metadata: Metadata = {
+export const metadata = pageMetadata({
   title: 'Settings',
   description: 'Manage your MERN Learn profile, links, and privacy preferences.',
-}
+  path: '/settings',
+  noIndex: true,
+})
 
 export default function SettingsPage() {
   return (

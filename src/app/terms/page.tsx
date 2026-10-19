@@ -1,12 +1,13 @@
-import type { Metadata } from 'next'
 import Link from 'next/link'
 import { LegalPage } from '@/components/legal-page'
+import { pageMetadata } from '@/lib/seo'
 
-export const metadata: Metadata = {
+export const metadata = pageMetadata({
   title: 'Terms of Service',
   description:
     'The plain-language terms for using MERN Learn: accounts, acceptable use, content licenses, moderation, and the limits of a free educational site.',
-}
+  path: '/terms',
+})
 
 export default function TermsPage() {
   return (

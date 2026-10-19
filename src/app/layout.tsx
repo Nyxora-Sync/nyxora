@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
 import { Providers } from '@/components/providers'
+import { JsonLd } from '@/components/structured-data'
+import { absoluteUrl, defaultDescription, siteName, siteUrl } from '@/lib/seo'
 import './globals.css'
 
 const geistSans = Geist({
@@ -13,19 +15,14 @@ const geistMono = Geist_Mono({
   subsets: ['latin'],
 })
 
-const siteUrl =
-  process.env.NEXT_PUBLIC_SITE_URL ||
-  (process.env.VERCEL_PROJECT_PRODUCTION_URL
-    ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
-    : 'http://localhost:3000')
-
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: {
     default: 'MERN Learn — Master the MERN Stack for Free',
     template: '%s | MERN Learn',
   },
-  description: 'Learn the MERN stack (MongoDB, Express, React, Node.js) from beginner to mastery. Curated free resources, interactive playgrounds, progress tracking, and community.',
+  description: defaultDescription,
+  applicationName: siteName,
   keywords: ['MERN', 'MongoDB', 'Express', 'React', 'Node.js', 'web development', 'full stack', 'learn programming', 'free resources'],
   authors: [{ name: 'MERN Learn Community' }],
   creator: 'MERN Learn',
@@ -34,10 +31,10 @@ export const metadata: Metadata = {
   openGraph: {
     type: 'website',
     locale: 'en_US',
-    url: siteUrl,
-    siteName: 'MERN Learn',
+    url: absoluteUrl('/'),
+    siteName,
     title: 'MERN Learn — Master the MERN Stack for Free',
-    description: 'Learn the MERN stack from beginner to mastery with curated free resources, interactive playgrounds, and progress tracking.',
+    description: defaultDescription,
     images: [
       {
         url: '/og-image.png',
@@ -50,9 +47,8 @@ export const metadata: Metadata = {
   twitter: {
     card: 'summary_large_image',
     title: 'MERN Learn — Master the MERN Stack for Free',
-    description: 'Learn the MERN stack from beginner to mastery with curated free resources.',
+    description: defaultDescription,
     images: ['/og-image.png'],
-    creator: '@mernlearn',
   },
   icons: {
     icon: [
@@ -65,6 +61,33 @@ export const metadata: Metadata = {
   },
   manifest: '/site.webmanifest',
 }
+
+const organizationId = `${siteUrl}/#organization`
+const websiteId = `${siteUrl}/#website`
+
+const siteSchema = [
+  {
+    '@context': 'https://schema.org',
+    '@type': 'Organization',
+    '@id': organizationId,
+    name: siteName,
+    url: absoluteUrl('/'),
+    logo: absoluteUrl('/icon-512.png'),
+    description:
+      'A free, open-source MERN stack curriculum with written lessons, playgrounds, progress tracking, and a project showcase.',
+    sameAs: ['https://github.com/Nyxora-Sync/mern-learn'],
+  },
+  {
+    '@context': 'https://schema.org',
+    '@type': 'WebSite',
+    '@id': websiteId,
+    name: siteName,
+    url: absoluteUrl('/'),
+    description: defaultDescription,
+    inLanguage: 'en',
+    publisher: { '@id': organizationId },
+  },
+]
 
 export const viewport: Viewport = {
   themeColor: [
@@ -80,6 +103,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`} suppressHydrationWarning>
       <body className="min-h-full flex flex-col bg-background text-foreground">
+        <JsonLd data={siteSchema} />
         <Providers>{children}</Providers>
       </body>
     </html>

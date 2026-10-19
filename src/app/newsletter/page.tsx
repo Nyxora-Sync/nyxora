@@ -8,12 +8,14 @@ import { Card, CardContent } from '@/components/ui/card'
 import { NewsletterForm } from '@/components/newsletter-form'
 import { BellOff, BookOpen, CheckCircle2, Mail, ShieldCheck, Sparkles } from 'lucide-react'
 import { GithubIcon } from '@/components/icons/brand'
+import { pageMetadata } from '@/lib/seo'
 
-export const metadata: Metadata = {
+export const metadata: Metadata = pageMetadata({
   title: 'Newsletter',
   description:
     'Occasional MERN Learn updates: new modules, major lesson rewrites, and community milestones. No spam, unsubscribe anytime.',
-}
+  path: '/newsletter',
+})
 
 const updates = [
   'A new module or a substantial batch of lessons.',

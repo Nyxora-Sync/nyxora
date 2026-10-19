@@ -1,15 +1,17 @@
-import type { Metadata } from 'next'
 import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
 import { Badge } from '@/components/ui/badge'
 import { ShowcaseClient } from '@/components/community/showcase-client'
 import { Rocket, Sparkles } from 'lucide-react'
+import { pageMetadata } from '@/lib/seo'
 
-export const metadata: Metadata = {
+export const metadata = pageMetadata({
   title: 'Project Showcase',
   description:
     'Real projects built by MERN Learn learners. Browse apps, read how they were made, leave feedback, and share your own.',
-}
+  path: '/community/showcase',
+  keywords: ['developer project showcase', 'MERN projects', 'student portfolio projects'],
+})
 
 export default function ShowcasePage() {
   return (

@@ -8,12 +8,12 @@ A free, open-source learning platform that takes you from zero to MERN stack mas
 ## ✨ Features
 
 - **Dual learning tracks** — Beginner (starts from HTML/CSS/JS) and Developer (straight to MERN)
-- **Curated free resources** — 100+ hand-picked videos, articles, docs, and interactive courses. No paywalls, no affiliate links
+- **Curated free resources** — A searchable directory plus hand-picked videos, articles, and docs in every lesson. No paywalls, no affiliate links
 - **Interactive playground** — In-browser HTML/CSS/JS editor with live preview, plus one-click launches for Node, Express, React, and MongoDB environments via StackBlitz
 - **Progress tracking** — Lessons completed, XP, levels, streaks, badges, notes, and bookmarks. Stored locally with optional account sync
 - **Dashboard** — Track your journey across both tracks with stats, badges, and bookmarks
 - **Searchable resource directory** — Filter by topic, type, and difficulty
-- **Community** — Discord, GitHub Discussions, project showcase, and study groups
+- **Community** — Lesson discussions, project showcase, public learner profiles, and contribution guides
 - **Dark mode** — System-aware, with a manual toggle
 
 ## 🛠 Tech Stack

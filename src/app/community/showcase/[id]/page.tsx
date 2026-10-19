@@ -6,6 +6,7 @@ import { ProjectDetailClient } from '@/components/community/project-detail-clien
 export const metadata: Metadata = {
   title: 'Project',
   description: 'A project shared by a MERN Learn learner.',
+  robots: { index: false, follow: true },
 }
 
 // The project id is only known at request time; render the shell on demand.

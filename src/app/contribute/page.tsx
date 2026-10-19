@@ -1,4 +1,3 @@
-import type { Metadata } from 'next'
 import Link from 'next/link'
 import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
@@ -19,12 +18,15 @@ import {
 } from 'lucide-react'
 import { GithubIcon } from '@/components/icons/brand'
 import { getAccent } from '@/lib/utils'
+import { pageMetadata } from '@/lib/seo'
 
-export const metadata: Metadata = {
+export const metadata = pageMetadata({
   title: 'Contribute',
   description:
     'Help build MERN Learn: write lessons, add free resources, share projects, report bugs, or translate the curriculum.',
-}
+  path: '/contribute',
+  keywords: ['open source education', 'contribute to MERN Learn', 'write coding lessons'],
+})
 
 const ways = [
   {

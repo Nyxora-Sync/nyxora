@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { Mail, Heart, Code2 } from 'lucide-react'
-import { GithubIcon, XIcon } from '@/components/icons/brand'
+import { GithubIcon } from '@/components/icons/brand'
 import { NewsletterForm } from '@/components/newsletter-form'
 
 interface FooterLink {
@@ -41,7 +41,6 @@ const footerLinks: FooterColumn = {
   ],
   connect: [
     { name: 'Newsletter', href: '/newsletter', icon: Mail },
-    { name: 'Twitter', href: 'https://twitter.com/mernlearn', external: true, icon: XIcon },
     { name: 'GitHub', href: 'https://github.com/Nyxora-Sync/mern-learn', external: true, icon: GithubIcon },
     { name: 'Contact', href: '/contact', icon: Mail },
   ],
@@ -49,7 +48,6 @@ const footerLinks: FooterColumn = {
 
 const socialLinks: FooterLink[] = [
   { name: 'GitHub', href: 'https://github.com/Nyxora-Sync/mern-learn', icon: GithubIcon },
-  { name: 'Twitter', href: 'https://twitter.com/mernlearn', icon: XIcon },
   { name: 'Contact', href: '/contact', icon: Mail },
 ]
 

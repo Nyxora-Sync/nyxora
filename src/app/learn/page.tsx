@@ -7,6 +7,7 @@ import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
 import { cn, getAccent } from '@/lib/utils'
 import { tracks as curriculumTracks } from '@/lib/curriculum'
+import { pageMetadata } from '@/lib/seo'
 
 const trackIcons: Record<string, typeof BookOpen> = {
   beginner: BookOpen,
@@ -32,6 +33,19 @@ const tracks = curriculumTracks.map((track) => {
       lessons: m.lessons.length,
     })),
   }
+})
+
+const uniqueLessonCount = new Set(
+  curriculumTracks.flatMap((track) =>
+    track.modules.flatMap((mod) => mod.lessons.map((lesson) => lesson.id))
+  )
+).size
+
+export const metadata = pageMetadata({
+  title: 'Learn the MERN Stack',
+  description: `Choose a beginner foundations track or go straight to the MERN core. ${uniqueLessonCount} free written lessons, playgrounds, and a path to production mastery.`,
+  path: '/learn',
+  keywords: ['learn MERN', 'MERN roadmap', 'beginner web development', 'MongoDB Express React Node'],
 })
 
 export default function LearnPage() {
@@ -126,9 +140,9 @@ export default function LearnPage() {
               {[
                 { icon: CheckCircle, title: '100% Free Forever', desc: 'No paywalls, no subscriptions, no upsells. All content is free and open source.', color: 'emerald' },
                 { icon: Clock, title: 'Self-Paced Learning', desc: 'Learn on your schedule. Track progress, pick up where you left off, no deadlines.', color: 'violet' },
-                { icon: Trophy, title: 'Real Projects', desc: 'Build 12+ portfolio projects: Todo app, Blog, E-commerce, Real-time chat, and more.', color: 'amber' },
-                { icon: Code2, title: 'Interactive Playgrounds', desc: 'Run Node.js, React, and MongoDB code in your browser. Zero setup required.', color: 'rose' },
-                { icon: Users, title: 'Active Community', desc: 'Discord server, GitHub Discussions on every lesson, project showcase, study buddies.', color: 'blue' },
+                { icon: Trophy, title: 'Real Projects', desc: 'Build a portfolio site, blog, e-commerce app, and a multi-tenant SaaS capstone.', color: 'amber' },
+                { icon: Code2, title: 'Interactive Playgrounds', desc: 'Run HTML, CSS, JavaScript, React, Node, and Express examples in your browser. Zero setup required.', color: 'rose' },
+                { icon: Users, title: 'Community', desc: 'Lesson discussions, a project showcase, and public learner profiles.', color: 'blue' },
                 { icon: BookOpen, title: 'Curated Resources', desc: 'Hand-picked from freeCodeCamp, Net Ninja, official docs, and top educators.', color: 'indigo' },
               ].map((feature) => (
                 <Card key={feature.title} className="group hover:shadow-lg transition-shadow">
@@ -155,7 +169,7 @@ export default function LearnPage() {
                     Ready to become a MERN master?
                   </h2>
                   <p className="mt-4 text-lg text-muted-foreground">
-                    Join thousands of developers. Start with the track that matches your level.
+                    Both tracks are free, written, and self-paced. Start where you are.
                   </p>
                   <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
                     <Button size="lg" asChild className="gap-2 w-full sm:w-auto">
