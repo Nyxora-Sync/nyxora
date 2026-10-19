@@ -1,0 +1,331 @@
+This is the lesson where everything comes together. You will build a **personal portfolio page** — semantic HTML, responsive CSS, a dash of JavaScript — and publish it to the internet at a URL you can share.
+
+A portfolio is the perfect first project: small enough to finish in a few sessions, personal enough that you will actually maintain it, and it forces you to use every skill from this module. Treat it as a real client project. Plan, build, test, ship.
+
+## What you are building
+
+One page with these sections:
+
+| Section | Contents |
+|---------|----------|
+| Header | Your name, navigation links, theme toggle |
+| Hero | One clear sentence about what you do, call-to-action button |
+| About | Short bio, 3–5 skills, optionally a photo |
+| Projects | 3 project cards: name, description, tech used, live link / repo link |
+| Contact | Email link, GitHub, LinkedIn |
+| Footer | Copyright with the current year |
+
+**Must have:** semantic structure, responsive layout that works at 360px, visible focus styles, accessible contrast, working links, deployed URL.
+
+**Nice to have:** dark mode toggle that remembers the choice, smooth scrolling, project filtering, a custom favicon.
+
+If you do not have three projects yet, invent them now as placeholders — small apps you plan to build. The portfolio is a living document.
+
+## Step 1 — Plan before code
+
+Open a notebook and write:
+
+1. A one-sentence pitch: “Frontend developer focused on accessible interfaces.”
+2. Your three projects with a line each: what it does, what you built it with.
+3. Where the page should send people: email, GitHub, LinkedIn.
+4. A rough wireframe — three boxes stacked on paper is enough.
+
+If you skip this step, the CSS will take twice as long because you will be designing and coding at the same time.
+
+## Step 2 — Repository and files
+
+```text
+portfolio/
+├── index.html
+├── styles.css
+├── script.js
+└── README.md
+```
+
+Initialize Git, add a `.gitignore`, and make your first commit before writing any real code. Commit after each step in this lesson — you should end with at least ten commits.
+
+```bash
+mkdir portfolio
+cd portfolio
+git init
+```
+
+## Step 3 — Semantic skeleton
+
+Write the HTML structure first, with real content, no styling. Every section gets a heading. Use `nav`, `main`, `section`, `article`, and `footer` deliberately:
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Aki Tanaka — frontend developer building accessible web apps." />
+    <title>Aki Tanaka · Frontend Developer</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="script.js" defer></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="logo" href="#top">Aki Tanaka</a>
+      <button id="nav-toggle" aria-expanded="false" aria-controls="site-nav">
+        Menu
+      </button>
+      <nav id="site-nav">
+        <a href="#about">About</a>
+        <a href="#projects">Projects</a>
+        <a href="#contact">Contact</a>
+        <button id="theme-toggle" aria-label="Switch theme">🌙</button>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="hero" aria-labelledby="hero-title">
+        <h1 id="hero-title">I build fast, accessible web experiences.</h1>
+        <p>Frontend developer with a focus on React and the MERN stack.</p>
+        <a class="button" href="#projects">See my work</a>
+      </section>
+
+      <section id="about" aria-labelledby="about-title">
+        <h2 id="about-title">About</h2>
+        <p>Short bio...</p>
+        <ul class="skills">
+          <li>JavaScript</li>
+          <li>React</li>
+          <li>Node.js</li>
+        </ul>
+      </section>
+
+      <section id="projects" aria-labelledby="projects-title">
+        <h2 id="projects-title">Projects</h2>
+        <article class="project">
+          <h3>Task Manager</h3>
+          <p>A small app for tracking daily tasks...</p>
+          <p class="tech">HTML · CSS · JavaScript</p>
+          <a href="https://github.com/you/task-manager">Source code</a>
+        </article>
+        <!-- two more projects -->
+      </section>
+
+      <section id="contact" aria-labelledby="contact-title">
+        <h2 id="contact-title">Contact</h2>
+        <p>Email: <a href="mailto:you@example.com">you@example.com</a></p>
+      </section>
+    </main>
+
+    <footer>
+      <p>© <span id="year"></span> Aki Tanaka</p>
+    </footer>
+  </body>
+</html>
+```
+
+Commit this before adding any CSS. The page should already be usable in a text-only browser.
+
+## Step 4 — Style mobile-first
+
+Start with variables so the whole palette is one edit away:
+
+```css
+:root {
+  --bg: #ffffff;
+  --text: #1c1917;
+  --muted: #57534e;
+  --brand: #047857;
+  --border: #e7e5e4;
+}
+
+[data-theme='dark'] {
+  --bg: #0c0a09;
+  --text: #fafaf9;
+  --muted: #a8a29e;
+  --brand: #34d399;
+  --border: #292524;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  line-height: 1.6;
+  background: var(--bg);
+  color: var(--text);
+}
+```
+
+Then build outward:
+
+- A centered container: `max-width: 65rem; margin-inline: auto; padding-inline: 1.5rem;`
+- A responsive project grid: `grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1.5rem;`
+- Comfortable type scale in `rem` and a readable line length (`max-width: 65ch` for paragraphs).
+- Visible focus for every interactive element: `:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }`
+- A `min-width: 640px` media query that turns the header into a horizontal flex row.
+
+Every section should look intentional at 360px **before** you check the desktop version.
+
+## Step 5 — Add behaviour with JavaScript
+
+Three small scripts, all with clear single jobs.
+
+**Footer year** — never hardcode it:
+
+```js
+document.querySelector('#year').textContent = new Date().getFullYear()
+```
+
+**Theme toggle with memory:**
+
+```js
+const root = document.documentElement
+const themeButton = document.querySelector('#theme-toggle')
+
+const saved = localStorage.getItem('theme')
+if (saved) root.dataset.theme = saved
+
+themeButton.addEventListener('click', () => {
+  const next = root.dataset.theme === 'dark' ? 'light' : 'dark'
+  root.dataset.theme = next
+  localStorage.setItem('theme', next)
+})
+```
+
+**Mobile navigation toggle:**
+
+```js
+const navButton = document.querySelector('#nav-toggle')
+const nav = document.querySelector('#site-nav')
+
+navButton.addEventListener('click', () => {
+  const isOpen = nav.classList.toggle('open')
+  navButton.setAttribute('aria-expanded', String(isOpen))
+})
+```
+
+Add `.open { display: flex; }` in CSS next to a mobile-first `#site-nav { display: none; }`. Because the script runs with `defer`, the elements exist by the time it executes.
+
+<Callout type="danger" title="Respect reduced motion">
+  If you add smooth scrolling or animations, wrap them:
+
+  ```css
+  @media (prefers-reduced-motion: no-preference) {
+    html { scroll-behavior: smooth; }
+  }
+  ```
+</Callout>
+
+## Step 6 — Accessibility and performance pass
+
+Run this checklist before deploying:
+
+- Every image has meaningful `alt` text; decorative images use `alt=""`.
+- Every form control has a label; buttons have discernible text or `aria-label`.
+- The page works with keyboard only: Tab through it. Can you see focus everywhere? Can you reach the theme toggle?
+- Headings run `h1 → h2 → h3` without skipping levels.
+- Text contrast passes [WebAIM Contrast Checker](https://webaim.org/resources/contrastchecker/).
+- Images are compressed (WebP or JPEG under ~200KB) and have `width`/`height` attributes.
+- Lighthouse in DevTools reports 90+ for Accessibility, Best Practices, and SEO.
+
+## Step 7 — Deploy it
+
+A portfolio nobody can visit is a local file. Pick one:
+
+**GitHub Pages** (free, no account needed beyond GitHub):
+
+1. Push your repository to GitHub.
+2. Open **Settings → Pages**.
+3. Under “Build and deployment”, choose **Deploy from a branch**, branch `main`, folder `/ (root)`, and save.
+4. Wait a minute; your site appears at `https://YOUR-USERNAME.github.io/portfolio/`.
+
+**Vercel** (free, great for future React projects too):
+
+1. Sign in at [vercel.com](https://vercel.com) with GitHub.
+2. **Add New → Project** and import your repository.
+3. Framework preset: **Other**; leave the build command empty and the output directory as `.`.
+4. Deploy. You get `https://your-project.vercel.app` and automatic redeploys on every push.
+
+Open the live URL on your phone. Fix anything that looks cramped. Then add the URL to your GitHub repository description and to your LinkedIn.
+
+## Step 8 — Write the README
+
+A repository without a README looks abandoned. Use this template:
+
+```md
+# Personal Portfolio
+
+A responsive portfolio built with HTML, CSS, and JavaScript.
+
+**Live:** https://your-url-here
+
+## Features
+- Responsive layout (mobile-first)
+- Dark mode with saved preference
+- Accessible navigation and focus states
+
+## Built with
+HTML · CSS (custom properties, Flexbox, Grid) · Vanilla JavaScript
+
+## Run locally
+Open `index.html`, or serve with `npx serve`.
+```
+
+## Check your understanding
+
+<Quiz
+  question="Why does the theme script read from localStorage before setting the theme?"
+  options={[
+    'To restore the visitor’s saved preference on their next visit',
+    'Because localStorage is required by browsers',
+    'To make the toggle animate smoothly',
+    'To improve search engine ranking'
+  ]}
+  answer={0}
+  explanation="Persistence is the point: save the choice on click, read it on load, apply it before the first paint so the page matches the visitor's preference immediately."
+/>
+
+<Quiz
+  question="Which of these can host a static portfolio for free?"
+  options={['GitHub Pages', 'Vercel', 'Netlify', 'All of the above']}
+  answer={3}
+  explanation="All three host static sites on their free tiers. GitHub Pages keeps everything in one place; Vercel and Netlify add preview deployments and will be useful for your React projects later."
+/>
+
+<Exercise title="Build the portfolio, milestone by milestone" difficulty="hard">
+Work through the steps from this lesson in order. Commit after every milestone.
+
+1. **Plan** — write the pitch, three projects, and a paper wireframe.
+2. **Skeleton** — repository, files, semantic HTML with real content, no CSS. Commit.
+3. **Layout** — container, header, hero, sections, footer. Verify at 360px. Commit.
+4. **Projects grid** — responsive cards with `auto-fit`/`minmax`. Commit.
+5. **Theme** — CSS variables, dark theme, toggle button, `localStorage`. Commit.
+6. **Navigation** — mobile menu toggle with `aria-expanded`, keyboard accessible. Commit.
+7. **Accessibility pass** — keyboard test, contrast check, Lighthouse run. Commit fixes.
+8. **Deploy** — GitHub Pages or Vercel, then test the live URL on your phone.
+9. **README** — features, built with, live URL. Commit and push.
+</Exercise>
+
+<Exercise title="Ship checklist" difficulty="easy">
+Before you call it done:
+
+- [ ] Live URL opens on your phone without horizontal scrolling.
+- [ ] Every link and email address works.
+- [ ] Tab order is logical and focus is always visible.
+- [ ] The theme choice survives a page reload.
+- [ ] `Lighthouse` scores 90+ on Accessibility, Best Practices, and SEO.
+- [ ] The repository has a README with the live URL.
+- [ ] You shared the link with one person and asked for one piece of feedback.
+</Exercise>
+
+## Summary
+
+- A portfolio is a real project: plan it, structure it semantically, style it mobile-first, enhance it with JavaScript.
+- Semantic HTML and accessibility are requirements, not polish — they are also what Lighthouse measures.
+- Three small scripts cover theme persistence, navigation state, and the footer year.
+- Deploy early: GitHub Pages or Vercel give you a public URL for free.
+- A README with a live link turns a folder of files into a portfolio piece.
+
+You have finished the Web Foundations module. You can structure pages, style them responsively, program behaviour, fetch data, and ship with Git. Next: Node.js — running JavaScript on a server, where your MERN journey really begins.

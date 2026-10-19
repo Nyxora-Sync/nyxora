@@ -1,0 +1,294 @@
+Most of what a web app does takes time. Fetching data from a server, reading a file, waiting for a user to click — none of it happens instantly. **Asynchronous code** is how JavaScript waits for slow work without freezing the page while it happens.
+
+This is the skill that separates toy scripts from real applications. Every API call you make in React and every database query you run in Express will sit on the foundation from this lesson.
+
+## Synchronous vs asynchronous
+
+Synchronous code runs one line at a time, in order, and each line waits for the previous one:
+
+```js
+console.log('1')
+console.log('2')
+console.log('3')
+// 1, 2, 3
+```
+
+Asynchronous code schedules work to happen **later**, letting the program continue:
+
+```js
+console.log('1')
+
+setTimeout(() => {
+  console.log('2')
+}, 1000)
+
+console.log('3')
+// 1, 3, 2
+```
+
+`setTimeout` does not pause the program. It hands a function to the browser and says “run this in a second”. The program keeps going, prints `3`, and when the timer fires, the callback prints `2`.
+
+<KeyPoint>
+JavaScript runs on one thread. Asynchronous code does not run two things at once — it schedules work and continues, then picks the result up when it is ready.
+</KeyPoint>
+
+<Callout type="warning" title="Blocking code freezes everything">
+  A long `while` loop or a heavy computation stops the browser from responding to clicks, scrolling, or typing. That is why network calls, file reads, and timers are asynchronous — they move the waiting outside the main thread.
+</Callout>
+
+## Callbacks
+
+The oldest way to handle “do this when that finishes” is a **callback** — a function you pass in to be called later:
+
+```js
+function loadUser(id, callback) {
+  setTimeout(() => {
+    callback({ id, name: 'Aki' })
+  }, 500)
+}
+
+loadUser(1, (user) => {
+  console.log(user.name) // Aki
+})
+```
+
+Callbacks work, but they nest badly. Three dependent operations become a pyramid:
+
+```js
+loadUser(1, (user) => {
+  loadPosts(user.id, (posts) => {
+    loadComments(posts[0].id, (comments) => {
+      console.log(comments) // how do we handle an error at step 1?
+    })
+  })
+})
+```
+
+Each level needs its own error handling, the code reads top-to-bottom but runs inside-out, and adding a step means indenting everything again. This is “callback hell”.
+
+## Promises
+
+A **promise** is an object that represents a value that will exist in the future. It has exactly three states:
+
+```text
+pending  ──▶  fulfilled  (success: resolve was called)
+         └──▶  rejected   (failure: reject was called)
+```
+
+Create one with the `Promise` constructor, and consume it with `.then()` and `.catch()`:
+
+```js
+function loadUser(id) {
+  return new Promise((resolve, reject) => {
+    setTimeout(() => {
+      if (id > 0) {
+        resolve({ id, name: 'Aki' })
+      } else {
+        reject(new Error('Invalid id'))
+      }
+    }, 500)
+  })
+}
+
+loadUser(1)
+  .then((user) => console.log(user.name))
+  .catch((error) => console.error(error.message))
+```
+
+The advantage: promises chain. Each `.then` can return another promise, producing a flat sequence instead of nested callbacks:
+
+```js
+loadUser(1)
+  .then((user) => loadPosts(user.id))
+  .then((posts) => loadComments(posts[0].id))
+  .then((comments) => console.log(comments))
+  .catch((error) => console.error('Something failed:', error.message))
+```
+
+One `.catch` at the end handles a failure anywhere in the chain.
+
+## async / await
+
+`async/await` is syntax on top of promises that makes asynchronous code read like synchronous code:
+
+```js
+async function showUser() {
+  try {
+    const user = await loadUser(1)
+    console.log(user.name)
+  } catch (error) {
+    console.error(error.message)
+  }
+}
+
+showUser()
+```
+
+Two rules:
+
+- An `async` function **always returns a promise**, even if you just `return 5`.
+- `await` waits for that promise and hands you the value — but it only pauses **this function**. The rest of the program keeps running.
+
+Inside `async` functions you use normal `try/catch` for errors, which is easier to read than `.catch()` chains.
+
+## Sequential is not always necessary
+
+Awaiting one request after another makes them run in sequence. If the requests do not depend on each other, run them together with `Promise.all`:
+
+```js
+// Slow: the second request waits for the first
+const user = await loadUser(1)
+const posts = await loadPosts(1)
+
+// Fast: both start at once
+const [user, posts] = await Promise.all([loadUser(1), loadPosts(1)])
+```
+
+`Promise.all` resolves when every promise resolves, and rejects as soon as **any** of them fails.
+
+<Callout type="info" title="Top-level await">
+  In ES modules (`<script type="module">` or Node with ESM), you can use `await` at the top level of a file without wrapping it in a function. In older script files, you still need an `async` function.
+</Callout>
+
+## The Fetch API
+
+`fetch` makes HTTP requests from JavaScript and returns a promise for a **Response** object:
+
+```js
+const response = await fetch('https://jsonplaceholder.typicode.com/posts/1')
+const data = await response.json()
+
+console.log(data.title)
+```
+
+Two `await`s, two different waits:
+
+1. The first waits for the response **headers**.
+2. The second waits for the body to arrive and parses it as JSON.
+
+`response.json()` itself returns a promise — forget the `await` and you get a pending promise instead of data, which is one of the most common beginner bugs.
+
+<Callout type="danger" title="fetch does not reject on 404">
+  A request for a missing page still resolves the promise. Only network failures reject it. Always check `response.ok` (true for status 200–299) before trusting the body:
+
+  ```js
+  if (!response.ok) {
+    throw new Error(`Request failed with status ${response.status}`)
+  }
+  ```
+</Callout>
+
+Sending data uses the same tool with a few options:
+
+```js
+const response = await fetch('https://jsonplaceholder.typicode.com/posts', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({ title: 'Hello', body: 'World', userId: 1 }),
+})
+
+const created = await response.json()
+```
+
+- `method` defaults to `GET`; use `POST`, `PUT`, `PATCH`, or `DELETE` as needed.
+- `headers` describe what you are sending. Express will not parse a JSON body unless `Content-Type` says it is JSON.
+- `body` must be a string, so objects are stringified.
+
+## Loading, error, success
+
+Real interfaces have three states, and asynchronous code is where they come from:
+
+```js
+const status = document.querySelector('#status')
+
+async function loadPost() {
+  status.textContent = 'Loading…'
+
+  try {
+    const response = await fetch('https://jsonplaceholder.typicode.com/posts/1')
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+
+    const post = await response.json()
+    status.textContent = post.title
+  } catch (error) {
+    status.textContent = 'Could not load the post. Try again.'
+    console.error(error)
+  }
+}
+
+loadPost()
+```
+
+Hold on to this pattern: **set loading, try the request, handle success, catch failures**. React will give it structure later, but the logic is the same.
+
+## Try it
+
+<TryIt title="A countdown with a reusable wait function">
+```html
+<script>
+  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+  async function countdown() {
+    for (let i = 3; i >= 1; i--) {
+      console.log(i)
+      await wait(1000)
+    }
+    console.log('Go!')
+  }
+
+  countdown()
+</script>
+```
+</TryIt>
+
+## Check your understanding
+
+<Quiz
+  question="What does fetch() return?"
+  options={[
+    'The JSON data directly',
+    'A promise that resolves to a Response object',
+    'The HTML of the page',
+    'Nothing until you call await'
+  ]}
+  answer={1}
+  explanation="fetch always returns a promise. It fulfils once the response headers arrive; you then await response.json() to read the body."
+/>
+
+<Quiz
+  question="A request returns 404 Not Found. What happens to the fetch promise?"
+  options={[
+    'It rejects, so the catch block runs',
+    'It resolves normally — you must check response.ok yourself',
+    'The browser displays an error page',
+    'response.json() returns null'
+  ]}
+  answer={1}
+  explanation="fetch only rejects on network-level failures. HTTP error statuses resolve normally, so checking response.ok is mandatory."
+/>
+
+<Exercise title="Fetch and render data with all three UI states" difficulty="medium">
+Build `index.html` and `script.js` (loaded with `defer`). Use the free API at `https://jsonplaceholder.typicode.com`.
+
+1. Add a `<p id="status">` and a `<div id="post">` to the page.
+2. Write `async function loadPost(id)` that sets the status to `Loading…`, fetches `https://jsonplaceholder.typicode.com/posts/${id}`, checks `response.ok`, and renders the post title into the status area and the body text into `#post`.
+3. On any failure, set the status to a friendly error message and log the real error to the console.
+4. Call `loadPost(1)` on page load.
+5. Test your error handling twice: first request `/posts/99999` (a 404), then temporarily change the URL to an invalid domain to see a real network rejection.
+6. Bonus: add a button that loads a random post ID (1–100).
+7. Bonus: use `Promise.all` to fetch a post **and** its author (`/users/1`) at the same time, and render both.
+</Exercise>
+
+## Summary
+
+- JavaScript is single-threaded; asynchronous code schedules work instead of blocking.
+- Callbacks handle “later”, but nesting makes them hard to read and error-handle.
+- Promises represent a future value in one of three states: pending, fulfilled, rejected.
+- `async/await` reads like synchronous code; `async` functions always return promises.
+- Independent requests should run together with `Promise.all`.
+- `fetch` resolves for HTTP errors — always check `response.ok`, and `await response.json()`.
+- The loading → success → error pattern is the backbone of every data-driven interface.
+
+You can now talk to servers. Next, modern JavaScript syntax — the shorthand that makes React and MERN code compact and readable.

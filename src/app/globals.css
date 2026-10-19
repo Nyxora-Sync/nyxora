@@ -3,6 +3,16 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Task-list checkboxes inside lessons */
+.prose input[type='checkbox'],
+.not-prose input[type='checkbox'] {
+  width: 1rem;
+  height: 1rem;
+  margin-right: 0.5rem;
+  vertical-align: -0.15em;
+  accent-color: #10b981;
+}
+
 :root {
   --radius: 0.625rem;
   --background: oklch(1 0 0);

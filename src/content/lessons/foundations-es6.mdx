@@ -1,0 +1,339 @@
+There was a time when JavaScript code looked like string concatenation, `var`, and arguments objects. In 2015, ECMAScript 6 (ES6) changed the language permanently. Today every React component, Express route, and Mongoose model you meet uses this syntax.
+
+This lesson is a tour of the features you will read hourly in real MERN codebases. None of them are academic — each one removes a specific kind of pain.
+
+## Template literals
+
+Backtick strings can span lines and embed expressions:
+
+```js
+const user = { name: 'Aki', role: 'developer' }
+
+// Old string building
+const old = user.name + ' is a ' + user.role
+
+// Template literal
+const modern = `${user.name} is a ${user.role}`
+
+const card = `
+  <article>
+    <h2>${user.name}</h2>
+    <p>${user.role}</p>
+  </article>
+`
+```
+
+Any expression works inside `${ }` — arithmetic, function calls, ternaries.
+
+## Destructuring
+
+Destructuring pulls values out of objects and arrays into named variables:
+
+```js
+const user = {
+  name: 'Aki',
+  role: 'developer',
+  address: { city: 'Kyoto' },
+}
+
+const { name, role } = user           // object
+const { city } = user.address         // nested
+const { name: userName } = user       // rename to avoid collisions
+const { active = true } = user        // default when missing
+
+const [first, second] = ['HTML', 'CSS', 'JS'] // array, by position
+```
+
+It shines in function parameters, which is exactly how React components receive **props**:
+
+```js
+function Profile({ name, role = 'guest' }) {
+  return `${name} — ${role}`
+}
+
+Profile({ name: 'Aki' }) // Aki — guest
+```
+
+You can also swap variables without a temporary:
+
+```js
+let a = 1
+let b = 2
+
+;[a, b] = [b, a] // a = 2, b = 1
+```
+
+<Callout type="tip" title="Why the leading semicolon?">
+  The `;` before `[a, b]` prevents the previous line from being parsed as `let b = 2[a, b]`. It is only needed when a line starts with `[`, `(`, or a backtick — a good argument for ending all statements with semicolons.
+</Callout>
+
+## Spread and rest
+
+The `...` syntax does two related jobs: **spread** expands a collection, **rest** collects items.
+
+```js
+const base = [1, 2, 3]
+
+const copy = [...base]            // [1, 2, 3]
+const extended = [...base, 4, 5]  // [1, 2, 3, 4, 5]
+const combined = [...base, ...[9]] // [1, 2, 3, 9]
+
+const defaults = { theme: 'light', lang: 'en' }
+const settings = { ...defaults, theme: 'dark' }
+// { theme: 'dark', lang: 'en' } — later values win
+```
+
+In function signatures, `...` collects arguments into an array:
+
+```js
+function sum(...numbers) {
+  return numbers.reduce((total, n) => total + n, 0)
+}
+
+sum(1, 2, 3) // 6
+```
+
+<Callout type="warning" title="Spread copies shallowly">
+  Spreading an object copies only the top level. Nested objects are still shared references:
+  ```js
+  const a = { user: { name: 'Aki' } }
+  const b = { ...a }
+  b.user.name = 'Mina' // a.user.name is now 'Mina' too
+  ```
+  For deep copies use `structuredClone(object)`.
+</Callout>
+
+## Shorthand and computed properties
+
+If a variable name matches the property name, write it once:
+
+```js
+const name = 'Aki'
+const role = 'developer'
+
+const user = { name, role } // { name: 'Aki', role: 'developer' }
+
+const handlers = {
+  onClick() { ... }, // same as onClick: function () { ... }
+}
+```
+
+Computed keys build objects from variables:
+
+```js
+const field = 'score'
+const state = { [field]: 10 } // { score: 10 }
+```
+
+## Default parameters
+
+```js
+function greet(name = 'friend') {
+  return `Hello, ${name}`
+}
+
+greet()        // Hello, friend
+greet('Aki')   // Hello, Aki
+```
+
+Defaults apply when the argument is `undefined` — which is what happens when a caller omits it.
+
+## Optional chaining and nullish coalescing
+
+Accessing a property of `undefined` throws. Optional chaining `?.` stops the chain instead:
+
+```js
+const user = { name: 'Aki' }
+
+user.address?.city          // undefined — no crash
+user.address?.city ?? 'Unknown' // 'Unknown'
+```
+
+The nullish coalescing operator `??` returns the right side only when the left side is `null` or `undefined`:
+
+```js
+const count = 0
+
+count || 10 // 10 — because 0 is falsy (usually not what you want)
+count ?? 10 // 0  — correct: only null/undefined trigger the fallback
+```
+
+Use `??` for defaults on values that may legitimately be `0`, `''`, or `false`.
+
+## ES modules
+
+Modern JavaScript splits code into files that import what they need. In `math.js`:
+
+```js
+export const add = (a, b) => a + b
+
+export default function multiply(a, b) {
+  return a * b
+}
+```
+
+In `app.js`:
+
+```js
+import multiply, { add } from './math.js'
+
+add(2, 3)       // 5
+multiply(2, 3)  // 6
+```
+
+- **Named exports** use braces and must match the exported name exactly.
+- **Default exports** take any name at import time. Prefer named exports: they are easier to search and rename.
+- Paths in browsers need the file extension (`./math.js`) and a real server — opening the file directly with `file://` blocks module loading.
+
+```html
+<script type="module" src="./app.js"></script>
+```
+
+<Callout type="info" title="Modules are deferred by default">
+  `<script type="module">` executes after the HTML is parsed, just like `defer`, and each module has its own scope — variables do not leak into the global object.
+</Callout>
+
+## Classes
+
+Most application code uses plain functions and objects, but classes appear in libraries, error types, and framework internals, so you should be able to read them:
+
+```js
+class ApiError extends Error {
+  constructor(message, status) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+  }
+
+  isAuthError() {
+    return this.status === 401
+  }
+}
+
+throw new ApiError('Not signed in', 401)
+```
+
+- `constructor` runs when you call `new ApiError(...)`.
+- `super(...)` calls the parent class constructor.
+- Methods are shared between all instances.
+
+React class components are rare today (hooks replaced them), but knowing the syntax helps you read older code and plenty of Node libraries.
+
+## Iterating like a modern developer
+
+`for...of` walks values; `Object.entries` turns an object into pairs:
+
+```js
+const scores = { html: 90, css: 85, js: 70 }
+
+for (const [skill, score] of Object.entries(scores)) {
+  console.log(`${skill}: ${score}`)
+}
+
+Object.keys(scores)   // ['html', 'css', 'js']
+Object.values(scores) // [90, 85, 70]
+```
+
+And `Array.from` converts array-like values (including NodeLists) into real arrays so you can use `map` and `filter`:
+
+```js
+const buttons = Array.from(document.querySelectorAll('button'))
+buttons.map((button) => button.textContent)
+```
+
+## Try it
+
+<TryIt title="Destructure, spread, and coalesce">
+```js
+const response = {
+  user: { name: 'Mina', role: 'admin' },
+  posts: [{ id: 1, title: 'Hello' }],
+}
+
+const { user: { name, role = 'member' }, posts } = response
+const [firstPost] = posts
+
+const draft = { title: 'Untitled', tags: [] }
+const published = { ...draft, publishedAt: new Date(), tags: [...draft.tags, 'news'] }
+
+const pageSize = 0
+console.log(name, role)                    // Mina admin
+console.log(firstPost.title)               // Hello
+console.log(published.tags)                // ['news']
+console.log(pageSize ?? 10)                // 0
+console.log(pageSize || 10)                // 10
+```
+</TryIt>
+
+## Check your understanding
+
+<Quiz
+  question="What does the ?? operator do?"
+  options={[
+    'Returns the right side when the left side is null or undefined',
+    'Returns the right side for any falsy left side',
+    'Checks strict equality between two values',
+    'Creates a default export'
+  ]}
+  answer={0}
+  explanation="?? is nullish coalescing: only null and undefined trigger the fallback. || also triggers on 0, empty strings, and false, which often hides bugs."
+/>
+
+<Quiz
+  question="How do you import a named export called fetchUser from ./api.js?"
+  options={[
+    "import fetchUser from './api.js'",
+    "import { fetchUser } from './api.js'",
+    "import * as fetchUser from './api.js'",
+    "const fetchUser = require('./api.js')"
+  ]}
+  answer={1}
+  explanation="Named exports are imported inside braces and must match the exported name. The first option imports a default export."
+/>
+
+<Exercise title="Refactor old JavaScript into modern JavaScript" difficulty="medium">
+Here is a small program written in pre-ES6 style. Recreate it as three module files — `data.js`, `profile.js`, and `app.js` — using everything from this lesson.
+
+```js
+var users = [
+  { name: 'Aki', role: 'developer', skills: ['HTML', 'CSS'] },
+  { name: 'Mina', role: 'designer', skills: ['Figma'] }
+]
+
+function buildTitle(user) {
+  var name = user.name
+  var role = user.role || 'guest'
+  return name + ' - ' + role
+}
+
+function countSkills(user) {
+  return user.skills.length
+}
+
+for (var i = 0; i < users.length; i++) {
+  var user = users[i]
+  console.log(buildTitle(user) + ' (' + countSkills(user) + ' skills)')
+}
+```
+
+Requirements:
+
+1. In `data.js`, export the users array as a named export. Use `const`.
+2. In `profile.js`, export `buildTitle(user)` and `countSkills(user)`. Use destructured parameters, a default for `role`, an arrow function, and a template literal.
+3. In `app.js`, import both functions and the data, then loop with `for...of`.
+4. Print a line per user, such as `Aki - developer (2 skills)`.
+5. Add a third user whose `skills` array is missing entirely, and make `countSkills` return `0` for them using optional chaining or a fallback.
+6. Finish by merging two objects with spread — for example `const merged = { ...user, active: true }` — and log the result.
+</Exercise>
+
+## Summary
+
+- Template literals embed expressions and span multiple lines.
+- Destructuring extracts values from objects and arrays, including in function parameters and with defaults.
+- Spread expands collections, rest collects items, and both copy shallowly only.
+- `?.` avoids crashes on missing data; `??` provides fallbacks that respect `0` and `''`.
+- ES modules use `export` and `import`, keep scope local, and defer automatically in the browser.
+- Classes are readable despite being rare in modern application code.
+- `Object.entries`, `for...of`, and `Array.from` replace manual index loops in most code.
+
+You now write modern JavaScript. Next, the tool every developer uses before writing more of it: Git and the terminal.

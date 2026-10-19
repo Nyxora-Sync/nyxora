@@ -34,7 +34,7 @@ export function Exercise({
         </span>
       </div>
       <h3 className="mb-2 text-base font-semibold">{title}</h3>
-      <div className="text-sm leading-relaxed text-foreground/90 [&>ol]:my-2 [&>ol]:list-decimal [&>ol]:pl-5 [&>ul]:my-2 [&>ul]:list-disc [&>ul]:pl-5 [&>p+p]:mt-2">
+      <div className="text-sm leading-relaxed text-foreground/90 [&>ol]:my-2 [&>ol]:list-decimal [&>ol]:pl-5 [&>ul]:my-2 [&>ul]:list-disc [&>ul]:pl-5 [&>ul:has(input[type=checkbox])]:list-none [&>ul:has(input[type=checkbox])]:pl-0 [&>ul:has(input[type=checkbox])]:space-y-1.5 [&>p+p]:mt-2">
         {children}
       </div>
     </section>
@@ -43,9 +43,11 @@ export function Exercise({
 
 export function TryIt({
   title = 'Try it yourself',
+  hint = 'Type this out by hand, then run it in the playground or in your own editor.',
   children,
 }: {
   title?: string
+  hint?: string
   children: ReactNode
 }) {
   return (
@@ -54,9 +56,7 @@ export function TryIt({
         <FlaskConical className="h-4 w-4" aria-hidden="true" />
         {title}
       </div>
-      <p className="mb-2 text-xs text-muted-foreground">
-        Type this out by hand, then run it in the playground or in your own editor.
-      </p>
+      <p className="mb-2 text-xs text-muted-foreground">{hint}</p>
       <div className="[&>div]:my-2 [&>div:last-child]:mb-0">{children}</div>
     </section>
   )
