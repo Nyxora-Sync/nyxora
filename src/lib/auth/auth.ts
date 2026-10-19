@@ -36,13 +36,18 @@ if (process.env.EMAIL_SERVER) {
   )
 }
 
+const hasDatabase = Boolean(process.env.DATABASE_URL)
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
-  adapter: PrismaAdapter(prisma),
+  // Only attach the Prisma adapter when a database is configured.
+  // Without one, auth falls back to JWT sessions (and the app's core
+  // learning experience still works fully via localStorage).
+  ...(hasDatabase ? { adapter: PrismaAdapter(prisma) } : { session: { strategy: 'jwt' as const } }),
   providers,
   callbacks: {
-    async session({ session, user }) {
+    async session({ session, user, token }) {
       if (session.user) {
-        session.user.id = user.id
+        session.user.id = user?.id ?? (token?.sub as string)
       }
       return session
     },
