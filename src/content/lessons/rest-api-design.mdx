@@ -1,0 +1,272 @@
+Your API works. Now make it predictable. **REST** is not a protocol or a library — it is a set of conventions for exposing data as resources over HTTP. Following them means client developers can guess your endpoints and error shapes instead of reading your source code.
+
+This lesson covers the conventions that matter in practice: naming, methods, status codes, validation, pagination, versioning, and consistent error responses.
+
+## Resources, not actions
+
+In REST, URLs identify **things** (nouns), and HTTP methods express **actions** (verbs). The method is already the verb, so it does not belong in the path:
+
+| Good | Why |
+|------|-----|
+| `GET /api/v1/movies` | List the movies collection |
+| `GET /api/v1/movies/42` | One movie |
+| `POST /api/v1/movies` | Create a movie |
+| `PATCH /api/v1/movies/42` | Update part of a movie |
+| `GET /api/v1/movies/42/reviews` | Sub-resource of one movie |
+
+| Avoid | Problem |
+|-------|---------|
+| `GET /api/getMovies` | Verb in the path; the method is enough |
+| `POST /api/movies/create` | Redundant; POST already means create |
+| `GET /api/movie` | Singular for a collection |
+| `GET /api/movies/42/reviews/7/comments/3/writers` | Too deep; expose a flatter route |
+
+Rules of thumb:
+
+- **Plural nouns** for collections: `movies`, `users`, `orders`.
+- **Lowercase with dashes** for multi-word paths: `/order-items`.
+- Nest at most **one level** deep. If you need more, the nested thing deserves its own top-level route.
+- **Query strings** filter, sort, and page — they never identify a resource.
+
+## Methods carry meaning
+
+| Method | Purpose | Safe? | Idempotent? |
+|--------|---------|:-----:|:-----------:|
+| `GET` | Read | Yes | Yes |
+| `POST` | Create | No | No |
+| `PUT` | Replace the whole resource | No | Yes |
+| `PATCH` | Update some fields | No | No |
+| `DELETE` | Remove | No | Yes |
+
+- **Safe** means no side effects — a `GET` must never change data.
+- **Idempotent** means repeating the request gives the same end state. Two identical `DELETE`s: the second returns 404, but the resource is still gone.
+
+Use `PUT` when the client sends the complete representation, `PATCH` for partial updates. In practice, MERN APIs lean on `PATCH` for updates and reserve `PUT` for full replacements.
+
+## Status codes are the API’s body language
+
+Return the status that describes what happened:
+
+| Code | When to use |
+|------|-------------|
+| `200 OK` | Successful read, update, or delete with a body |
+| `201 Created` | Resource created; include a `Location` header |
+| `204 No Content` | Success with nothing to return (typical delete) |
+| `400 Bad Request` | Malformed request — bad JSON, wrong types |
+| `401 Unauthorized` | Not authenticated (missing or invalid credentials) |
+| `403 Forbidden` | Authenticated, but not allowed to do this |
+| `404 Not Found` | The resource does not exist |
+| `409 Conflict` | Duplicate — email already registered, version clash |
+| `422 Unprocessable Entity` | Body parsed but failed validation rules |
+| `429 Too Many Requests` | Rate limit exceeded |
+| `500 Internal Server Error` | Unhandled failure — never leak stack traces |
+| `503 Service Unavailable` | Temporarily down or overloaded |
+
+```js
+app.post('/api/v1/movies', async (req, res) => {
+  const movie = await createMovie(req.body)
+  res.status(201).location(`/api/v1/movies/${movie.id}`).json(movie)
+})
+```
+
+<Callout type="warning" title="404 and 400 are not decorations">
+  Returning `200` with `{ "error": "not found" }` forces every client to inspect the body for failures and breaks caching, retries, and monitoring. The status code is the contract.
+</Callout>
+
+## One error shape everywhere
+
+Clients should parse errors once, not per endpoint. Pick a shape and keep it forever:
+
+```json
+{
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Invalid request body",
+    "details": [
+      { "field": "year", "message": "Expected a number, received a string" }
+    ]
+  }
+}
+```
+
+- `code` is machine-readable and stable — clients can switch on it.
+- `message` is for humans and may change.
+- `details` is optional and holds field-level problems.
+
+Never return raw exception messages from a 500. They leak file paths, queries, and column names. Log the real error server-side; return a generic message.
+
+## Validate at the boundary
+
+Never trust `req.body`. Parse it against a schema, and use the parsed result — not the original input:
+
+```js
+import { z } from 'zod'
+
+const movieSchema = z.object({
+  title: z.string().min(1).max(200),
+  year: z.number().int().min(1888).max(new Date().getFullYear() + 5),
+  genre: z.enum(['action', 'comedy', 'drama', 'sci-fi']).optional(),
+})
+
+app.post('/api/v1/movies', (req, res) => {
+  const result = movieSchema.safeParse(req.body)
+
+  if (!result.success) {
+    return res.status(422).json({
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'Invalid request body',
+        details: result.error.issues.map((issue) => ({
+          field: issue.path.join('.'),
+          message: issue.message,
+        })),
+      },
+    })
+  }
+
+  const movie = createMovie(result.data) // typed, defaults applied, extra keys stripped
+  res.status(201).json(movie)
+})
+```
+
+Turn it into reusable middleware so routes stay thin:
+
+```js
+export const validate = (schema) => (req, res, next) => {
+  const result = schema.safeParse(req.body)
+  if (!result.success) {
+    return res.status(422).json({
+      error: { code: 'VALIDATION_ERROR', message: 'Invalid request body' },
+    })
+  }
+  req.validated = result.data
+  next()
+}
+
+// app.post('/api/v1/movies', validate(movieSchema), createHandler)
+```
+
+<Callout type="tip" title="Zod gives you types for free">
+  `z.infer<typeof movieSchema>` produces a TypeScript type from the same schema, so runtime validation and compile-time types can never drift apart.
+</Callout>
+
+## Pagination, filtering, sorting
+
+Never return an unbounded collection. `GET /api/v1/movies` on a real database can hold a million rows.
+
+```text
+GET /api/v1/movies?page=2&limit=20&sort=-year&genre=sci-fi
+```
+
+- `page` / `limit` — offset pagination, simple and familiar.
+- `sort` — field name; a leading `-` means descending.
+- Everything else — filters.
+
+Return data plus metadata so clients can build pagination controls:
+
+```json
+{
+  "data": [ { "id": 21, "title": "Akira" } ],
+  "meta": { "page": 2, "limit": 20, "total": 137, "pages": 7 }
+}
+```
+
+Always cap `limit` server-side (`Math.min(limit, 100)`). Otherwise one curious client can ask for everything and take your API down. For very large datasets, cursor pagination (`?after=<id>`) is more stable than offsets because inserts do not shift pages.
+
+## Versioning
+
+Version the API from day one: `/api/v1/movies`. When you must make a breaking change, add `/api/v2` and keep `v1` running while clients migrate. Announce a sunset date, and prefer additive changes — new fields and new endpoints rarely break anyone.
+
+## Make it documentable
+
+An API nobody can use does not exist. Keep a contract table in your README or an OpenAPI definition:
+
+| Method | Path | Body | Success | Errors |
+|--------|------|------|---------|--------|
+| `GET` | `/api/v1/movies` | — | `200` list + meta | — |
+| `POST` | `/api/v1/movies` | movie | `201` movie | `422` validation |
+| `GET` | `/api/v1/movies/:id` | — | `200` movie | `404` |
+| `PATCH` | `/api/v1/movies/:id` | partial | `200` movie | `404`, `422` |
+| `DELETE` | `/api/v1/movies/:id` | — | `204` | `404` |
+
+Tools like Postman, Insomnia, or a `requests.http` file double as living documentation and manual test suites.
+
+## Try it
+
+<TryIt title="Validate a request body with Zod" hint="Run npm install zod in a scratch folder, save this as validate.js, and run it with node.">
+```js
+import { z } from 'zod'
+
+const signupSchema = z.object({
+  email: z.email(),
+  password: z.string().min(8).max(72),
+  age: z.number().int().min(13).optional(),
+})
+
+const good = signupSchema.safeParse({
+  email: 'aki@example.com',
+  password: 'correct-horse',
+})
+
+const bad = signupSchema.safeParse({
+  email: 'not-an-email',
+  password: 'short',
+  age: 'twelve',
+})
+
+console.log(good.success) // true
+console.log(bad.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`))
+```
+</TryIt>
+
+## Check your understanding
+
+<Quiz
+  question="What is the difference between PUT and PATCH?"
+  options={[
+    'PUT is faster than PATCH',
+    'PUT replaces the entire resource; PATCH updates only the provided fields',
+    'PATCH creates, PUT updates',
+    'They are identical'
+  ]}
+  answer={1}
+  explanation="PUT sends a full representation and overwrites everything. PATCH sends a partial document, leaving the other fields untouched."
+/>
+
+<Quiz
+  question="A client created a resource successfully. Which status code and header should the server send?"
+  options={[
+    '200 OK with no body',
+    '201 Created with a Location header pointing at the new resource',
+    '204 No Content',
+    '202 Accepted'
+  ]}
+  answer={1}
+  explanation="201 is the code for successful creation. A Location header tells the client where the new resource lives. 200 is for reads and updates, 204 for deletes."
+/>
+
+<Exercise title="Design and implement a versioned library API" difficulty="medium">
+Build the API contract first, then the implementation. Use Express and Zod, with in-memory data.
+
+1. **Contract:** write a table of every endpoint for a `books` resource — method, path, body, success, errors. Include list, read, create, patch, delete, plus nested `GET` and `POST` on `/api/v1/books/:id/reviews`.
+2. **Implement** under `/api/v1`:
+   - `GET /books` with `?page`, `?limit` (capped at 100), `?sort`, and `?author` filters; return `{ data, meta }`.
+   - `GET /books/:id`, `POST`, `PATCH`, `DELETE` with the status codes from the table.
+   - `409 Conflict` when creating a book with an existing ISBN.
+   - Zod validation with a reusable `validate` middleware returning `422`.
+3. **Errors:** one consistent error shape for every failure, including the 404 and 500 handlers.
+4. **Test every status code with curl**: 200, 201, 204, 404, 409, and 422. Save the commands in the README.
+5. **Bonus:** add rate limiting to `POST` routes and verify a `429` after rapid requests.
+</Exercise>
+
+## Summary
+
+- URLs name resources (plural nouns); methods carry the verbs.
+- `GET` is safe; `PUT` and `DELETE` are idempotent; `PATCH` updates partially.
+- Use precise status codes: 201 for creation, 204 for empty success, 422 for validation, 409 for conflicts, 401 vs 403 for auth failures.
+- Standardize one error shape with a stable machine-readable code.
+- Validate every request body with Zod and use the parsed data.
+- Paginate always, cap the limit, and return metadata.
+- Version from day one under `/api/v1` and document the contract.
+
+Next: authentication and authorization — proving who a request comes from and deciding what they are allowed to do.

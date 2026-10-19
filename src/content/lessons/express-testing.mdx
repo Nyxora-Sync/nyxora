@@ -1,0 +1,414 @@
+Every codebase grows. Endpoints get added, validation tightens, a refactor moves files around — and something that worked yesterday breaks silently. **Tests** are the safety net that catches regressions before users do, and **centralized error handling** is what makes failures predictable in production.
+
+This lesson covers the testing pyramid, Vitest and Supertest in practice, a single error-handling pipeline, and how the two reinforce each other.
+
+## Why write tests
+
+- **Confidence to change code.** Without tests, every edit is a gamble.
+- **Regression detection.** A bug that once cost you an hour never returns unnoticed.
+- **Documentation that cannot lie.** A test shows exactly what a function or endpoint does.
+- **Faster debugging.** A failing test points at one behavior instead of “the app is broken”.
+
+Write tests for behavior, not implementation. A test that breaks every time you rename a variable is a tax, not a safety net.
+
+## The testing pyramid
+
+```text
+        ╱╲          E2E (few)
+       ╱  ╲         Real browser, whole system, slowest
+      ╱────╲
+     ╱      ╲       Integration (some)
+    ╱        ╲      Routes + middleware + test database
+   ╱──────────╲
+  ╱            ╲    Unit (many)
+ ╱              ╲   Pure functions, no I/O, milliseconds
+╱────────────────╲
+```
+
+- **Unit tests** cover small pure pieces: a total calculator, a slug formatter, a permission check.
+- **Integration tests** send real HTTP requests through your Express app with Supertest: status codes, validation, auth middleware.
+- **End-to-end tests** drive a real browser (Playwright) against a running app. Powerful and slow — save them for critical flows like sign-up and checkout.
+
+Most bugs are caught by the bottom two layers. Start there.
+
+## Setup
+
+```bash
+npm install --save-dev vitest supertest
+```
+
+```json
+{
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  }
+}
+```
+
+<Callout type="info" title="Vitest and Jest are the same dialect">
+  `describe`, `it`, `expect`, `beforeEach` — Vitest uses the same API as Jest, so every example in the Jest documentation applies. Vitest runs ES modules out of the box, which is why it is used here. If you prefer Jest, swap the import and add its ESM configuration.
+</Callout>
+
+## Unit tests
+
+Take a pure function — the easiest thing in the world to test:
+
+```js
+// cart.js
+export function calculateTotal(items) {
+  return items.reduce((sum, item) => sum + item.price * item.qty, 0)
+}
+```
+
+```js
+// cart.test.js
+import { describe, it, expect } from 'vitest'
+import { calculateTotal } from './cart.js'
+
+describe('calculateTotal', () => {
+  it('sums line items', () => {
+    expect(calculateTotal([{ price: 10, qty: 2 }])).toBe(20)
+  })
+
+  it('returns 0 for an empty cart', () => {
+    expect(calculateTotal([])).toBe(0)
+  })
+
+  it('handles decimal prices without floating point surprises', () => {
+    expect(calculateTotal([{ price: 0.1, qty: 3 }])).toBeCloseTo(0.3)
+  })
+})
+```
+
+Run it with `npm test`. Habits that keep unit tests valuable:
+
+- Name tests after behavior: `returns 0 for an empty cart`, not `test 2`.
+- Test the edges: empty input, zero, negative, huge, wrong type.
+- One behavior per test; when it fails, the name alone should explain what broke.
+- Use `toBeCloseTo` for decimals, `toEqual` for objects and arrays, `toThrow` for errors.
+
+## Integration tests with Supertest
+
+To test HTTP endpoints, your app must be importable **without** starting a server. Split the app from the listener:
+
+```js
+// app.js
+import express from 'express'
+
+export function createApp() {
+  const app = express()
+  app.use(express.json())
+
+  const movies = []
+
+  app.get('/api/v1/movies', (req, res) => {
+    res.json({ data: movies })
+  })
+
+  app.post('/api/v1/movies', (req, res) => {
+    const { title, year } = req.body ?? {}
+    if (typeof title !== 'string' || title.trim() === '' || !Number.isInteger(year)) {
+      return res.status(422).json({
+        error: { code: 'VALIDATION_ERROR', message: 'title and year are required' },
+      })
+    }
+    const movie = { id: movies.length + 1, title, year }
+    movies.push(movie)
+    return res.status(201).json(movie)
+  })
+
+  return app
+}
+```
+
+```js
+// server.js
+import { createApp } from './app.js'
+
+const port = process.env.PORT ?? 3000
+createApp().listen(port, () => console.log(`API on http://localhost:${port}`))
+```
+
+A `createApp()` factory gives every test a clean app with empty state, and Supertest handles the HTTP layer without opening a real port:
+
+```js
+// app.test.js
+import { describe, it, expect } from 'vitest'
+import request from 'supertest'
+import { createApp } from './app.js'
+
+describe('movies API', () => {
+  it('starts with an empty list', async () => {
+    const app = createApp()
+    const res = await request(app).get('/api/v1/movies')
+
+    expect(res.status).toBe(200)
+    expect(res.body.data).toEqual([])
+  })
+
+  it('creates a movie and returns 201', async () => {
+    const app = createApp()
+    const res = await request(app)
+      .post('/api/v1/movies')
+      .send({ title: 'Akira', year: 1988 })
+
+    expect(res.status).toBe(201)
+    expect(res.body).toMatchObject({ title: 'Akira', year: 1988 })
+  })
+
+  it('rejects an invalid body with 422', async () => {
+    const app = createApp()
+    const res = await request(app)
+      .post('/api/v1/movies')
+      .send({ title: '', year: '1988' })
+
+    expect(res.status).toBe(422)
+    expect(res.body.error.code).toBe('VALIDATION_ERROR')
+  })
+})
+```
+
+<KeyPoint>
+`request(app)` sends a real HTTP request through your entire Express stack — middleware, routing, validation, error handling — without a running server. That is what makes integration tests so valuable.
+</KeyPoint>
+
+<Callout type="warning" title="Never test against development or production data">
+  For in-memory stores, create a fresh app per test. With a database, point `DATABASE_URL` at a dedicated test database and clean collections in `beforeEach` — or use transactions that roll back. Tests that share state fail randomly and are worse than no tests.
+</Callout>
+
+## Centralized error handling
+
+Scattering `try/catch` across every route duplicates logic and produces inconsistent responses. Instead, define one error type, throw it anywhere, and handle it in one place.
+
+```js
+// errors.js
+export class AppError extends Error {
+  constructor(message, statusCode = 500, code = 'INTERNAL_ERROR') {
+    super(message)
+    this.name = 'AppError'
+    this.statusCode = statusCode
+    this.code = code
+  }
+}
+```
+
+```js
+// app.js (excerpt)
+import { AppError } from './errors.js'
+
+const asyncHandler = (fn) => (req, res, next) =>
+  Promise.resolve(fn(req, res, next)).catch(next)
+
+app.get('/api/v1/movies/:id', asyncHandler(async (req, res) => {
+  const movie = await findMovie(req.params.id)
+  if (!movie) {
+    throw new AppError('Movie not found', 404, 'NOT_FOUND')
+  }
+  res.json(movie)
+}))
+
+// 404 for unmatched routes
+app.use((req, res) => {
+  res.status(404).json({ error: { code: 'ROUTE_NOT_FOUND', message: 'Route not found' } })
+})
+
+// The single error handler — note the four arguments
+app.use((err, req, res, next) => {
+  const status = err.statusCode ?? 500
+
+  if (status >= 500) {
+    console.error(err) // full details in the server logs, never in the response
+  }
+
+  res.status(status).json({
+    error: {
+      code: err.code ?? 'INTERNAL_ERROR',
+      message: status >= 500 ? 'Internal server error' : err.message,
+    },
+  })
+})
+```
+
+Why this matters:
+
+- Handlers describe intent (`throw new AppError('Movie not found', 404)`) instead of formatting responses.
+- Every error has the same JSON shape, so clients parse one thing.
+- 5xx details stay in the logs; users get a safe generic message.
+- Express 5 forwards rejected promises to the error handler automatically. On Express 4, wrap handlers with `asyncHandler` as shown above.
+
+## Validate with Zod, then test both sides
+
+The schema from the REST lesson plugs straight into tests:
+
+```js
+import { z } from 'zod'
+
+export const movieSchema = z.object({
+  title: z.string().trim().min(1).max(200),
+  year: z.number().int().min(1888).max(new Date().getFullYear() + 5),
+})
+
+export const validate = (schema) => (req, res, next) => {
+  const result = schema.safeParse(req.body)
+  if (!result.success) {
+    return res.status(422).json({
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'Invalid request body',
+        details: result.error.issues.map((issue) => ({
+          field: issue.path.join('.'),
+          message: issue.message,
+        })),
+      },
+    })
+  }
+  req.validated = result.data
+  next()
+}
+```
+
+Test the happy path **and** the failure path for every endpoint:
+
+```js
+it('returns 422 with a field detail when year is a string', async () => {
+  const res = await request(createApp())
+    .post('/api/v1/movies')
+    .send({ title: 'Akira', year: '1988' })
+
+  expect(res.status).toBe(422)
+  expect(res.body.error.details[0].field).toBe('year')
+})
+```
+
+## Testing error paths on purpose
+
+Error handling is code too — it needs coverage:
+
+```js
+it('returns a generic 500 without leaking internals', async () => {
+  const app = createApp()
+  app.get('/boom', () => {
+    throw new Error('database password is hunter2')
+  })
+  app.use((err, req, res, next) => {
+    res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Internal server error' } })
+  })
+
+  const res = await request(app).get('/boom')
+
+  expect(res.status).toBe(500)
+  expect(res.body.error.message).not.toContain('hunter2')
+})
+```
+
+The most valuable tests are often the ones asserting what must **not** happen: no password hashes in responses, no stack traces in 500s, no access after a token expires.
+
+## Coverage and test-driven development
+
+```bash
+npm run test:coverage
+```
+
+Coverage tells you which lines ran — nothing more. 100% coverage with meaningless assertions is worse than 70% covering real behavior. Aim for confidence on critical paths: authentication, payments, data mutations, error responses.
+
+**TDD** flips the order: write a failing test (red), make it pass (green), then refactor. It shines for bug fixes — reproduce the bug as a failing test first, and you have proof of the fix plus a permanent regression guard.
+
+## Logging errors that matter
+
+Separate development noise from production signals:
+
+```js
+import morgan from 'morgan'
+
+app.use(morgan('dev')) // compact request logs while developing
+```
+
+In production, use a structured logger such as `pino` and include a request id, method, path, status, and duration. Log full stack traces server-side; never log passwords, tokens, or entire auth request bodies.
+
+## Try it
+
+<TryIt title="Your first Vitest test" hint="Run npm install --save-dev vitest, save both files in one folder, and run npx vitest run.">
+```js
+// slug.js
+export const slugify = (text) =>
+  text.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+```
+
+```js
+// slug.test.js
+import { describe, it, expect } from 'vitest'
+import { slugify } from './slug.js'
+
+describe('slugify', () => {
+  it('lowercases and hyphenates', () => {
+    expect(slugify('Hello World')).toBe('hello-world')
+  })
+
+  it('trims leading and trailing hyphens', () => {
+    expect(slugify('  --MERN--  ')).toBe('mern')
+  })
+
+  it('collapses punctuation', () => {
+    expect(slugify('Node.js & Express!')).toBe('node-js-express')
+  })
+})
+```
+</TryIt>
+
+## Check your understanding
+
+<Quiz
+  question="Why should the Express app be exported from a createApp() function separate from the server listener?"
+  options={[
+    'Because Express requires it',
+    'So tests can import the app and send requests without opening a real port',
+    'To make the app load faster in production',
+    'Because listen() is deprecated'
+  ]}
+  answer={1}
+  explanation="Supertest takes an Express app and manages the HTTP layer itself. Keeping listen() in a separate file means tests get a fresh app with clean state and no port conflicts."
+/>
+
+<Quiz
+  question="Which test is an integration test?"
+  options={[
+    'Testing calculateTotal() with three cart items',
+    'Sending POST /api/v1/movies with Supertest and asserting the 201 response',
+    'A Playwright script that signs up in the browser',
+    'Checking that a string is lowercase'
+  ]}
+  answer={1}
+  explanation="Integration tests exercise multiple layers together — routing, middleware, validation, handlers. Supertest through Express is the classic example. The first and last options are unit tests; the Playwright script is end-to-end."
+/>
+
+<Exercise title="Add a test suite to your movies API" difficulty="medium">
+Take the Express API from the previous lessons and give it a real safety net.
+
+1. Install `vitest` and `supertest`, add `test` and `test:coverage` scripts.
+2. Refactor to `createApp()` and `server.js` if you have not already.
+3. Write unit tests for one pure function (a validator, a slug helper, a total calculator). Cover the edges: empty, zero, invalid types.
+4. Write integration tests covering:
+   - `GET /api/v1/movies` returns `200` and a list
+   - `POST` creates a movie and returns `201`
+   - `POST` with an invalid body returns `422` and a `VALIDATION_ERROR` code
+   - `GET /api/v1/movies/9999` returns `404`
+   - `DELETE` returns `204`, and deleting again returns `404`
+   - a duplicate create returns `409` if your API checks for conflicts
+5. Add a test for the central error handler: a throwing route returns `500` with a generic message — assert the internal message does not leak.
+6. Run `npm run test:coverage`. Look at which branches are untested and add one test for the most important gap.
+7. Bonus (TDD): find or invent a small bug, write a failing test that reproduces it, then fix the code until the suite passes.
+</Exercise>
+
+## Summary
+
+- The pyramid: many fast unit tests, fewer integration tests through Express, a handful of E2E flows.
+- Vitest uses the same `describe`/`it`/`expect` API as Jest and runs ESM without configuration.
+- Export `createApp()` separately from `listen()` so Supertest can test the whole stack.
+- Isolate every test: fresh app or dedicated test database, never production data.
+- One `AppError` class plus a single four-argument error middleware removes duplicated try/catch and leaks.
+- Validate with Zod and test both happy paths and failure paths — especially what must not leak.
+- Coverage is a signal, not a goal; TDD is strongest for bug fixes.
+
+The backend module is complete. Next module: MongoDB and Mongoose — replacing every in-memory array with a real database.

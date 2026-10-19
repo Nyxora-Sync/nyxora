@@ -1,0 +1,292 @@
+For its first twenty years, JavaScript lived inside the browser. It could style a button, but it could not open a socket, read a file, or talk to a database. In 2009, Node.js changed that by taking Chrome’s JavaScript engine (V8) and wrapping it in the APIs a server needs.
+
+That single decision is why the MERN stack exists. One language, top to bottom: React in the browser, Node and Express on the server, JavaScript models for MongoDB. This lesson gets you running JavaScript as a server program.
+
+## Why Node.js exists
+
+Node is **not** a framework and not a language. It is a **runtime**: the V8 engine plus a standard library for files, networks, processes, and cryptography.
+
+It is a good fit for web servers because web servers spend most of their time waiting — for a database, a disk, or another API. Node handles waiting efficiently with a single-threaded event loop instead of spawning a thread per request. That makes it excellent for I/O-heavy APIs (which is what MERN apps are) and less ideal for CPU-heavy work like video encoding.
+
+## Install and run
+
+Install the current **LTS** version from [nodejs.org](https://nodejs.org), or with a version manager like [nvm](https://github.com/nvm-sh/nvm), then verify:
+
+```bash
+node --version   # v22.x.x or newer
+npm --version    # 10.x.x or newer
+```
+
+Node ships with a REPL — a live playground. Type `node` with no arguments, experiment, and exit with `.exit` or Ctrl+D:
+
+```bash
+$ node
+> 2 + 2
+4
+> 'hello'.toUpperCase()
+'HELLO'
+```
+
+To run a file:
+
+```bash
+node app.js
+
+# Restart automatically when the file changes (Node 18.11+)
+node --watch app.js
+```
+
+`node --watch` replaces `nodemon` for most development work.
+
+## ES modules
+
+Node supports two module systems. Modern code uses **ES modules** (ESM), which you already know from the browser. To enable them, add this to `package.json`:
+
+```json
+{
+  "type": "module"
+}
+```
+
+Now `import` and `export` work the way you expect:
+
+```js
+// math.js
+export const add = (a, b) => a + b
+
+// app.js
+import { add } from './math.js'
+
+console.log(add(2, 3)) // 5
+```
+
+Note the `.js` extension in the import path — Node requires explicit file extensions. The older CommonJS style (`const x = require('x')`) still appears in tutorials and older packages, so you should recognize it, but write ESM in new code.
+
+<Callout type="info" title="Core modules use the node: prefix">
+  Built-in modules are imported as `node:fs`, `node:path`, `node:http`. The prefix makes it obvious that the module comes from Node, not npm.
+</Callout>
+
+## The process object
+
+Every Node program has a global `process` with information and control over the running program:
+
+```js
+console.log(process.argv)
+// [ '/path/to/node', '/path/to/app.js', 'Aki' ] when run as: node app.js Aki
+
+const name = process.argv[2] ?? 'friend'
+console.log(`Hello, ${name}`)
+
+console.log(process.cwd()) // current working directory
+process.exit(1)            // exit with a failure code
+```
+
+Environment variables live in `process.env` and are how you configure a program without editing code:
+
+```js
+const port = process.env.PORT ?? 3000
+```
+
+Keep secrets in a `.env` file, add it to `.gitignore`, and load it with Node itself (20.6+) or `dotenv`:
+
+```bash
+node --env-file=.env app.js
+```
+
+```text
+# .env
+PORT=4000
+DATABASE_URL=mongodb://localhost:27017/mydb
+```
+
+## Files with node:fs
+
+The filesystem module has promise-based APIs, which pair naturally with `async/await`:
+
+```js
+import { readFile, writeFile } from 'node:fs/promises'
+
+const text = await readFile('notes.txt', 'utf8')
+console.log(text.toUpperCase())
+
+await writeFile('output.txt', `Processed ${text.length} characters`)
+```
+
+Top-level `await` works in ESM, so no wrapper function is needed. For paths, always use `node:path` instead of string concatenation — it handles separators correctly on every operating system:
+
+```js
+import path from 'node:path'
+
+const file = path.join(process.cwd(), 'data', 'notes.txt')
+const ext = path.extname(file) // '.txt'
+```
+
+## npm and package.json
+
+**npm** is the package manager that installs libraries and records them in `package.json`:
+
+```bash
+npm init -y                      # create package.json
+npm install express              # runtime dependency
+npm install --save-dev vitest    # development-only dependency
+npm install                      # reinstall everything from package.json
+npm ls                           # show installed packages
+```
+
+Two dependency categories:
+
+| Field | Meaning | Examples |
+|-------|---------|----------|
+| `dependencies` | Needed to run the app in production | `express`, `mongoose` |
+| `devDependencies` | Needed only while developing | test runners, bundlers, `nodemon` |
+
+Version numbers use semantic versioning: `^4.19.2` accepts `4.x.x` (compatible updates), `~4.19.2` accepts `4.19.x` (patch updates only). `package-lock.json` pins the exact versions your machine installed — commit it.
+
+Scripts are shortcuts defined in `package.json`:
+
+```json
+{
+  "type": "module",
+  "scripts": {
+    "start": "node app.js",
+    "dev": "node --watch app.js",
+    "test": "vitest run"
+  }
+}
+```
+
+```bash
+npm run dev
+```
+
+<Callout type="warning" title="Never commit node_modules">
+  It contains hundreds of megabytes that `npm install` recreates exactly from `package-lock.json`. Add `node_modules/` and `.env` to `.gitignore` before your first commit.
+</Callout>
+
+## The event loop and non-blocking I/O
+
+This is the mental model that makes Node make sense. Run this:
+
+```js
+import { readFile, readFileSync } from 'node:fs'
+
+console.log('start')
+
+readFile('big-file.txt', 'utf8', () => {
+  console.log('file read finished')
+})
+
+console.log('end')
+// start, end, file read finished
+```
+
+`readFile` hands the work to the operating system, registers a callback, and returns immediately. The event loop keeps running other code and calls the callback when the data is ready. `readFileSync`, by contrast, **blocks the entire process** until the file is read:
+
+```js
+const data = readFileSync('big-file.txt', 'utf8') // everything waits here
+```
+
+On a server, blocking is fatal: one slow synchronous operation freezes every user. Remember the async lesson — the same rules, now applied to files and the network.
+
+<KeyPoint>
+Node is single-threaded for your JavaScript, but the event loop lets thousands of connections wait concurrently. Keep your code non-blocking and one process can serve a lot of traffic.
+</KeyPoint>
+
+## Your first HTTP server
+
+Everything in Express is built on the built-in `node:http` module. Here is a server with real routing, no dependencies:
+
+```js
+import { createServer } from 'node:http'
+
+const server = createServer((req, res) => {
+  if (req.url === '/') {
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ message: 'Hello from Node' }))
+    return
+  }
+
+  if (req.url === '/time') {
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ now: new Date().toISOString() }))
+    return
+  }
+
+  res.writeHead(404, { 'Content-Type': 'application/json' })
+  res.end(JSON.stringify({ error: 'Not found' }))
+})
+
+const port = process.env.PORT ?? 3000
+server.listen(port, () => {
+  console.log(`Server running at http://localhost:${port}`)
+})
+```
+
+Run it with `node --watch app.js` and visit `http://localhost:3000`. You now have a real web server. Notice the manual work: parsing URLs, setting headers, matching routes. That is exactly what Express removes, and it is why the next lesson exists.
+
+## Try it
+
+<TryIt title="A command-line greeting script">
+```js
+// greet.js — run with: node greet.js Aki
+const name = process.argv[2] ?? 'friend'
+const hour = new Date().getHours()
+
+const partOfDay = hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening'
+
+console.log(`Good ${partOfDay}, ${name}!`)
+```
+</TryIt>
+
+## Check your understanding
+
+<Quiz
+  question="Which operation blocks the Node event loop?"
+  options={[
+    'await readFile(path)',
+    'readFileSync(path)',
+    'AbortController.abort()',
+    'console.log()'
+  ]}
+  answer={1}
+  explanation="Any function ending in Sync blocks: readFileSync, writeFileSync, execSync. The promise-based versions yield to the event loop while the operating system does the work."
+/>
+
+<Quiz
+  question="Where does a test runner belong in package.json?"
+  options={[
+    'dependencies, because tests run everywhere',
+    'devDependencies, because it is only needed during development',
+    'scripts, because it is a command',
+    'package-lock.json'
+  ]}
+  answer={1}
+  explanation="Tests are not needed to run the production server, so they go in devDependencies. Scripts define how to run commands, not what is installed."
+/>
+
+<Exercise title="Build your first Node scripts and HTTP server" difficulty="easy">
+Create a folder `node-lab` and work through these steps. Commit after each one.
+
+1. Run `npm init -y`, then set `"type": "module"`.
+2. Write `args.js` that prints the number of arguments passed after the script name, then greets the first one. Run it as `node args.js Aki extra`.
+3. Write `info.js` that reads `package.json` with `node:fs/promises`, parses it, and prints the package name and version.
+4. Write `server.js` using `node:http` with these routes:
+   - `GET /` → `{ "message": "Hello from Node" }`
+   - `GET /about` → JSON with your name and a hobby
+   - `GET /time` → `{ "now": <current ISO timestamp> }`
+   - anything else → status `404` with `{ "error": "Not found" }`
+5. Add npm scripts `start` (`node server.js`) and `dev` (`node --watch server.js`). Verify both with `npm run`.
+6. Bonus: move the port to a `.env` file and run with `node --env-file=.env --watch server.js`.
+</Exercise>
+
+## Summary
+
+- Node.js is a JavaScript runtime: V8 plus server-side APIs, which enables one language across the MERN stack.
+- Enable ES modules with `"type": "module"`; import core modules with the `node:` prefix.
+- `process.argv`, `process.env`, and `process.exit` are how programs take input and report status.
+- `node:fs/promises` and `node:path` handle files and paths safely across operating systems.
+- npm records dependencies in `package.json`; `package-lock.json` pins exact versions; never commit `node_modules`.
+- The event loop makes non-blocking code fast; `Sync` functions block every user.
+- A raw `node:http` server works, but routing and headers by hand are painful — which is what Express solves.
+
+Next: Express, the routing and middleware layer that turns those raw requests into a clean API.

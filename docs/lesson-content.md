@@ -3,7 +3,7 @@
 The current curriculum has **30 unique lessons**. The developer track reuses the
 same lesson IDs as the beginner track, so a lesson is authored once.
 
-**Authored: 9 / 30**
+**Authored: 14 / 30**
 
 ## Web Foundations
 
@@ -19,11 +19,11 @@ same lesson IDs as the beginner track, so a lesson is authored once.
 
 ## Node.js & Express
 
-- [ ] `node-intro` — Node.js Fundamentals
-- [ ] `express-basics` — Express.js: Routing & Middleware
-- [ ] `rest-api-design` — REST API Design
-- [ ] `express-auth` — Authentication & Authorization
-- [ ] `express-testing` — Testing & Error Handling
+- [x] `node-intro` — Node.js Fundamentals
+- [x] `express-basics` — Express.js: Routing & Middleware
+- [x] `rest-api-design` — REST API Design
+- [x] `express-auth` — Authentication & Authorization
+- [x] `express-testing` — Testing & Error Handling
 
 ## MongoDB & Mongoose
 

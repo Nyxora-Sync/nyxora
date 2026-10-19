@@ -1,0 +1,345 @@
+Raw `node:http` gave you a server but made you parse URLs by hand. **Express** is a tiny layer on top that handles routing, request parsing, middleware, and responses — and it is the E in MERN.
+
+Express is deliberately minimal. You add only the features you need, and its middleware pipeline is the mental model behind almost every Node framework, including Next.js route handlers.
+
+## Setting up
+
+```bash
+mkdir api
+cd api
+npm init -y
+npm pkg set type=module
+npm install express
+```
+
+Create `server.js`:
+
+```js
+import express from 'express'
+
+const app = express()
+const PORT = process.env.PORT ?? 3000
+
+app.get('/', (req, res) => {
+  res.json({ message: 'API is running' })
+})
+
+app.listen(PORT, () => {
+  console.log(`API on http://localhost:${PORT}`)
+})
+```
+
+```bash
+npm run dev   # if you added "dev": "node --watch server.js"
+```
+
+<Callout type="info" title="Express 4 and Express 5">
+  Express 5 is the current major version, and the code in this module runs on both. The one difference that matters here: Express 5 automatically forwards errors from `async` route handlers, while Express 4 requires a `try/catch` or a wrapper. We write `try/catch` explicitly so the code works identically on either version.
+</Callout>
+
+## Routing
+
+A route pairs an HTTP method and a path with a handler:
+
+```js
+app.get('/movies', (req, res) => res.json({ movies: [] }))
+app.post('/movies', (req, res) => res.status(201).json({ created: true }))
+app.put('/movies/:id', (req, res) => res.json({ updated: req.params.id }))
+app.patch('/movies/:id', (req, res) => res.json({ patched: req.params.id }))
+app.delete('/movies/:id', (req, res) => res.status(204).end())
+```
+
+`app.get` is just the `GET` method; `app.use` handles every method. Routes are matched **in order**, first match wins, so specific routes must come before broad ones.
+
+### Route parameters
+
+Colons declare dynamic segments, available in `req.params`:
+
+```js
+app.get('/movies/:id', (req, res) => {
+  res.json({ requestedId: req.params.id }) // /movies/42 → '42'
+})
+```
+
+Multiple segments work too: `/users/:userId/posts/:postId`.
+
+### Query strings
+
+Everything after `?` arrives in `req.query`, always as strings:
+
+```js
+// GET /movies?genre=sci-fi&page=2
+app.get('/movies', (req, res) => {
+  const { genre, page } = req.query
+  res.json({ genre: genre ?? 'all', page: Number(page ?? 1) })
+})
+```
+
+## Reading the request
+
+```js
+app.post('/echo', (req, res) => {
+  res.json({
+    body: req.body,          // parsed JSON (see express.json below)
+    headers: req.get('content-type'),
+    ip: req.ip,
+  })
+})
+```
+
+Express does not parse JSON bodies by default. Add one line before your routes:
+
+```js
+app.use(express.json())
+```
+
+Without it, `req.body` is `undefined` and every POST silently breaks. This is the single most common Express bug.
+
+## Sending the response
+
+```js
+res.json({ ok: true })          // JSON with the right Content-Type
+res.status(201).json(movie)     // status + body
+res.send('plain text')          // text or HTML
+res.sendStatus(204)             // status code only, no body
+res.sendFile(path)              // a file from disk
+```
+
+Send **exactly one** response per request. Calling `res.json()` twice throws `ERR_HTTP_HEADERS_SENT`.
+
+## Middleware
+
+A middleware is any function with the signature `(req, res, next)`. It runs between the request arriving and the response leaving:
+
+```js
+function logger(req, res, next) {
+  console.log(`${req.method} ${req.url}`)
+  next() // pass control to the next middleware or route
+}
+
+app.use(logger)
+```
+
+Order matters — middleware runs top to bottom:
+
+```js
+app.use(express.json())  // 1. parse JSON bodies
+app.use(logger)          // 2. log every request
+app.use(express.static('public')) // 3. serve files from /public
+app.get('/movies', ...)  // 4. routes
+app.use(notFound)        // 5. nothing matched
+app.use(errorHandler)    // 6. errors from anywhere above
+```
+
+Three practical patterns:
+
+**Attach data for later handlers.** Middleware can enrich the request:
+
+```js
+app.use((req, res, next) => {
+  req.startedAt = Date.now()
+  next()
+})
+```
+
+**Guard a route.** Middleware can end the cycle early:
+
+```js
+function requireApiKey(req, res, next) {
+  if (req.get('x-api-key') !== process.env.API_KEY) {
+    return res.status(401).json({ error: 'Unauthorized' })
+  }
+  next()
+}
+
+app.get('/admin/stats', requireApiKey, (req, res) => {
+  res.json({ visitors: 42 })
+})
+```
+
+**Serve static files.** `express.static` handles an entire folder:
+
+```js
+app.use(express.static('public'))
+// public/logo.png is now served at /logo.png
+```
+
+<Callout type="warning" title="A 404 handler must come after all routes">
+  `app.use` catches everything that has not matched yet. Put a 404 handler near the bottom of the file, and the error handler after it:
+
+  ```js
+  app.use((req, res) => {
+    res.status(404).json({ error: 'Route not found' })
+  })
+
+  app.use((err, req, res, next) => {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
+  })
+  ```
+</Callout>
+
+## A complete in-memory API
+
+This example has everything in one file, which is how you should start:
+
+```js
+import express from 'express'
+
+const app = express()
+app.use(express.json())
+
+let movies = [
+  { id: 1, title: 'Spirited Away', year: 2001 },
+  { id: 2, title: 'Perfect Blue', year: 1997 },
+]
+
+app.use((req, res, next) => {
+  console.log(`${req.method} ${req.url}`)
+  next()
+})
+
+// List, with optional filtering
+app.get('/api/movies', (req, res) => {
+  const { year } = req.query
+  const result = year ? movies.filter((m) => m.year === Number(year)) : movies
+  res.json(result)
+})
+
+// Read one
+app.get('/api/movies/:id', (req, res) => {
+  const movie = movies.find((m) => m.id === Number(req.params.id))
+  if (!movie) {
+    return res.status(404).json({ error: 'Movie not found' })
+  }
+  res.json(movie)
+})
+
+// Create
+app.post('/api/movies', (req, res) => {
+  const { title, year } = req.body ?? {}
+  if (!title || !year) {
+    return res.status(400).json({ error: 'title and year are required' })
+  }
+
+  const movie = { id: movies.length + 1, title, year }
+  movies.push(movie)
+  res.status(201).json(movie)
+})
+
+// Delete
+app.delete('/api/movies/:id', (req, res) => {
+  const before = movies.length
+  movies = movies.filter((m) => m.id !== Number(req.params.id))
+  if (movies.length === before) {
+    return res.status(404).json({ error: 'Movie not found' })
+  }
+  res.status(204).end()
+})
+
+// 404 and error handling
+app.use((req, res) => {
+  res.status(404).json({ error: 'Route not found' })
+})
+
+app.use((err, req, res, next) => {
+  console.error(err)
+  res.status(500).json({ error: 'Internal server error' })
+})
+
+const PORT = process.env.PORT ?? 3000
+app.listen(PORT, () => console.log(`API on http://localhost:${PORT}`))
+```
+
+Test it without a browser:
+
+```bash
+curl http://localhost:3000/api/movies
+curl http://localhost:3000/api/movies/1
+curl -X POST http://localhost:3000/api/movies \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Akira","year":1988}'
+curl -X DELETE http://localhost:3000/api/movies/1
+```
+
+<KeyPoint>
+Express is three ideas: routes match method + path, middleware forms a pipeline, and the last middleware standing sends the response. Everything else is libraries on top.
+</KeyPoint>
+
+## Try it
+
+<TryIt title="A three-route Express server" hint="Create a new folder, npm install express, save this as server.js, and run it with node --watch server.js.">
+```js
+import express from 'express'
+
+const app = express()
+
+app.get('/', (req, res) => {
+  res.json({ status: 'ok' })
+})
+
+app.get('/api/greet/:name', (req, res) => {
+  res.json({ message: `Hello, ${req.params.name}!` })
+})
+
+app.use((req, res) => {
+  res.status(404).json({ error: 'Not found' })
+})
+
+app.listen(3000, () => console.log('http://localhost:3000'))
+```
+</TryIt>
+
+## Check your understanding
+
+<Quiz
+  question="What does calling next() inside middleware do?"
+  options={[
+    'Ends the request and sends a response',
+    'Passes control to the next middleware or route handler',
+    'Restarts the server',
+    'Skips all remaining middleware'
+  ]}
+  answer={1}
+  explanation="next() moves the request down the pipeline. Forgetting it makes the request hang forever with no response. To end a request early, send a response instead of calling next()."
+/>
+
+<Quiz
+  question="For GET /movies/42?sort=desc, what are req.params and req.query?"
+  options={[
+    'params: { id: 42 }, query: { sort: desc }',
+    'params: { id: "42" }, query: { sort: "desc" }',
+    'params: { sort: "desc" }, query: { id: "42" }',
+    'Both are empty until express.json() runs'
+  ]}
+  answer={1}
+  explanation="Route segments land in req.params and query-string values in req.query — and every value is a string, so convert numbers explicitly. express.json only parses request bodies."
+/>
+
+<Exercise title="Build a movies API with Express" difficulty="medium">
+Create `express-lab`, install Express, and build an in-memory API. No database yet — an array is fine.
+
+1. Set up `server.js` with `express.json()` and a logging middleware that prints method, URL, and response time.
+2. Model the data as `{ id, title, year, genre }`. Seed it with three movies.
+3. Implement:
+   - `GET /api/movies` — supports `?genre=` and `?year=` filters
+   - `GET /api/movies/:id` — 404 JSON when missing
+   - `POST /api/movies` — validates that `title` is a non-empty string and `year` is a number; 400 JSON otherwise; returns 201
+   - `PATCH /api/movies/:id` — updates only the provided fields; 404 when missing
+   - `DELETE /api/movies/:id` — 204 on success, 404 when missing
+4. Add a 404 handler and a four-argument error handler.
+5. Serve a `public/index.html` file with `express.static` and confirm it loads at `/`.
+6. Verify every route with `curl`, including the error cases. Save the commands in a `requests.http` file or a README section.
+7. Bonus: move routes into `src/routes/movies.js` using `express.Router()` and mount it with `app.use('/api/movies', moviesRouter)`.
+</Exercise>
+
+## Summary
+
+- Express layers routing, middleware, and request parsing over `node:http`.
+- Routes match an HTTP method and path, in the order they are declared.
+- `req.params` holds path segments; `req.query` holds strings from the URL; `req.body` needs `express.json()`.
+- Middleware is `(req, res, next)` and runs in order; call `next()` or send a response.
+- 404 and error handlers go last; the error handler takes four arguments.
+- Keep handlers thin and consistent — the API design lesson formalizes these habits.
+
+Next: REST API design — naming, verbs, status codes, pagination, and error shapes that clients can rely on.

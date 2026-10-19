@@ -1,0 +1,296 @@
+Now that your API can create and return data, the next question is unavoidable: **who is allowed to do this?** Authentication proves identity — “you are Aki.” Authorization decides permission — “Aki may delete this post, but not that one.”
+
+Get this wrong and everything else is decoration. Get it right and users can trust your app with real data.
+
+## Never store passwords in plain text
+
+A password is a secret you confirm, never a value you keep. Storing it as typed means one database leak exposes every account — and people reuse passwords everywhere.
+
+Passwords are stored as **hashes**: the result of a one-way function that cannot practically be reversed. Two properties matter:
+
+- **Salting** — a unique random value is mixed in, so identical passwords produce different hashes and precomputed tables (rainbow tables) fail.
+- **Slowness** — a good algorithm is deliberately expensive, so brute-forcing millions of guesses is impractical.
+
+`bcrypt` is the classic choice; `argon2id` is the modern recommendation when available:
+
+```js
+import bcrypt from 'bcrypt'
+
+const password = 'correct-horse-battery'
+
+const hash = await bcrypt.hash(password, 12)
+// '$2b$12$s2K...' — store ONLY this
+
+const ok = await bcrypt.compare(password, hash) // true
+const bad = await bcrypt.compare('wrong', hash) // false
+```
+
+The cost factor (`12`) is the work multiplier. Higher means slower hashing and harder brute force. Values of 10–12 are typical; benchmark on your server and pick what takes roughly 100–300ms.
+
+<Callout type="danger" title="Hashing is not encryption">
+  Encryption is reversible with a key. Hashing is one-way — there is no “decrypt the password” step, and password reset works by issuing a new credential, not by recovering the old one. If you can recover a user’s password, you built it wrong.
+</Callout>
+
+## Register and login, end to end
+
+The examples here use an in-memory array so the lesson stays database-agnostic — the next module swaps in MongoDB with Mongoose, and the auth logic does not change.
+
+```js
+import express from 'express'
+import bcrypt from 'bcrypt'
+import jwt from 'jsonwebtoken'
+
+const app = express()
+app.use(express.json())
+
+const users = []
+const SECRET = process.env.JWT_SECRET
+
+// Register
+app.post('/api/v1/auth/register', async (req, res) => {
+  const { email, password } = req.body ?? {}
+
+  if (typeof email !== 'string' || typeof password !== 'string' || password.length < 8) {
+    return res.status(422).json({
+      error: { code: 'VALIDATION_ERROR', message: 'Valid email and 8+ character password required' },
+    })
+  }
+
+  const normalized = email.trim().toLowerCase()
+  if (users.some((u) => u.email === normalized)) {
+    return res.status(409).json({
+      error: { code: 'EMAIL_IN_USE', message: 'An account with this email already exists' },
+    })
+  }
+
+  const passwordHash = await bcrypt.hash(password, 12)
+  const user = { id: users.length + 1, email: normalized, passwordHash, role: 'user' }
+  users.push(user)
+
+  const { passwordHash: _hidden, ...safeUser } = user
+  res.status(201).json({ data: safeUser })
+})
+
+// Login
+app.post('/api/v1/auth/login', async (req, res) => {
+  const { email, password } = req.body ?? {}
+  const normalized = String(email ?? '').trim().toLowerCase()
+
+  const user = users.find((u) => u.email === normalized)
+  const valid = user ? await bcrypt.compare(String(password ?? ''), user.passwordHash) : false
+
+  if (!valid) {
+    // Same message for unknown email and wrong password: no user enumeration.
+    return res.status(401).json({
+      error: { code: 'INVALID_CREDENTIALS', message: 'Invalid email or password' },
+    })
+  }
+
+  const token = jwt.sign({ sub: user.id, role: user.role }, SECRET, { expiresIn: '1h' })
+  res.json({ data: { token } })
+})
+```
+
+Two details that are easy to miss:
+
+- **Normalize email** (trim, lowercase) before storing and comparing, or `Aki@example.com` and `aki@example.com` become two accounts.
+- **Return one generic login error.** Saying “no account with that email” tells attackers which emails are registered.
+
+## What a JWT actually is
+
+A JSON Web Token has three base64url-encoded parts separated by dots:
+
+```text
+header.payload.signature
+eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOjEsInJvbGUiOiJ1c2VyIn0.X3f9...
+```
+
+- **Header** — algorithm and type.
+- **Payload** — claims: who (`sub`), role, expiry (`exp`). **Readable by anyone** — base64 is encoding, not encryption.
+- **Signature** — proves the token was issued by someone holding the secret and was not modified.
+
+```js
+const token = jwt.sign({ sub: user.id, role: user.role }, SECRET, { expiresIn: '15m' })
+const payload = jwt.verify(token, SECRET) // throws if tampered with or expired
+```
+
+Never put secrets, personal data, or password hashes in the payload. Keep access tokens short-lived (minutes) and pair them with a longer-lived refresh token that can be revoked — a stolen access token is valid until it expires, because JWTs are stateless.
+
+## Sessions vs tokens
+
+| | Server sessions | JWT |
+|---|---|---|
+| State lives | Server (memory or database) | Inside the token |
+| Revoke instantly | Yes | Only at expiry, unless you keep a denylist |
+| Scales across servers | Needs shared session store | Stateless, no store needed |
+| Typical storage | `httpOnly` cookie | Cookie or `Authorization` header |
+
+Both are legitimate. A first-party web app with the same backend can use session cookies and keep revocation simple. An API serving web, mobile, and third parties benefits from stateless JWTs.
+
+<Callout type="danger" title="Keep tokens out of localStorage">
+  Anything in `localStorage` is readable by any script on the page, so one XSS vulnerability steals every token. Prefer `httpOnly; Secure; SameSite=Lax` cookies, which JavaScript cannot read. If you use an `Authorization` header, the token lives in memory only.
+</Callout>
+
+## Protect routes with middleware
+
+```js
+function requireAuth(req, res, next) {
+  const header = req.get('authorization') ?? ''
+  const token = header.startsWith('Bearer ') ? header.slice(7) : null
+
+  if (!token) {
+    return res.status(401).json({
+      error: { code: 'UNAUTHENTICATED', message: 'Missing access token' },
+    })
+  }
+
+  try {
+    req.user = jwt.verify(token, SECRET)
+    next()
+  } catch {
+    return res.status(401).json({
+      error: { code: 'INVALID_TOKEN', message: 'Invalid or expired token' },
+    })
+  }
+}
+
+app.get('/api/v1/auth/me', requireAuth, (req, res) => {
+  res.json({ data: { id: req.user.sub, role: req.user.role } })
+})
+```
+
+## Authorization: roles and ownership
+
+Authentication answers *who*; authorization answers *whether*. Two checks cover most apps.
+
+**Role-based access control (RBAC)** — gate whole endpoints:
+
+```js
+const requireRole = (...roles) => (req, res, next) => {
+  if (!roles.includes(req.user.role)) {
+    return res.status(403).json({
+      error: { code: 'FORBIDDEN', message: 'You do not have permission for this action' },
+    })
+  }
+  next()
+}
+
+app.delete('/api/v1/users/:id', requireAuth, requireRole('admin'), (req, res) => {
+  res.status(204).end()
+})
+```
+
+**Ownership checks** — gate individual resources:
+
+```js
+app.patch('/api/v1/posts/:id', requireAuth, async (req, res) => {
+  const post = await findPost(req.params.id)
+  if (!post) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Post not found' } })
+
+  if (post.authorId !== req.user.sub) {
+    return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Not your post' } })
+  }
+
+  // ... update and return
+})
+```
+
+<KeyPoint>
+401 means “I do not know who you are.” 403 means “I know who you are, and the answer is no.” Mixing them up makes debugging auth issues miserable.
+</KeyPoint>
+
+## Harden the edges
+
+Authentication code is a target. These five lines remove whole categories of attacks:
+
+```js
+import helmet from 'helmet'
+import cors from 'cors'
+import rateLimit from 'express-rate-limit'
+
+app.use(helmet()) // sensible security headers
+app.use(cors({ origin: process.env.CLIENT_URL, credentials: true }))
+
+app.use(
+  '/api/v1/auth',
+  rateLimit({ windowMs: 15 * 60 * 1000, limit: 20 }) // 20 attempts / 15 min / IP
+)
+```
+
+Checklist before you ship auth:
+
+- Secrets (`JWT_SECRET`, API keys) live in `.env`, are long and random, and never appear in Git.
+- Login and register routes are rate-limited; repeated failures get slower or locked.
+- Cookies are `httpOnly`, `Secure`, and `SameSite`.
+- Password reset and email verification tokens are single-use and expire quickly.
+- Server logs never contain passwords, tokens, or full request bodies on auth routes.
+- `npm audit` is clean of known vulnerabilities in auth dependencies.
+
+## Try it
+
+<TryIt title="Hash and verify a password" hint="Run npm install bcrypt in a scratch folder, save this as auth.js, and run it with node.">
+```js
+import bcrypt from 'bcrypt'
+
+const password = 'correct-horse-battery'
+const hash = await bcrypt.hash(password, 12)
+
+console.log('stored hash:', hash)
+console.log('correct password:', await bcrypt.compare(password, hash))
+console.log('wrong password:', await bcrypt.compare('hunter2', hash))
+```
+</TryIt>
+
+## Check your understanding
+
+<Quiz
+  question="Why is bcrypt preferred over a fast hash like SHA-256 for passwords?"
+  options={[
+    'SHA-256 has been broken',
+    'bcrypt salts automatically and is deliberately slow, making brute force expensive',
+    'bcrypt can be decrypted when a user forgets their password',
+    'Fast hashes produce longer output'
+  ]}
+  answer={1}
+  explanation="General-purpose hashes are designed to be fast — great for checksums, terrible for passwords. bcrypt mixes in a salt and uses a tunable cost factor so each guess costs real time."
+/>
+
+<Quiz
+  question="A logged-in user tries to delete someone else’s post and is refused. Which status code is correct?"
+  options={['401 Unauthorized', '403 Forbidden', '404 Not Found', '409 Conflict']}
+  answer={1}
+  explanation="The user is authenticated, so 401 would be wrong. They simply lack permission for this resource — that is 403 Forbidden."
+/>
+
+<Exercise title="Build a complete auth API" difficulty="hard">
+Create `auth-lab` and implement authentication with bcrypt, JWT, and Express. In-memory users are fine.
+
+```bash
+npm init -y
+npm pkg set type=module
+npm install express bcrypt jsonwebtoken helmet cors express-rate-limit
+```
+
+1. Put `JWT_SECRET` in `.env` (generate it with `openssl rand -base64 32`), add `.env` to `.gitignore`, and load it with `node --env-file=.env`.
+2. Implement the routes from this lesson:
+   - `POST /api/v1/auth/register` → `201` with the user minus the hash; `409` for a duplicate email; `422` for invalid input.
+   - `POST /api/v1/auth/login` → `200` with `{ data: { token } }`; `401` with one generic message for any failure.
+   - `GET /api/v1/auth/me` → requires a valid bearer token.
+   - `GET /api/v1/admin/users` → `requireAuth` plus `requireRole('admin')`; a normal user gets `403`.
+3. Add `helmet()`, CORS restricted to `CLIENT_URL`, and rate limiting on the auth routes.
+4. Test the whole flow with curl: register, login, call `/me` with the token, call `/me` with a tampered token (expect `401`), call the admin route as a normal user (expect `403`).
+5. Verify in your responses that the password hash never appears.
+6. Write a single `requests.http` file documenting the flow for the next person.
+</Exercise>
+
+## Summary
+
+- Store passwords only as salted, slow hashes (bcrypt, argon2id); never encrypt or store them recoverably.
+- Normalize emails and return one generic login error to prevent user enumeration.
+- JWTs are signed, not secret — keep sensitive data out of the payload and expiry short.
+- `requireAuth` verifies the token and attaches `req.user`; `requireRole` and ownership checks handle authorization.
+- 401 means unauthenticated; 403 means authenticated but not allowed.
+- Sessions and JWTs are both valid; prefer `httpOnly` cookies over `localStorage`.
+- Helmet, CORS, rate limiting, and secret hygiene are part of auth, not extras.
+
+Next: proving all of it works — testing and centralized error handling, so regressions are caught before your users find them.
