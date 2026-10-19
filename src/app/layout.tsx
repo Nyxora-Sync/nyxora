@@ -13,8 +13,14 @@ const geistMono = Geist_Mono({
   subsets: ['latin'],
 })
 
+const siteUrl =
+  process.env.NEXT_PUBLIC_SITE_URL ||
+  (process.env.VERCEL_PROJECT_PRODUCTION_URL
+    ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+    : 'http://localhost:3000')
+
 export const metadata: Metadata = {
-  metadataBase: new URL(process.env.NEXTAUTH_URL || 'http://localhost:3000'),
+  metadataBase: new URL(siteUrl),
   title: {
     default: 'MERN Learn — Master the MERN Stack for Free',
     template: '%s | MERN Learn',
@@ -28,7 +34,7 @@ export const metadata: Metadata = {
   openGraph: {
     type: 'website',
     locale: 'en_US',
-    url: 'https://mern-learn.dev',
+    url: siteUrl,
     siteName: 'MERN Learn',
     title: 'MERN Learn — Master the MERN Stack for Free',
     description: 'Learn the MERN stack from beginner to mastery with curated free resources, interactive playgrounds, and progress tracking.',
