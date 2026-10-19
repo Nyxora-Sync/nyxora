@@ -1,10 +1,10 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Code2, Play, RotateCcw, ExternalLink, Server, Atom, Database, Layers,
   Copy, Check, Wand2, Zap,
@@ -87,7 +87,6 @@ export function PlaygroundClient() {
   const [js, setJs] = useState(WEB_TEMPLATES.blank.js)
   const [activeTab, setActiveTab] = useState('html')
   const [copied, setCopied] = useState(false)
-  const [autoRun, setAutoRun] = useState(true)
 
   // Persist to localStorage
   useEffect(() => {

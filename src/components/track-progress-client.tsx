@@ -5,12 +5,11 @@ import { useProgress } from '@/hooks/use-progress'
 import { getTrack } from '@/lib/curriculum'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import { Progress } from '@/components/ui/progress'
 import { ArrowRight, BookOpen, Zap } from 'lucide-react'
 import { calculateLevel } from '@/lib/utils'
 
 export function TrackProgressClient({ trackKey }: { trackKey: string }) {
-  const { state, isLoaded, isCompleted, getCompletedCount, xp } = useProgress()
+  const { state, isLoaded, xp } = useProgress()
 
   const track = getTrack(trackKey)
   if (!track) return null

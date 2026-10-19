@@ -10,7 +10,7 @@ import { JsonLd } from '@/components/structured-data'
 import { absoluteUrl, canonicalLearnPath, canonicalTrackForModule, pageMetadata } from '@/lib/seo'
 import { Badge } from '@/components/ui/badge'
 import { ModuleLessonsClient } from '@/components/module-lessons-client'
-import { BookOpen, CheckCircle, Clock, Zap } from 'lucide-react'
+import { BookOpen, Clock, Zap } from 'lucide-react'
 
 export function generateStaticParams() {
   const params: { track: string; module: string }[] = []
@@ -57,7 +57,6 @@ export default async function ModulePage({
   if (!track || !mod) notFound()
 
   const totalXP = mod.lessons.reduce((sum, l) => sum + l.xpReward, 0)
-  const totalMinutes = mod.lessons.reduce((sum, l) => sum + l.estimatedMinutes, 0)
 
   const modulePath = `/learn/${track.key}/${mod.key}`
   const breadcrumbSchema = {

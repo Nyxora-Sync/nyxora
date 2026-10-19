@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   BookOpen, Code2, Server, Database, Atom, Layers, ArrowRight,
-  CheckCircle2, Globe, GitBranch, Cloud, Boxes, TestTube2, Shield,
+  Globe, GitBranch, Cloud, Boxes, TestTube2, Shield,
   Rocket, Smartphone, Brain,
 } from 'lucide-react'
 import { cn, getAccent } from '@/lib/utils'

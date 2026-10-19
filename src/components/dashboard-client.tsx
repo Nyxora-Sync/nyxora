@@ -10,8 +10,8 @@ import { Progress } from '@/components/ui/progress'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import {
-  Trophy, Zap, Flame, Target, BookOpen, CheckCircle2, ArrowRight,
-  Clock, Bookmark, RotateCcw, Play, Award, TrendingUp, Cloud, CloudOff,
+  Trophy, Zap, Flame, CheckCircle2, ArrowRight,
+  Bookmark, RotateCcw, Play, Cloud, CloudOff,
 } from 'lucide-react'
 import { calculateLevel, cn } from '@/lib/utils'
 
@@ -58,7 +58,6 @@ export function DashboardClient() {
   const earnedBadges = badgeDefinitions.filter((b) => b.check(state))
 
   // Find continue learning target
-  const recentLessonId = state.lastVisited?.lesson
   let continueTarget: { track: string; module: string; lesson: string; title: string } | null = null
   if (state.lastVisited) {
     const { track: tKey, module: mKey, lesson: lId } = state.lastVisited

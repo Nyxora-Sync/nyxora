@@ -9,9 +9,8 @@ import { Footer } from '@/components/footer'
 import { JsonLd } from '@/components/structured-data'
 import { absoluteUrl, pageMetadata } from '@/lib/seo'
 import { Badge } from '@/components/ui/badge'
-import { Progress } from '@/components/ui/progress'
 import { TrackProgressClient } from '@/components/track-progress-client'
-import { BookOpen, Code2, Server, Database, Atom, Layers, FileCode, FlaskConical, ShieldCheck, Container, Network, Gauge, Rocket, ArrowRight, Clock, Zap, Trophy, Lock, type LucideIcon } from 'lucide-react'
+import { BookOpen, Code2, Server, Database, Atom, Layers, FileCode, FlaskConical, ShieldCheck, Container, Network, Gauge, Rocket, ArrowRight, Clock, Zap, type LucideIcon } from 'lucide-react'
 import { cn, getAccent } from '@/lib/utils'
 
 const iconMap: Record<string, LucideIcon> = {

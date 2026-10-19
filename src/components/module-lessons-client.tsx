@@ -25,7 +25,7 @@ export function ModuleLessonsClient({
   moduleKey: string
   lessons: Lesson[]
 }) {
-  const { state, isLoaded, isCompleted } = useProgress()
+  const { isLoaded, isCompleted } = useProgress()
 
   return (
     <div className="space-y-3">

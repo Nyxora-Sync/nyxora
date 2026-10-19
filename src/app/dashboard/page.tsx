@@ -2,9 +2,7 @@ import Link from 'next/link'
 import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
 import { DashboardClient } from '@/components/dashboard-client'
-import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Trophy, BookOpen, Zap, Flame, Target, TrendingUp } from 'lucide-react'
 import { pageMetadata } from '@/lib/seo'
 
 export const metadata = pageMetadata({

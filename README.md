@@ -131,7 +131,7 @@ src/
 4. React — components, hooks, routing, state, forms, performance
 5. Full Stack Mastery — architecture, integration, Socket.io, uploads, deployment, capstone
 
-**Developer Track (~10 weeks)** — modules 2–5 above, for people who already know JS.
+**Developer Track (~16 weeks)** — the four MERN core modules above, plus TypeScript, testing, security, DevOps, architecture, performance, and a master capstone, for people who already know JS.
 
 Content lives in `src/lib/curriculum.ts`. Add lessons by appending to a module's `lessons` array.
 
@@ -170,7 +170,7 @@ Edit `src/lib/resources-data.ts` and add an entry:
 
 1. Push to GitHub
 2. Import the repo at [vercel.com/new](https://vercel.com/new)
-3. Add environment variables (`DATABASE_URL`, `AUTH_SECRET`, OAuth keys)
+3. Add environment variables (`DATABASE_URL`, `AUTH_SECRET`, OAuth keys, and optionally `NEXT_PUBLIC_SITE_URL` when using a custom domain)
 4. Deploy — `postinstall` runs `prisma generate` automatically
 
 Run migrations against your production DB:
@@ -182,6 +182,10 @@ DATABASE_URL="<prod-url>" npx prisma migrate deploy
 ### Other platforms
 
 Any Node host works (Render, Railway, Fly.io). Requirements: Node 20+, build command `npm run build`, start command `npm start`, and the env vars above.
+
+### SEO
+
+Canonical URLs, `sitemap.xml`, `robots.txt`, and JSON-LD use `NEXT_PUBLIC_SITE_URL` when set, then Vercel's production URL, then `http://localhost:3000`. Set `NEXT_PUBLIC_SITE_URL` to your public origin when you add a custom domain, then redeploy. See `docs/seo.md` for the canonical rules and generated routes.
 
 ## 🔐 Security Notes
 
