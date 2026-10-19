@@ -1,0 +1,355 @@
+Every browser on earth runs one programming language natively: JavaScript. It is what makes pages interactive, and — through Node.js — it is also what runs your future Express servers. That is the entire trick of the MERN stack: one language from the database call to the button click.
+
+This lesson covers the core of the language: values, variables, logic, functions, arrays, and objects. Everything you build later is a combination of these parts.
+
+## Running JavaScript
+
+You can execute JavaScript in three places:
+
+```html
+<!-- In a page, loaded after the HTML is parsed -->
+<script src="/app.js" defer></script>
+```
+
+```js
+// In the browser console: F12 → Console
+2 + 2 // 4
+```
+
+```bash
+# On your machine, with Node.js installed
+node app.js
+```
+
+The browser console is the fastest way to test one line of code. `console.log` prints values without interrupting the program — it is the microscope you will use constantly:
+
+```js
+const name = 'Aki'
+console.log('Hello,', name) // Hello, Aki
+```
+
+<Callout type="tip" title="defer is your friend">
+  A script in the `head` without `defer` runs before the page exists, so `document.querySelector` returns `null`. With `defer`, the browser downloads the script in parallel and runs it after the HTML is parsed.
+</Callout>
+
+## Values and types
+
+JavaScript has a small set of primitive types you will meet every day:
+
+```js
+typeof 'hello'    // 'string'
+typeof 42         // 'number'
+typeof 3.14       // 'number' — no separate float type
+typeof true       // 'boolean'
+typeof undefined  // 'undefined' — declared but no value
+typeof null       // 'object'   — a historical bug, but null means "deliberately empty"
+typeof { a: 1 }   // 'object'
+typeof [1, 2]     // 'object'   — arrays are objects with numeric keys
+```
+
+Strings use single quotes, double quotes, or backticks. Backticks create **template literals**, which can contain expressions:
+
+```js
+const user = 'Aki'
+const greeting = `Hello, ${user}!` // Hello, Aki!
+```
+
+Numbers include `NaN` (“not a number”), which appears when a maths operation fails:
+
+```js
+Number('banana') // NaN
+```
+
+`null` and `undefined` are different: `undefined` means “nothing has been assigned”, `null` means “intentionally empty”.
+
+## Variables
+
+You declare variables with `const` or `let`. Forget `var` — it has confusing scoping rules that caused decades of bugs.
+
+```js
+const siteName = 'MERN Learn' // cannot be reassigned
+let score = 0                 // can be reassigned
+score = score + 10            // 10
+```
+
+Use `const` by default. Reach for `let` only when the value genuinely changes — loop counters, accumulating totals, toggles.
+
+<KeyPoint>
+`const` prevents *reassignment*, not change. `const user = { name: 'Aki' }` still allows `user.name = 'Mina'`, because you are changing the object, not rebinding the name.
+</KeyPoint>
+
+Variables declared inside a function or a block (`{ }`) are **local** to it:
+
+```js
+function double(n) {
+  const result = n * 2 // local to double
+  return result
+}
+
+double(4)     // 8
+// result is not defined here
+```
+
+## Operators and equality
+
+```js
+2 + 3   // 5
+10 - 4  // 6
+3 * 4   // 12
+10 / 4  // 2.5
+10 % 3  // 1   — remainder
+2 ** 3  // 8   — exponent
+
+'2' + 2 // '22' — + concatenates when one side is a string
+
+5 === 5   // true   — strict equality, compares type and value
+5 === '5' // false  — number vs string
+5 == '5'  // true   — loose equality, converts types. Avoid.
+```
+
+**Always use `===` and `!==`.** Loose equality has surprising results (`'' == false` is `true`) and hides bugs.
+
+Logical operators combine conditions:
+
+```js
+const isLoggedIn = true
+const isAdmin = false
+
+isLoggedIn && isAdmin // false — both must be true
+isLoggedIn || isAdmin // true  — at least one
+!isLoggedIn           // false — negation
+
+const label = isLoggedIn ? 'Profile' : 'Sign in' // ternary
+```
+
+Six values are **falsy** — everything else is truthy: `false`, `0`, `''`, `null`, `undefined`, `NaN`. That is why `if (user)` is a common “does this exist?” check.
+
+## Control flow
+
+```js
+const temperature = 31
+
+if (temperature > 30) {
+  console.log('Hot day')
+} else if (temperature > 20) {
+  console.log('Pleasant')
+} else {
+  console.log('Bring a jacket')
+}
+```
+
+Use `switch` when comparing one value against many discrete cases, and prefer **early returns** in functions to avoid deeply nested `if`s:
+
+```js
+function priceFor(plan) {
+  if (!plan) return 0
+  if (plan === 'pro') return 19
+  if (plan === 'team') return 49
+  return 9
+}
+```
+
+## Functions
+
+A function packages a task behind a name. It takes **parameters**, does work, and **returns** a value:
+
+```js
+function addTax(price, rate = 0.08) {
+  return price * (1 + rate)
+}
+
+addTax(100)     // 108
+addTax(100, 0.2) // 120
+```
+
+The arrow function is a shorter syntax, used heavily in React:
+
+```js
+const addTax = (price, rate = 0.08) => price * (1 + rate)
+
+const sayHi = () => {
+  console.log('Hi!')
+}
+```
+
+An arrow function with a single expression returns it automatically. With curly braces you need an explicit `return`.
+
+Functions without a `return` give back `undefined`. Keep them small and name them after what they do: `calculateTotal`, `formatDate`, `isValidEmail`.
+
+## Arrays
+
+An array is an ordered list:
+
+```js
+const tasks = ['Learn HTML', 'Learn CSS', 'Learn JS']
+
+tasks.length          // 3
+tasks[0]              // 'Learn HTML' (zero-based)
+tasks.push('Learn DOM') // adds to the end
+tasks.includes('Learn CSS') // true
+```
+
+Loop over one with `for...of`:
+
+```js
+for (const task of tasks) {
+  console.log(task)
+}
+```
+
+Three array methods do most of the work in real code:
+
+```js
+const numbers = [1, 2, 3, 4, 5]
+
+const doubled = numbers.map((n) => n * 2)        // [2, 4, 6, 8, 10]
+const evens = numbers.filter((n) => n % 2 === 0) // [2, 4]
+const total = numbers.reduce((sum, n) => sum + n, 0) // 15
+```
+
+- `map` **transforms** every item and returns a new array of the same length.
+- `filter` **keeps** the items that pass a test and returns a new, possibly shorter array.
+- `reduce` **boils** the array down to a single value — a sum, an object, anything.
+
+<Callout type="warning" title="map and filter return new arrays">
+  They do not change the original. `forEach` is for side effects like `console.log`, not for building values — if you catch yourself pushing into an array inside `forEach`, use `map` or `filter` instead.
+</Callout>
+
+## Objects
+
+An object groups related values under named keys:
+
+```js
+const user = {
+  name: 'Aki',
+  skills: ['HTML', 'CSS'],
+  greet() {
+    return `Hi, I'm ${this.name}`
+  },
+}
+
+user.name           // 'Aki'
+user['name']        // 'Aki' — bracket access for dynamic keys
+user.skills[0]      // 'HTML'
+user.greet()        // "Hi, I'm Aki"
+
+user.email = 'aki@example.com' // add a key
+delete user.email               // remove a key
+```
+
+Objects nest naturally, which is exactly how API responses look:
+
+```js
+const response = {
+  id: 42,
+  author: { name: 'Mina', role: 'admin' },
+  tags: ['react', 'mongodb'],
+}
+
+response.author.name       // 'Mina'
+response.tags[0]           // 'react'
+response.author?.nickname  // undefined — optional chaining avoids a crash
+```
+
+Two modern shortcuts keep object code readable:
+
+```js
+const { name, skills } = user          // destructuring
+const updated = { ...user, name: 'Mina' } // spread into a new object
+```
+
+## Errors are instructions
+
+When JavaScript throws, it prints a type, a message, and a line number:
+
+```text
+TypeError: Cannot read properties of undefined (reading 'name')
+    at getUser (app.js:12:18)
+```
+
+Read it backwards: `getUser` on line 12 tried to read `.name` from something undefined. The fix is almost always to check the value before using it or to find why the data is missing.
+
+For operations that can legitimately fail, use `try/catch`:
+
+```js
+try {
+  const data = JSON.parse(rawInput)
+  console.log(data)
+} catch (error) {
+  console.error('Invalid JSON:', error.message)
+}
+```
+
+## Try it
+
+<TryIt title="First program: a price formatter">
+```html
+<script>
+  const price = 24
+  const taxRate = 0.08
+
+  function formatPrice(amount) {
+    return '$' + amount.toFixed(2)
+  }
+
+  const totalWithTax = (price, rate = 0.08) => price * (1 + rate)
+
+  console.log('Total: ' + formatPrice(totalWithTax(price, taxRate)))
+
+  const cart = [
+    { name: 'Keyboard', price: 80, qty: 1 },
+    { name: 'Cable', price: 12, qty: 2 },
+  ]
+
+  const itemTotals = cart.map((item) => item.price * item.qty)
+  const grandTotal = itemTotals.reduce((sum, n) => sum + n, 0)
+
+  console.log('Cart:', formatPrice(grandTotal))
+</script>
+```
+</TryIt>
+
+## Check your understanding
+
+<Quiz
+  question="What is the difference between const and let?"
+  options={[
+    'const values can never change in any way',
+    'const cannot be reassigned; the contents of an object it points to can still change',
+    'let only works inside functions',
+    'const variables are faster'
+  ]}
+  answer={1}
+  explanation="const locks the binding, not the data. You cannot write user = somethingElse, but user.name = 'new' is fine."
+/>
+
+<Quiz
+  question="What does [1, 2, 3, 4].filter((n) => n > 2) return?"
+  options={['[1, 2]', '[3, 4]', '9', 'true']}
+  answer={1}
+  explanation="filter keeps the items that pass the test. 3 and 4 are greater than 2, so the new array is [3, 4]. The original array is unchanged."
+/>
+
+<Exercise title="Build a tip calculator and a cart summary" difficulty="medium">
+Create `index.html` and `script.js`, linked with `<script src="script.js" defer></script>`. Do the work in this order:
+
+1. Declare `const bill = 84.5` and `const tipPercent = 15`. Write `tipAmount(bill, percent)` that returns the tip as a number. Log it with a template literal.
+2. Write `formatMoney(amount)` that returns a string like `$12.50`.
+3. Log the full total using both functions, with a template literal such as `Total: ${formatMoney(...)}`.
+4. Create a `cart` array with at least three objects shaped like `{ name, price, qty }`.
+5. Use `map` to build an array of line totals, then `reduce` to get the grand total.
+6. Use `filter` to create a list of items costing more than 20, and log their names with `for...of`.
+7. Add an `if/else` that logs `Free shipping` when the grand total is over 100, otherwise `Shipping: $9.00`.
+8. Finally, break something on purpose — call a function with the wrong type, read the error message in the console, and fix it. Learning to read errors is half of programming.
+</Exercise>
+
+## Summary
+
+- `const` by default, `let` when reassigning, never `var`.
+- Use `===` and `!==`; know your six falsy values.
+- Functions take parameters and return values; arrow functions are the compact form used in React.
+- Arrays: `for...of` to loop, `map` to transform, `filter` to select, `reduce` to total.
+- Objects group named data; destructuring and spread make working with them pleasant.
+- Read errors seriously — they tell you the type, the line, and often the fix.
+
+You can now write programs, but they only talk to the console. Next, the DOM: the bridge between JavaScript and the page the user actually sees.

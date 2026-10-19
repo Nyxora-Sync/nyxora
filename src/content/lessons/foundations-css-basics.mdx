@@ -1,0 +1,308 @@
+HTML gives a page structure. CSS gives it personality. With the same HTML, one stylesheet can produce a brutalist poster, a clean dashboard, or a playful storefront.
+
+CSS (Cascading Style Sheets) is a list of rules. Each rule says: *find these elements, and change these visual properties*. This lesson covers the rules worth knowing first — selectors, the cascade, the box model, units, colors, Flexbox, Grid, and responsive design.
+
+## Three ways to add CSS
+
+You can attach styles in three places:
+
+```html
+<!-- 1. External stylesheet (preferred) -->
+<link rel="stylesheet" href="/styles.css" />
+
+<!-- 2. Inside the document -->
+<style>
+  p { color: navy; }
+</style>
+
+<!-- 3. Inline on one element (avoid) -->
+<p style="color: navy;">Text</p>
+```
+
+Use an **external stylesheet**. It can be cached by the browser, reused across pages, and keeps structure and presentation separate. Inline styles win every conflict and are painful to override, so reserve them for values JavaScript calculates at runtime.
+
+## Anatomy of a rule
+
+```css
+/* selector { property: value; } */
+.card {
+  background: white;
+  padding: 1.5rem;
+  border-radius: 0.5rem;
+}
+```
+
+- `.card` is the **selector** — which elements this applies to.
+- `background`, `padding`, `border-radius` are **properties**.
+- `white`, `1.5rem`, `0.5rem` are **values**.
+- The whole `property: value` pair is a **declaration**, and each ends with a semicolon.
+
+## Selectors
+
+```css
+h1            { }  /* every <h1>        */
+.card         { }  /* every class="card" */
+#site-title   { }  /* the element with id="site-title" */
+nav a         { }  /* every <a> inside a <nav> */
+.card:hover   { }  /* .card while the mouse is over it */
+input:focus   { }  /* an input while it has keyboard focus */
+```
+
+Classes are the workhorse: reusable, combinable, and specific enough. IDs should be unique and are usually reserved for JavaScript hooks or anchor links, because they are hard to override.
+
+<Callout type="info" title="Pseudo-classes are states, not elements">
+  `:hover`, `:focus`, `:visited`, and `:first-child` select an element **in a particular state or position**. Always style `:focus` visibly — keyboard users navigate your site with it.
+</Callout>
+
+## The cascade and specificity
+
+When two rules set the same property, the browser decides with two questions:
+
+1. **Specificity** — an ID beats a class, and a class beats an element selector. Inline styles beat all of them.
+2. **Source order** — if specificity is equal, the rule written later wins.
+
+```css
+p        { color: gray; }   /* specificity: element       */
+.note    { color: blue; }   /* specificity: class         */
+#warning { color: red; }    /* specificity: id            */
+```
+
+A paragraph with `class="note"` inside an element with `id="warning"` will be red.
+
+Avoid `!important` — it throws specificity out the window and starts an arms race. If you feel you need it, your selector structure is probably wrong.
+
+## The box model
+
+Every element is a box with four layers:
+
+```text
+┌─────────────────────────────────────────────┐
+│                  margin                     │
+│  ┌───────────────────────────────────────┐  │
+│  │               border                  │  │
+│  │  ┌─────────────────────────────────┐  │  │
+│  │  │            padding              │  │  │
+│  │  │  ┌───────────────────────────┐  │  │  │
+│  │  │  │        content            │  │  │  │
+│  │  │  └───────────────────────────┘  │  │  │
+│  │  └─────────────────────────────────┘  │  │
+│  └───────────────────────────────────────┘  │
+└─────────────────────────────────────────────┘
+```
+
+- **Content** — the text or image itself.
+- **Padding** — space *inside* the border, between content and edge. A button’s comfortable click area.
+- **Border** — the visible edge.
+- **Margin** — space *outside* the border, pushing other elements away.
+
+By default, `width` describes only the content box, so adding padding silently makes elements wider than you planned. Fix it once, globally:
+
+```css
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+```
+
+Now `width: 300px` includes padding and border. Every serious stylesheet starts with this.
+
+<Callout type="warning" title="Margins collapse">
+  Vertical margins between adjacent blocks can collapse into one — the larger value wins, not the sum. This is a frequent source of “why is my spacing wrong?”. Prefer `gap` in Flexbox and Grid over stacking margins.
+</Callout>
+
+## Units and colors
+
+```css
+.title {
+  font-size: 2rem;
+  max-width: 60ch;
+  padding: 1rem 1.5rem;
+  color: hsl(220 15% 15%);
+  background: #f5f5f4;
+}
+```
+
+- `rem` is relative to the root font size (16px by default), so `2rem` is 32px. Users who increase their browser font size get a proportional layout.
+- `px` is absolute. Fine for borders, risky for typography.
+- `%` depends on the parent; `vw` and `vh` refer to the viewport.
+- `ch` is the width of the `0` character — useful for readable line lengths.
+- Colors can be written as hex (`#f5f5f4`), `rgb()`, or `hsl()`. All are valid; pick one style and stay consistent.
+
+For colors used more than once, define CSS custom properties:
+
+```css
+:root {
+  --brand: hsl(160 84% 39%);
+  --text: hsl(220 15% 15%);
+}
+
+.button {
+  background: var(--brand);
+  color: var(--text);
+}
+```
+
+Change the variable once and every usage updates.
+
+## Layout with Flexbox
+
+Flexbox arranges items along **one axis** — a row or a column. It is the right tool for navigation bars, toolbars, and rows of cards.
+
+```css
+.nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+```
+
+- `display: flex` turns the element into a flex container; its children become flex items.
+- `justify-content` controls the main axis (horizontal in a row).
+- `align-items` controls the cross axis (vertical in a row).
+- `gap` adds consistent space between items without margins.
+
+To stack items vertically instead:
+
+```css
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+```
+
+## Layout with Grid
+
+Grid arranges items in **two dimensions** — rows and columns at the same time. It is ideal for card galleries and page layouts.
+
+```css
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+}
+```
+
+That single line creates as many columns as fit, each at least 220px wide, and wraps automatically. It is one of the most useful CSS snippets you will ever memorize.
+
+<KeyPoint>
+Flexbox for one direction, Grid for two. If you find yourself building a layout in the wrong tool, switch tools instead of fighting it.
+</KeyPoint>
+
+## Responsive design
+
+Responsive means the layout adapts to the screen. Start with the **mobile layout** — one column, comfortable touch targets — then enhance upward with media queries:
+
+```css
+.article {
+  display: grid;
+  gap: 1.5rem;
+}
+
+@media (min-width: 640px) {
+  .article {
+    grid-template-columns: 200px 1fr;
+  }
+}
+```
+
+Media queries can test width, height, orientation, and even user preferences like `prefers-reduced-motion`. Two habits prevent most mobile bugs:
+
+1. Never set a fixed width larger than the viewport. Use `max-width`.
+2. Give images `max-width: 100%; height: auto;` so they scale down instead of overflowing.
+
+## Try it
+
+<TryIt title="Style a card with a hover state">
+```html
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+
+  body {
+    font-family: system-ui, sans-serif;
+    background: #fafaf9;
+    padding: 2rem;
+  }
+
+  .card {
+    max-width: 20rem;
+    padding: 1.5rem;
+    background: white;
+    border: 1px solid #e7e5e4;
+    border-radius: 0.75rem;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
+    transition: transform 150ms ease, box-shadow 150ms ease;
+  }
+
+  .card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 24px rgb(0 0 0 / 0.1);
+  }
+</style>
+
+<div class="card">
+  <h2>Hover me</h2>
+  <p>The card lifts and the shadow deepens.</p>
+</div>
+```
+</TryIt>
+
+## Check your understanding
+
+Given this HTML and CSS:
+
+```html
+<div id="intro"><p class="note">Hello</p></div>
+```
+
+```css
+p        { color: gray; }
+.note    { color: blue; }
+#intro p { color: pink; }
+```
+
+<Quiz
+  question="What colour is the paragraph text?"
+  options={['Gray', 'Blue', 'Pink', 'It depends on which rule was written last']}
+  answer={2}
+  explanation="Specificity order is inline > ID > class > element. #intro p combines an ID with an element, so it beats .note (a class) and plain p — source order does not come into it."
+/>
+
+<Quiz
+  question="What does box-sizing: border-box change?"
+  options={[
+    'Width and height include padding and border',
+    'Width and height include margin',
+    'Padding is removed inside the element',
+    'The element always fills its parent'
+  ]}
+  answer={0}
+  explanation="With border-box, a width of 300px stays 300px on screen even after you add padding and borders. Margins are always outside the box and never included."
+/>
+
+<Exercise title="Style the recipe page from the previous lesson" difficulty="medium">
+Take the `recipe.html` you built and give it a stylesheet. Create `styles.css` and link it from the head.
+
+1. Start with the universal `border-box` reset and set a font family on `body`.
+2. Define `--brand`, `--text`, and `--background` custom properties in `:root` and use them.
+3. Give the page a centered container: `max-width: 70ch; margin-inline: auto; padding: 1.5rem;`.
+4. Make the header a flex container with the nav links spread out using `gap` and `justify-content`.
+5. Turn the ingredient list into a card with padding, border, and `border-radius`.
+6. Display the steps as a grid with `grid-template-columns: repeat(auto-fit, minmax(200px, 1fr))`.
+7. Add a `:hover` state to nav links and a visible `:focus` style.
+8. Add one media query that changes something meaningful at `min-width: 640px`.
+9. Make every image `max-width: 100%; height: auto;` and verify the page at 360px wide in DevTools.
+</Exercise>
+
+## Summary
+
+- Link an external stylesheet; avoid inline styles except for runtime values.
+- Specificity: ID beats class beats element; source order breaks ties. Avoid `!important`.
+- Every element is a box: content, padding, border, margin — and you should set `box-sizing: border-box` globally.
+- Use `rem` for typography, `%` and viewport units for layout, and custom properties for repeated values.
+- Flexbox lays out one axis; Grid lays out two. `repeat(auto-fit, minmax(...))` handles most card galleries.
+- Design mobile-first, then add `min-width` media queries and never let content overflow.
+
+Your pages now look intentional. Next, JavaScript adds behaviour: variables, logic, functions, and data.

@@ -1,0 +1,251 @@
+Every website you have ever visited is made of HTML. It is not a programming language — it has no loops, no math, no logic. HTML is a **markup language**: you wrap content in tags to describe what each piece *is*. A heading, a paragraph, a link, an image, a navigation menu.
+
+Get this right and everything after it becomes easier. CSS styles the structure, JavaScript reacts to it, and React ultimately produces it.
+
+## What HTML actually is
+
+An **element** is made of an opening tag, some content, and a closing tag:
+
+```html
+<p class="intro">Hello, world</p>
+```
+
+- `<p>` is the opening tag — `p` stands for paragraph.
+- `class="intro"` is an **attribute**: extra information attached to the element.
+- `Hello, world` is the content.
+- `</p>` is the closing tag. The slash means “this element ends here.”
+
+Elements nest inside each other and form a **tree**. That tree is what the browser reads, and later what JavaScript will walk through.
+
+<Callout type="warning" title="Some elements never close">
+  Elements like `<img>`, `<input>`, `<br>`, and `<meta>` are **void elements**. They have no content and no closing tag. Writing `<img ...></img>` is a mistake.
+</Callout>
+
+## The skeleton of every page
+
+Every HTML file follows the same structure:
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>My First Page</title>
+  </head>
+  <body>
+    <h1>Hello, web!</h1>
+    <p>This text is visible to visitors.</p>
+  </body>
+</html>
+```
+
+Each line has a job:
+
+| Line | Purpose |
+|------|---------|
+| `<!DOCTYPE html>` | Tells the browser to use modern HTML rules |
+| `<html lang="en">` | The root element; `lang` helps screen readers and search engines |
+| `<head>` | Metadata: not visible on the page |
+| `charset="UTF-8"` | Supports every character, including emoji and accents |
+| `viewport` | Makes the page scale correctly on phones |
+| `<title>` | The browser tab title and the search result title |
+| `<body>` | Everything visitors actually see |
+
+<KeyPoint>
+The `head` is for machines. The `body` is for humans.
+</KeyPoint>
+
+<Callout type="tip" title="Type the skeleton once by hand">
+  In editors like VS Code you can type `!` and press Tab to generate this skeleton. Do it manually at least once so you know every line is not magic.
+</Callout>
+
+## Text, headings, and lists
+
+Headings create an outline. Browsers use them for accessibility and search engines use them to understand the page:
+
+```html
+<h1>Miyazaki's Bakery</h1>
+<h2>Our breads</h2>
+<h3>Sourdough</h3>
+<h2>Opening hours</h2>
+```
+
+Rules that matter:
+
+- Use **one `<h1>` per page** — it is the page title.
+- Never skip levels to get a smaller font. If you want smaller text, use CSS. The heading level describes structure, not size.
+- Wrap normal text in `<p>`.
+- Use `<strong>` for importance and `<em>` for emphasis. They carry meaning; `<b>` and `<i>` only change appearance.
+
+Lists come in two flavours:
+
+```html
+<ul>
+  <li>Flour</li>
+  <li>Water</li>
+  <li>Salt</li>
+</ul>
+
+<ol>
+  <li>Mix the dough</li>
+  <li>Rest for 30 minutes</li>
+  <li>Bake</li>
+</ol>
+```
+
+`<ul>` is an unordered list (bullets), `<ol>` is ordered (numbers), and every item is an `<li>`.
+
+## Links and images
+
+A link uses the anchor element with an `href` attribute:
+
+```html
+<a href="/learn">Browse all lessons</a>
+<a href="https://developer.mozilla.org" target="_blank" rel="noopener">
+  MDN Web Docs
+</a>
+```
+
+- A path starting with `/` is **relative to your site**.
+- A full `https://` address points anywhere on the internet.
+- `target="_blank"` opens a new tab; always pair it with `rel="noopener"` for security.
+- Link text should describe the destination. “Click here” tells a screen reader user nothing.
+
+Images use `<img>` and require two attributes:
+
+```html
+<img
+  src="/images/sourdough.jpg"
+  alt="A round sourdough loaf with a scored cross on top"
+  width="600"
+  height="400"
+/>
+```
+
+- `src` is the file path.
+- `alt` is the text alternative. Describe the image as if you were reading the page aloud. If the image is purely decorative, use an empty `alt=""` so screen readers skip it.
+- `width` and `height` reserve space before the image loads, preventing the page from jumping around.
+
+<Callout type="danger" title="Alt text is not optional">
+  Missing or lazy alt text locks blind users out of your content and hurts your search ranking. “Image of bread” is not alt text. “A round sourdough loaf with a scored cross on top” is.
+</Callout>
+
+## Semantic HTML
+
+A `<div>` is a generic box with no meaning. It works, but it tells the browser, screen readers, and search engines nothing about its contents.
+
+Semantic elements describe their role:
+
+```html
+<body>
+  <header>
+    <nav>
+      <a href="/">Home</a>
+      <a href="/menu">Menu</a>
+    </nav>
+  </header>
+
+  <main>
+    <article>
+      <h1>How to bake sourdough</h1>
+      <p>The full recipe...</p>
+    </article>
+  </main>
+
+  <footer>
+    <p>&copy; 2026 Miyazaki's Bakery</p>
+  </footer>
+</body>
+```
+
+The important ones:
+
+- `<header>` — introductory content for the page or a section
+- `<nav>` — a group of navigation links
+- `<main>` — the primary content; use it once per page
+- `<section>` — a thematic group with a heading
+- `<article>` — a self-contained piece, like a blog post or card
+- `<aside>` — related but secondary content
+- `<footer>` — closing content
+
+<KeyPoint>
+Choosing a semantic element is free documentation. `nav` says “navigation” to every tool that reads your page; `div` says nothing.
+</KeyPoint>
+
+## Forms and inputs
+
+Forms collect data from visitors. Every control should have a `<label>` linked by `for` and `id`:
+
+```html
+<form action="/subscribe" method="post">
+  <label for="email">Email address</label>
+  <input
+    id="email"
+    name="email"
+    type="email"
+    placeholder="you@example.com"
+    required
+  />
+  <button type="submit">Subscribe</button>
+</form>
+```
+
+- `type` changes behaviour: `email`, `password`, `number`, `date`, `checkbox`, and more. The browser validates and shows the right keyboard on phones.
+- `name` is the key the server receives with the value.
+- `required` blocks submission until the field is filled.
+- Never use a placeholder as a replacement for a label — it disappears as soon as typing starts.
+
+<Callout type="info" title="Placeholders are hints, labels are contracts">
+  A label is always visible and clickable. A placeholder is temporary text inside the field. Use both, but only the label is guaranteed to be read by assistive technology.
+</Callout>
+
+## Checking your work
+
+Two tools catch almost everything:
+
+1. **DevTools Elements panel** — right-click any part of a page and choose “Inspect”. You see the live tree exactly as the browser parsed it. If your markup was invalid, the browser had to guess, and you will see a different structure than you wrote.
+2. **The W3C validator** at [validator.w3.org](https://validator.w3.org/) — paste your HTML or a URL and fix every error it reports.
+
+## Check your understanding
+
+<Quiz
+  question="Which element should wrap a group of site navigation links?"
+  options={['<nav>', '<div>', '<menu>', '<header>']}
+  answer={0}
+  explanation="<nav> explicitly identifies navigation for screen readers and search engines. A <div> works visually but communicates nothing."
+/>
+
+<Quiz
+  question="You add a decorative divider image that carries no information. What should its alt attribute be?"
+  options={[
+    'A detailed description of the image',
+    'An empty string: alt=""',
+    'The image file name',
+    'alt="decorative image"'
+  ]}
+  answer={1}
+  explanation={'Decorative images should be hidden from assistive technology with an empty alt. Descriptive alt is for meaningful images; file names help no one.'}
+/>
+
+<Exercise title="Build a semantic recipe page" difficulty="easy">
+Create a new file called `recipe.html` and build a page for a dish you like, using only what this lesson covered:
+
+1. Start with the full document skeleton: doctype, `<html lang>`, head with charset, viewport, and a real title.
+2. Add a `<header>` with a bakery name and a `<nav>` containing at least three links.
+3. In `<main>`, add an `<article>` with an `<h1>` for the dish, one image with meaningful alt text, an `<h2>` for ingredients followed by a `<ul>`, and an `<h2>` for steps followed by an `<ol>`.
+4. Add a `<footer>` with a copyright line.
+5. Finish with a small form that has a labelled email input and a submit button.
+6. Open the page in your browser, inspect elements in DevTools, then run it through the W3C validator and fix every error.
+</Exercise>
+
+## Summary
+
+- HTML elements are opening tag, content, and closing tag; some elements are void and never close.
+- Every page needs a `head` for machines and a `body` for humans.
+- Headings form an outline: one `<h1>`, never skip levels for stylistic reasons.
+- Links use `href` and descriptive text; images use `src`, meaningful `alt`, and dimensions.
+- Semantic elements (`header`, `nav`, `main`, `article`, `footer`) describe meaning, while `div` describes nothing.
+- Forms pair a `<label>` with an `<input>` using `for` and `id`, and use `type` to get the right behaviour.
+
+Your page now has structure but no style — every heading looks the same and everything is stacked in one column. Next, CSS gives it colour, spacing, and layout.
