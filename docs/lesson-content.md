@@ -1,9 +1,10 @@
 # Lesson content progress
 
-The current curriculum has **30 unique lessons**. The developer track reuses the
-same lesson IDs as the beginner track, so a lesson is authored once.
+The curriculum has **30 core lessons** plus **23 mastery lessons** in the developer
+track — **53 unique lessons** total. The developer track reuses the same core lesson
+IDs as the beginner track, so each lesson is authored once.
 
-**Authored: 30 / 30 ✅ all lessons complete**
+**Authored: 30 / 53** — all core lessons complete; mastery modules in progress.
 
 ## Web Foundations
 
@@ -50,6 +51,52 @@ same lesson IDs as the beginner track, so a lesson is authored once.
 - [x] `fullstack-deployment` — Deployment & CI/CD
 - [x] `fullstack-project` — Capstone: Full Stack App
 
+## Mastery Modules (Developer Track)
+
+### TypeScript
+
+- [ ] `typescript-foundations` — TypeScript Fundamentals for JS Developers
+- [ ] `typescript-express` — Typing Express APIs
+- [ ] `typescript-react` — TypeScript in React
+- [ ] `typescript-fullstack` — End-to-End Type Safety
+
+### Testing in Depth
+
+- [ ] `testing-strategy` — Testing Strategy & Unit Tests
+- [ ] `testing-api-integration` — API Integration Testing
+- [ ] `testing-react-components` — Testing React Components
+- [ ] `testing-e2e-playwright` — End-to-End Testing with Playwright
+
+### Security
+
+- [ ] `security-web-fundamentals` — Web Security Fundamentals
+- [ ] `security-express-hardening` — Hardening Express APIs
+- [ ] `security-auth-advanced` — Advanced Authentication
+- [ ] `security-data-protection` — Data Protection & MongoDB Security
+
+### DevOps
+
+- [ ] `devops-docker-deep` — Docker & Containers in Depth
+- [ ] `devops-cicd-production` — Production CI/CD
+- [ ] `devops-observability-scaling` — Observability & Scaling
+
+### Architecture & System Design
+
+- [ ] `architecture-system-design` — System Design for MERN Developers
+- [ ] `architecture-api-evolution` — API Design at Scale
+- [ ] `architecture-data-modeling` — Advanced Data Modeling
+
+### Performance Engineering
+
+- [ ] `performance-node-runtime` — Node.js Performance
+- [ ] `performance-database` — Database Performance
+- [ ] `performance-frontend-delivery` — Frontend Delivery & Caching
+
+### Master Capstone
+
+- [ ] `capstone-saas-app` — Master Project: Multi-Tenant SaaS
+- [ ] `capstone-portfolio-career` — Portfolio, Open Source & Career
+
 ## Batch plan
 
 1. Foundations core — HTML, CSS, JavaScript, DOM (4)
@@ -58,3 +105,10 @@ same lesson IDs as the beginner track, so a lesson is authored once.
 4. Database — MongoDB, schemas, relationships, aggregation (4)
 5. React — fundamentals, hooks, router, state, forms, performance (6)
 6. Full stack — architecture, integration, realtime, uploads, deployment, capstone (6)
+7. Mastery — TypeScript (4)
+8. Mastery — Testing in depth (4)
+9. Mastery — Security (4)
+10. Mastery — DevOps (3)
+11. Mastery — Architecture & system design (3)
+12. Mastery — Performance engineering (3)
+13. Mastery — Capstone: SaaS + career (2)
