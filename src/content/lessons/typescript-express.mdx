@@ -1,0 +1,387 @@
+Your Express API works, but nothing stops a handler from reading `req.body.titel`, returning a shape the client never expected, or accepting `{ price: 'free' }` where a number belongs. TypeScript closes those gaps — and the best part is that with **Zod, your validation and your types become one definition** instead of two things that drift apart.
+
+This lesson converts a JavaScript API to strict TypeScript: project setup, typed handlers, typed middleware, schema-derived types, and typed Mongoose models.
+
+## Project setup
+
+```bash
+npm install -D typescript tsx @types/node @types/express @types/cors @types/bcrypt @types/jsonwebtoken
+```
+
+A tsconfig tuned for Node 20+ with ESM:
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "skipLibCheck": true,
+    "sourceMap": true
+  },
+  "include": ["src"]
+}
+```
+
+Scripts that match the workflow you already know:
+
+```json
+{
+  "scripts": {
+    "dev": "tsx watch src/server.js",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "typecheck": "tsc --noEmit"
+  }
+}
+```
+
+<Callout type="info" title="tsx runs TypeScript directly">
+  `tsx` strips types and runs your entry point with restart-on-change — the same `node --watch` feeling, no build step during development. The `build` script compiles for production, and `typecheck` proves the whole codebase is sound without emitting files.
+</Callout>
+
+## Typing route handlers
+
+Express's `Request` type is generic in four positions: **params, response body, request body, query**. Annotate the handler when you define it as a standalone function:
+
+```ts
+import type { Request, Response } from 'express'
+
+interface CreateMovieBody {
+  title: string
+  year: number
+}
+
+interface MovieParams {
+  id: string
+}
+
+export async function createMovie(
+  req: Request<Record<string, never>, unknown, CreateMovieBody>,
+  res: Response
+) {
+  const { title, year } = req.body   // both typed
+  const movie = await Movie.create({ title, year })
+  res.status(201).json({ data: movie })
+}
+
+export async function getMovie(req: Request<MovieParams>, res: Response) {
+  const { id } = req.params          // string, guaranteed by inference
+  // ...
+}
+```
+
+The generic order is easy to misremember — **params, response, body, query** — so most teams define helpers:
+
+```ts
+// src/types/http.ts
+import type { Request, Response } from 'express'
+
+export type BodyRequest<B> = Request<Record<string, never>, unknown, B>
+export type ParamsRequest<P> = Request<P, unknown, unknown>
+export type QueryRequest<Q> = Request<Record<string, never>, unknown, unknown, Q>
+```
+
+```ts
+export async function createMovie(req: BodyRequest<CreateMovieBody>, res: Response) {
+  // ...
+}
+```
+
+<KeyPoint>
+These annotations describe what your code *expects*, not what the network delivers. A request can carry any JSON at all. Types make handlers easier to write correctly; validation makes them safe. The next section connects the two so you get both from one definition.
+</KeyPoint>
+
+## Zod: one definition, validation and types
+
+Instead of a hand-written interface plus a separate validator, define the **schema** and derive the type:
+
+```ts
+// src/schemas/movie.ts
+import { z } from 'zod'
+
+export const createMovieSchema = z.object({
+  title: z.string().trim().min(1).max(200),
+  year: z.number().int().min(1888).max(new Date().getFullYear() + 5),
+  genres: z.array(z.string()).max(10).default([]),
+})
+
+export type CreateMovieInput = z.infer<typeof createMovieSchema>
+```
+
+`z.infer` extracts the static type. If someone adds a field to the schema, every place that consumes the type updates automatically.
+
+A small middleware turns any schema into a validating guard:
+
+```ts
+// src/middleware/validate.ts
+import type { ZodType } from 'zod'
+import type { RequestHandler } from 'express'
+
+export function validateBody<T>(schema: ZodType<T>): RequestHandler {
+  return (req, res, next) => {
+    const result = schema.safeParse(req.body)
+    if (!result.success) {
+      return res.status(422).json({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Invalid request body',
+          details: result.error.issues,
+        },
+      })
+    }
+    req.body = result.data   // now the parsed value, not the raw input
+    next()
+  }
+}
+```
+
+```ts
+// src/routes/movies.ts
+import { Router } from 'express'
+import { validateBody } from '../middleware/validate.js'
+import { createMovieSchema, type CreateMovieInput } from '../schemas/movie.js'
+
+const router = Router()
+
+router.post('/movies', validateBody(createMovieSchema), async (req, res) => {
+  const input = req.body as CreateMovieInput   // parsed and typed
+  // ...
+})
+```
+
+<Callout type="tip" title="Assign the parsed value back">
+  Replacing `req.body` with `result.data` matters: Zod trims strings, applies defaults, and strips unknown keys, so downstream code works with the validated version. It is also how `.default([])` on `genres` actually takes effect.
+</Callout>
+
+There is a subtle wrinkle: Express types `req.body` as `any`, so assigning parsed data back keeps working without complaints, but you lose the automatic narrowing at usage sites. Two clean options:
+
+1. **Cast at the boundary** — `const input = req.body as CreateMovieInput` inside the handler. One cast, right after validation, where it is provably true.
+2. **Carry it in `res.locals`** — define a typed locals interface per route, which we will do below for request augmentation.
+
+## Middleware and request augmentation
+
+Auth middleware attaches a user to the request. In JavaScript you just wrote `req.user`; in TypeScript you declare the addition to Express's types:
+
+```ts
+// src/types/express.d.ts
+import type { HydratedDocument } from 'mongoose'
+import type { User } from '../models/user.js'
+
+declare global {
+  namespace Express {
+    interface Request {
+      user?: HydratedDocument<User>
+    }
+  }
+}
+
+export {}
+```
+
+Make sure the file is included by tsconfig (it is, via `src`). Now every handler sees `req.user`, typed — and optional, because unauthenticated requests have no user. A typed guard fixes that for protected routes:
+
+```ts
+// src/middleware/require-auth.ts
+import jwt from 'jsonwebtoken'
+import type { RequestHandler } from 'express'
+import { env } from '../config/env.js'
+import { User } from '../models/user.js'
+
+export const requireAuth: RequestHandler = async (req, res, next) => {
+  try {
+    const header = req.headers.authorization
+    if (!header?.startsWith('Bearer ')) {
+      return res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Missing token' } })
+    }
+
+    const payload = jwt.verify(header.slice(7), env.JWT_SECRET) as { sub: string }
+    const user = await User.findById(payload.sub)
+    if (!user) {
+      return res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Invalid token' } })
+    }
+
+    req.user = user
+    next()
+  } catch {
+    res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired token' } })
+  }
+}
+
+// Handlers behind requireAuth can now use a narrowing helper
+export function currentUser(req: Express.Request) {
+  if (!req.user) throw new Error('requireAuth must run before this handler')
+  return req.user
+}
+```
+
+```ts
+router.get('/me', requireAuth, async (req, res) => {
+  const user = currentUser(req)   // fully typed, never undefined
+  res.json({ data: { id: user.id, email: user.email, name: user.name } })
+})
+```
+
+`currentUser` is a deliberate pattern: it converts the “this should be present but is typed optional” problem into one loud failure at the one place that can violate the contract.
+
+## Typed error handling
+
+Express identifies error middleware by its four parameters. Type it explicitly so the signature is preserved and `error` is not `any` by accident:
+
+```ts
+import type { ErrorRequestHandler } from 'express'
+import { ZodError } from 'zod'
+import mongoose from 'mongoose'
+
+export const errorHandler: ErrorRequestHandler = (error, req, res, next) => {
+  if (error instanceof ZodError) {
+    return res.status(422).json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input' } })
+  }
+
+  if (error instanceof mongoose.Error.ValidationError) {
+    return res.status(422).json({ error: { code: 'VALIDATION_ERROR', message: error.message } })
+  }
+
+  if (error instanceof mongoose.Error.CastError) {
+    return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Resource not found' } })
+  }
+
+  console.error(error)
+  res.status(500).json({ error: { code: 'INTERNAL', message: 'Something went wrong' } })
+}
+```
+
+Add a response envelope type for consistency:
+
+```ts
+// src/types/http.ts
+export type ApiSuccess<T> = { data: T }
+export type ApiFailure = { error: { code: string; message: string; details?: unknown } }
+export type ApiResponse<T> = ApiSuccess<T> | ApiFailure
+```
+
+Handlers returning `res.json({ data: movie })` now have a name for their shape — and the client-side lessons reuse these types.
+
+## Typed Mongoose models
+
+Mongoose ships good TypeScript support. The modern approach derives your document type from the schema itself:
+
+```ts
+// src/models/movie.ts
+import { Schema, model, type InferSchemaType, type HydratedDocument } from 'mongoose'
+
+const movieSchema = new Schema(
+  {
+    title: { type: String, required: true, trim: true, maxlength: 200 },
+    year: { type: Number, required: true, min: 1888 },
+    genres: { type: [String], default: [] },
+    owner: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+  },
+  { timestamps: true }
+)
+
+export type Movie = InferSchemaType<typeof movieSchema>
+export type MovieDocument = HydratedDocument<Movie>
+
+export const MovieModel = model('Movie', movieSchema)
+```
+
+Now `MovieModel.findById()` returns `MovieDocument | null` — you must handle `null`, exactly as production requires — and `movie.title` is `string`, not `any`. `lean()` queries narrow to the plain `Movie` shape when you do not need document methods.
+
+<Callout type="danger" title="never trust ObjectId input">
+  `req.params.id` is always a string, and casting it with `new mongoose.Types.ObjectId(id)` throws on garbage input. Let `findById()` perform the cast — it returns `null` on invalid ids in current Mongoose versions — or validate the id shape with Zod (`z.string().regex(/^[0-9a-f]{24}$/)`). An unhandled cast error is a 500 waiting to happen.
+</Callout>
+
+## Try it
+
+<TryIt title="A typed route with schema-validated input" hint="Put this in a tsx-run project with express and zod installed. Send a valid and an invalid body with curl to see both paths.">
+```ts
+import express from 'express'
+import { z } from 'zod'
+
+const app = express()
+app.use(express.json())
+
+const taskSchema = z.object({
+  title: z.string().min(1),
+  priority: z.enum(['low', 'medium', 'high']).default('medium'),
+  dueAt: z.coerce.date().optional(),
+})
+
+type TaskInput = z.infer<typeof taskSchema>
+
+const tasks: Array<TaskInput & { id: number }> = []
+let nextId = 1
+
+app.post('/api/v1/tasks', (req, res) => {
+  const result = taskSchema.safeParse(req.body)
+  if (!result.success) {
+    return res.status(422).json({ error: result.error.flatten() })
+  }
+  const task = { id: nextId++, ...result.data }
+  tasks.push(task)
+  res.status(201).json({ data: task })
+})
+
+app.get('/api/v1/tasks', (req, res) => {
+  res.json({ data: tasks })
+})
+
+app.listen(3000, () => console.log('typed tasks API on :3000'))
+```
+</TryIt>
+
+## Check your understanding
+
+<Quiz
+  question="A handler is defined as Request<{ id: string }>. Which request data does that type describe?"
+  options={[
+    'The JSON body',
+    'The route params, such as :id in /movies/:id',
+    'The query string',
+    'The response payload'
+  ]}
+  answer={1}
+  explanation="Express's Request generics are params, response body, request body, then query — in that order. The first argument types req.params, which is what a route like /movies/:id populates."
+/>
+
+<Quiz
+  question="Why derive types with z.infer instead of writing a separate interface for the request body?"
+  options={[
+    'z.infer runs faster at runtime',
+    'A single schema definition cannot drift from itself: validation and types always describe the same shape',
+    'Interfaces cannot be exported',
+    'z.infer generates validation code for the client'
+  ]}
+  answer={1}
+  explanation="Two definitions for one contract mean they can disagree — and eventually will. Deriving the type from the schema makes drift impossible: change the schema, and every consumer gets a compile error until updated."
+/>
+
+<Exercise title="Convert the movies API to TypeScript" difficulty="hard">
+Take the Express API you have built through the curriculum and bring it under strict TypeScript.
+
+1. **Setup:** add `typescript`, `tsx`, and the `@types` packages; create a strict tsconfig per this lesson; wire `dev`, `build`, `start`, and `typecheck` scripts.
+2. **Env:** type and validate configuration — a Zod schema for `process.env` that produces `env` with `PORT: number`, `MONGODB_URI: string`, `JWT_SECRET: string`, `CLIENT_URL: string`. Fail at boot when anything is missing.
+3. **Schemas:** for each write endpoint (create/update movie), define a Zod schema and export `z.infer` types; add the `validateBody` middleware and apply it to those routes.
+4. **Handlers:** annotate every handler with `Request` generics for params and body. No `any` anywhere in `src/`.
+5. **Augmentation:** create `types/express.d.ts` adding `user`, type your `requireAuth` middleware, and use a `currentUser` helper in protected handlers.
+6. **Models:** convert each Mongoose model to `InferSchemaType` plus `HydratedDocument`; fix every `null` check the compiler now demands — that is the compiler finding real bugs.
+7. **Errors:** type the error middleware as `ErrorRequestHandler` and keep the `{ error: { code, message } }` envelope; add a shared `ApiResponse<T>` type.
+8. **Proof:** run `npx tsc --noEmit` until clean, then run your existing Vitest + Supertest suite — it should pass unchanged, since behavior did not change, only its guarantees.
+9. **Break it on purpose:** rename `title` to `name` in the schema but not in a route handler; confirm the compiler catches every affected site before you fix them. That is the workflow from now on.
+</Exercise>
+
+## Summary
+
+- Strict tsconfig plus `tsx` for development and `tsc` for builds is the modern Node + TypeScript workflow.
+- Express handlers type their four-message contract with `Request<Params, ResBody, ReqBody, Query>`; helper aliases keep it readable.
+- Zod schemas serve double duty: runtime validation and, via `z.infer`, the static types handlers consume.
+- Request augmentation (`declare global` on `Express.Request`) gives middleware like `requireAuth` a typed `req.user`; a `currentUser` helper removes the optionality inside protected handlers.
+- `InferSchemaType` + `HydratedDocument` make Mongoose models fully typed, `null`-safe, and refactor-friendly.
+- Type the error middleware as `ErrorRequestHandler` and standardize on one response envelope.
+
+Next: the same rigor on the frontend — typing props, events, hooks, context, and forms in React.

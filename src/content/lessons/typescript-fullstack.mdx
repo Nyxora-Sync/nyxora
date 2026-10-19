@@ -1,0 +1,378 @@
+You have strict TypeScript on the server and strict TypeScript on the client. And yet the boundary between them — the HTTP contract — is still untyped. The server can rename `posterUrl` to `imageUrl`, deploy, and your client keeps compiling happily until users see `undefined` on screen.
+
+**End-to-end type safety** closes that gap. This lesson walks the spectrum of approaches — shared schemas, typed clients, codegen, tRPC — and builds the one that fits a REST MERN monorepo: a shared package that both sides import, plus a client that validates what it receives.
+
+## The contract problem
+
+Three failure modes live at the client/server boundary:
+
+1. **Drift** — the server changes a field; the client unawarely reads old names.
+2. **Lies** — the server says `data: Movie[]` in types but returns an error envelope at runtime; the client crashes parsing it.
+3. **Blind spots** — query parameters, error codes, and envelope shapes are typed on neither side.
+
+Types alone fix drift. Types plus runtime validation fix lies and blind spots. The good news: both come from one artifact — the schema.
+
+<KeyPoint>
+The stack of techniques, cheapest to strongest: hand-copied types (drifts), shared schema types (no drift, no runtime checks), shared schema types plus response validation (no drift, no lies), and RPC/codegen (no drift, no lies, no manual client functions). More power costs more machinery — choose per project, not per fashion.
+</KeyPoint>
+
+## A shared workspace package
+
+The architecture lesson set up npm workspaces. Add one more package — `shared` — that owns every piece of the contract:
+
+```text
+mern-app/
+├── client/          # Vite + React
+├── server/          # Express + Mongoose
+├── shared/          # the contract: schemas + inferred types
+│   ├── src/
+│   │   ├── movie.ts
+│   │   ├── user.ts
+│   │   └── http.ts
+│   ├── package.json
+│   └── tsconfig.json
+└── package.json     # workspaces: [client, server, shared]
+```
+
+```json
+// shared/package.json
+{
+  "name": "@app/shared",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./http": "./src/http.ts"
+  },
+  "dependencies": {
+    "zod": "^4.0.0"
+  }
+}
+```
+
+Two details make this ergonomic:
+
+- **The package exports TypeScript source directly.** Vite compiles TS from workspace packages out of the box, and tsx does the same for the server. No build step for `shared`.
+- **`exports` maps subpaths**, so imports stay clean: `import { createMovieSchema } from '@app/shared'` on both sides.
+
+Install it as a dependency in both workspaces:
+
+```bash
+npm install @app/shared@* --workspace client --workspace server
+```
+
+```ts
+// shared/src/movie.ts
+import { z } from 'zod'
+
+export const movieSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  year: z.number().int(),
+  genres: z.array(z.string()),
+  posterUrl: z.string().url().nullable(),
+})
+
+export const createMovieSchema = movieSchema.omit({ id: true, posterUrl: true })
+export const updateMovieSchema = createMovieSchema.partial()
+
+export type Movie = z.infer<typeof movieSchema>
+export type CreateMovieInput = z.infer<typeof createMovieSchema>
+export type UpdateMovieInput = z.infer<typeof updateMovieSchema>
+```
+
+```ts
+// shared/src/http.ts
+import { z } from 'zod'
+
+export const apiErrorSchema = z.object({
+  code: z.string(),
+  message: z.string(),
+  details: z.unknown().optional(),
+})
+
+export function apiSuccess<T extends z.ZodType>(data: T) {
+  return z.object({ data })
+}
+
+export function apiFailure() {
+  return z.object({ error: apiErrorSchema })
+}
+
+export const errorCodes = ['UNAUTHORIZED', 'FORBIDDEN', 'NOT_FOUND', 'VALIDATION_ERROR', 'INTERNAL'] as const
+export type ErrorCode = (typeof errorCodes)[number]
+```
+
+Now the server's handler and the client's parser reference the same objects, and a rename cannot pass unnoticed:
+
+```text
+server: res.json({ data: movie.toJSON() })
+                          ~~~~ the Movie type must match movieSchema
+client: movieSchema.parse(payload.data)
+                          ~~~~ breaks at compile time if the shape changed
+```
+
+## The typed API client
+
+The client keeps exactly one place that knows how to talk HTTP. Build it on the shared schemas:
+
+```ts
+// client/src/lib/api.ts
+import { z } from 'zod'
+import { apiErrorSchema } from '@app/shared/http'
+
+export class ApiError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly code: string,
+    message: string,
+    public readonly details?: unknown
+  ) {
+    super(message)
+    this.name = 'ApiError'
+  }
+}
+
+const API_URL = import.meta.env.VITE_API_URL ?? ''
+
+async function request<T extends z.ZodType>(
+  path: string,
+  schema: T,
+  init: RequestInit & { token?: string | null } = {}
+): Promise<z.infer<T>> {
+  const { token, headers, ...rest } = init
+
+  let response: Response
+  try {
+    response = await fetch(`${API_URL}${path}`, {
+      ...rest,
+      headers: {
+        ...(rest.body ? { 'Content-Type': 'application/json' } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...headers,
+      },
+    })
+  } catch {
+    throw new ApiError(0, 'NETWORK', 'Cannot reach the server')
+  }
+
+  const payload: unknown = await response.json().catch(() => null)
+
+  if (!response.ok) {
+    const parsed = apiErrorSchema.safeParse((payload as { error?: unknown })?.error)
+    throw new ApiError(
+      response.status,
+      parsed.success ? parsed.data.code : 'UNKNOWN',
+      parsed.success ? parsed.data.message : `Request failed with ${response.status}`,
+      parsed.success ? parsed.data.details : undefined
+    )
+  }
+
+  const result = schema.safeParse(payload)
+  if (!result.success) {
+    // The server broke its side of the contract — fail loudly in development
+    throw new ApiError(response.status, 'CONTRACT', 'Response did not match the schema', result.error.issues)
+  }
+
+  return result.data
+}
+
+// Typed endpoint functions — the only file that mentions paths
+import { movieSchema, createMovieSchema, type CreateMovieInput } from '@app/shared'
+import { z } from 'zod'
+
+export const moviesApi = {
+  list: (token: string | null) =>
+    request('/api/v1/movies', z.object({ data: z.array(movieSchema) }).transform((v) => v.data), { token }),
+
+  get: (id: string, token: string | null) =>
+    request(`/api/v1/movies/${id}`, z.object({ data: movieSchema }).transform((v) => v.data), { token }),
+
+  create: (input: CreateMovieInput, token: string) =>
+    request('/api/v1/movies', z.object({ data: movieSchema }).transform((v) => v.data), {
+      method: 'POST',
+      body: JSON.stringify(createMovieSchema.parse(input)),
+      token,
+    }),
+}
+```
+
+What this buys you, concretely:
+
+- `moviesApi.create()` **cannot** be called with a malformed object — the input type is the schema's output type.
+- The return of every function is validated at runtime; a contract break surfaces as a clear `CONTRACT` error with issues attached, not a mystery `undefined`.
+- Components consume plain typed values:
+
+```tsx
+const [movies, setMovies] = useState<Movie[]>([])
+
+useEffect(() => {
+  moviesApi.list(token).then(setMovies).catch(handleError)
+}, [token])
+```
+
+<Callout type="tip" title="Parse, don't trust — but keep it cheap">
+  Validating every response in production has a small cost. A common policy: always validate in development and CI (catch drift before deploy), and validate in production for critical or externally sourced endpoints. The schema stays; only the enforcement policy changes.
+</Callout>
+
+## When codegen earns its place
+
+If your API is documented with an **OpenAPI** specification — hand-written or generated from your routes — you can generate client types instead of maintaining them:
+
+```bash
+npm install -D openapi-typescript
+npx openapi-typescript http://localhost:3000/openapi.json -o client/src/lib/api-types.ts
+```
+
+```ts
+import type { paths } from './api-types'
+
+type MovieListResponse = paths['/api/v1/movies']['get']['responses']['200']['content']['application/json']
+```
+
+Codegen shines when the API has **many consumers** (web, mobile, third parties) or **exists for others**. The trade-offs: it only knows what the spec says (a stale spec generates confidently wrong types), and it is a build step to maintain. For a single-team monorepo, shared schemas are usually less machinery for the same safety.
+
+## When tRPC earns its place
+
+tRPC skips HTTP contracts entirely: you call server functions directly, and the client type is **the server's actual type**, inferred over the wire. No schemas per endpoint, no path strings, no codegen:
+
+```ts
+// server
+export const appRouter = router({
+  movie: router({
+    list: publicProcedure.query(() => MovieModel.find().lean()),
+    create: protectedProcedure
+      .input(createMovieSchema)
+      .mutation(({ input, ctx }) => MovieModel.create({ ...input, owner: ctx.userId })),
+  }),
+})
+export type AppRouter = typeof appRouter
+```
+
+```ts
+// client — end-to-end types with zero duplication
+const movies = await trpc.movie.list.query()
+await trpc.movie.create.mutate({ title: 'Dune', year: 2021, genres: [] })
+```
+
+The catch: tRPC only works when **both ends are TypeScript and share runtime types** (it needs the server's type declarations available to the client — in a monorepo, the router's type import does exactly that). If you have non-TS consumers, are building a public API, or your team uses REST conventions for good reasons, stay with schemas or codegen.
+
+<Callout type="info" title="What REST loses and keeps in this trade">
+  A shared-schema REST setup keeps universal clients (curl, Postman, mobile, other teams) and the standard mental model, at the cost of writing endpoint functions. tRPC removes the boilerplate but couples client and server into one deployment unit. The capstone project sticks with REST plus shared schemas precisely because a public API is part of its story.
+</Callout>
+
+## Keeping the contract honest
+
+Three habits keep end-to-end safety real instead of aspirational:
+
+**Validate at both edges.** The client schema validates server responses; the server schema validates requests and also parses **its own responses in tests**, so the wire shape is pinned down where it is cheap to fix.
+
+**Version intentional breaks.** Renaming a field used by a deployed client is a breaking change. Add the new field alongside the old, migrate the client, then remove — the deployment lesson's backwards-compatible migrations apply to JSON too.
+
+**Pin the boundary with tests.** One integration test asserting `GET /movies` matches `movieSchema` catches drift the moment it appears:
+
+```ts
+import { movieSchema } from '@app/shared'
+import { z } from 'zod'
+import request from 'supertest'
+
+it('GET /api/v1/movies matches the shared schema', async () => {
+  const { body } = await request(app).get('/api/v1/movies').expect(200)
+  const parsed = z.object({ data: z.array(movieSchema) }).safeParse(body)
+  expect(parsed.success).toBe(true)
+})
+```
+
+Note the direction: the **test** owns the schema assertion, so runtime payloads stay untouched in production while CI still fails on drift.
+
+## Try it
+
+<TryIt title="A shared schema across client and server" hint="In a monorepo with a shared workspace, create the schema once, import it in both apps, and run the typecheck in both. Then change one field and watch where the errors land.">
+```ts
+// shared/src/index.ts
+import { z } from 'zod'
+
+export const taskSchema = z.object({
+  id: z.string(),
+  title: z.string().min(1),
+  done: z.boolean(),
+})
+
+export type Task = z.infer<typeof taskSchema>
+
+// ---------- server/src/routes/tasks.ts ----------
+import { taskSchema } from '@app/shared'
+import type { Task } from '@app/shared'
+
+const tasks: Task[] = []
+app.get('/api/v1/tasks', (req, res) => {
+  res.json({ data: tasks.map((t) => taskSchema.parse(t)) })
+})
+
+// ---------- client/src/lib/tasks.ts ----------
+import { taskSchema, type Task } from '@app/shared'
+import { z } from 'zod'
+
+const listSchema = z.object({ data: z.array(taskSchema) })
+
+export async function fetchTasks(): Promise<Task[]> {
+  const res = await fetch('/api/v1/tasks')
+  const parsed = listSchema.parse(await res.json())
+  return parsed.data
+}
+
+// Now rename `done` to `completed` inside taskSchema and run
+// `npx tsc --noEmit` in server/ and client/ — both report exactly
+// the places that must change. That's the whole feature.
+```
+</TryIt>
+
+## Check your understanding
+
+<Quiz
+  question="The client typed its API client with z.infer from shared schemas but never validates responses at runtime. Which failure remains possible?"
+  options={[
+    'The client cannot compile',
+    'The server can return data that does not match the schema — for example during a deploy that changes a field — and the client reads it as if it matched',
+    'Browsers reject unknown JSON fields',
+    'The schema cannot be shared'
+  ]}
+  answer={1}
+  explanation="Types are erased at runtime. A schema mismatch produces no error unless something checks — hence response validation: parsing what arrives (at least in dev and CI) turns silent drift into a loud, specific failure."
+/>
+
+<Quiz
+  question="When does tRPC fit better than a shared-schema REST setup?"
+  options={[
+    'When third parties will consume the API',
+    'When every consumer is TypeScript and client and server ship as one unit, so inferred procedure types replace handwritten endpoint functions',
+    'When you need OpenAPI documentation',
+    'When the server is not TypeScript'
+  ]}
+  answer={1}
+  explanation="tRPC's magic is inferring client types from the server's own types, which requires a shared TS context and works best in a single deployment. Public APIs and non-TS consumers are exactly when to keep REST."
+/>
+
+<Exercise title="Wire up end-to-end types for the movies app" difficulty="hard">
+Upgrade your monorepo so the client and server share one source of truth for the API contract.
+
+1. **Create the shared package:** add `shared/` with `package.json` exporting TS source and a `movie.ts` holding `movieSchema`, `createMovieSchema`, `updateMovieSchema`, and their inferred types. Install it into both workspaces.
+2. **HTTP types:** in `shared/http.ts`, add the error schema, `errorCodes` union, and success/failure envelope helpers.
+3. **Server:** replace ad-hoc types with the shared schemas; use them to validate request bodies (Zod middleware) and to shape responses. The server must import nothing from the client.
+4. **Client API layer:** build the `request<T>` helper with schema validation, the `ApiError` class (status, code, message), and one endpoint function per route using the shared schemas.
+5. **Consume it:** refactor components to use only the API layer and inferred types; no component may construct a fetch call directly.
+6. **Pin with tests:** add an integration test asserting each critical endpoint response parses against the shared schema; run it in CI.
+7. **Prove the loop:** rename `posterUrl` to `imageUrl` in the schema and run `npx tsc --noEmit` in `server/` and `client/`. Record how many sites the compiler flagged — then fix them and confirm both workspaces are clean.
+8. **Decide on codegen:** write two paragraphs in the README — one for codegen via OpenAPI, one for tRPC — stating whether either would improve *this* project, and why you are or are not adopting one.
+</Exercise>
+
+## Summary
+
+- Shared schemas make drift impossible: validation and static types both derive from one definition, imported by both sides through a workspace package.
+- Export TypeScript source from the shared package; Vite and tsx compile it without a build step.
+- The typed `request<T>` client pairs compile-time types with runtime validation — compile checks catch renames, parsing catches lies.
+- Codegen (OpenAPI) fits many-consumer or public APIs; tRPC fits all-TypeScript monorepos with a single deployment and trades REST universality for zero boilerplate.
+- Validate at both edges, version breaking changes, and pin the wire shape with contract tests in CI.
+
+Next module: testing in depth — the testing trophy, API integration tests, React component tests, and full end-to-end coverage with Playwright.

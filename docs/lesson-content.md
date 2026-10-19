@@ -4,7 +4,7 @@ The curriculum has **30 core lessons** plus **23 mastery lessons** in the develo
 track — **53 unique lessons** total. The developer track reuses the same core lesson
 IDs as the beginner track, so each lesson is authored once.
 
-**Authored: 30 / 53** — all core lessons complete; mastery modules in progress.
+**Authored: 34 / 53** — all core lessons complete; mastery modules in progress.
 
 ## Web Foundations
 
@@ -55,10 +55,10 @@ IDs as the beginner track, so each lesson is authored once.
 
 ### TypeScript
 
-- [ ] `typescript-foundations` — TypeScript Fundamentals for JS Developers
-- [ ] `typescript-express` — Typing Express APIs
-- [ ] `typescript-react` — TypeScript in React
-- [ ] `typescript-fullstack` — End-to-End Type Safety
+- [x] `typescript-foundations` — TypeScript Fundamentals for JS Developers
+- [x] `typescript-express` — Typing Express APIs
+- [x] `typescript-react` — TypeScript in React
+- [x] `typescript-fullstack` — End-to-End Type Safety
 
 ### Testing in Depth
 

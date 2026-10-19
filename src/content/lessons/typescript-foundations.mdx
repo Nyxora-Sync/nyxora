@@ -1,0 +1,279 @@
+You have written JavaScript for a while now. You know the feeling: a function returns something unexpected, a property is `undefined` at 2 a.m., or you rename a field on the server and find the broken usages one runtime error at a time. **TypeScript** exists to move those discoveries from production to your editor.
+
+TypeScript is JavaScript with a **type layer** that a compiler checks before your code runs. Nothing about the runtime changes — after checking, types are erased and plain JavaScript remains. The value is entirely in what you learn before deploying.
+
+<Callout type="info" title="You already use typed APIs">
+  Modern editors type plain JavaScript with JSDoc hints all the time. TypeScript simply makes those types precise, first-class, and enforceable across an entire project — server, client, tests, and tools.
+</Callout>
+
+## How TypeScript runs
+
+There are two eras in a TypeScript project:
+
+1. **Development** — your editor and the `tsc` checker analyze types in real time. A dev runner like `tsx` (or Node's built-in type stripping) executes the code without a build step.
+2. **Build/runtime** — types are erased. What ships is JavaScript: `.ts` becomes `.js` via `tsc`, or your bundler strips types entirely.
+
+```bash
+npm install -D typescript
+npx tsc --init
+```
+
+A sane starting `tsconfig.json` for Node projects:
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "outDir": "dist",
+    "skipLibCheck": true
+  },
+  "include": ["src"]
+}
+```
+
+`"strict": true` is the whole point — it turns on `strictNullChecks`, `noImplicitAny`, and friends. Writing TypeScript with `strict` off is writing JavaScript with extra ceremony. Turn it on from day one; retrofitting it later is painful.
+
+## Types flow by inference
+
+You annotate far less than beginners expect. TypeScript infers from values:
+
+```ts
+const title = 'Dune'                 // string
+const pages = 412                    // number
+const tags = ['sci-fi', 'classic']   // string[]
+const settings = { dark: true }      // { dark: boolean }
+```
+
+Annotate **boundaries**, not every line: function parameters, return values of public functions, and shared data shapes. Inside a function body, inference does the work.
+
+```ts
+function average(nums: number[]): number {
+  return nums.reduce((sum, n) => sum + n, 0) / nums.length
+}
+
+// Wrong types are caught before running anything
+average(['one', 'two'])
+//      ~~~~~~~~~~~~~~ Argument of type 'string[]' is not assignable to 'number[]'
+```
+
+That error message appears in your editor as you type — no test run, no browser, no crash.
+
+## Interfaces vs type aliases
+
+Both name a shape. Use **interface** for object shapes that describe entities, and **type** for unions and computed compositions:
+
+```ts
+interface User {
+  id: string
+  email: string
+  displayName: string
+}
+
+interface Admin extends User {
+  permissions: string[]
+}
+
+type Result = { ok: true; data: User } | { ok: false; error: string }
+```
+
+Interfaces are open (they can be augmented later, which library authors rely on); type aliases are closed but can express unions, intersections, tuples, and mapped types. Teams often standardize on one — either choice beats having none.
+
+## Unions and narrowing
+
+A **union** says a value is one of several shapes. **Narrowing** lets the compiler figure out which one you have right now:
+
+```ts
+type Status = 'draft' | 'published' | 'archived'
+
+function label(status: Status) {
+  if (status === 'draft') return 'Still editing'
+  if (status === 'published') return 'Live'
+  return 'Archived'   // the compiler knows only 'archived' remains
+}
+```
+
+Narrowing works through `typeof`, `in`, `instanceof`, truthiness checks, and — most importantly — **discriminated unions**: objects that carry a literal field identifying their variant.
+
+```ts
+type ApiResult<T> =
+  | { state: 'loading' }
+  | { state: 'error'; message: string }
+  | { state: 'ready'; data: T }
+
+function render(result: ApiResult<string[]>) {
+  switch (result.state) {
+    case 'loading': return 'Loading…'
+    case 'error': return `Failed: ${result.message}`
+    case 'ready': return result.data.join(', ')
+    default: {
+      // If a new variant is added, this line fails to compile until handled
+      const exhaustive: never = result
+      throw new Error(`Unhandled: ${JSON.stringify(exhaustive)}`)
+    }
+  }
+}
+```
+
+<KeyPoint>
+The `never` check in the `default` case is the most valuable pattern in this lesson: when someone adds a fourth variant to `ApiResult`, every switch that handles it stops compiling until the new case is handled. The compiler tracks your TODOs for you.
+</KeyPoint>
+
+## unknown beats any
+
+`any` switches type checking off for a value — errors flow silently through the rest of your program. `unknown` accepts anything **but forces you to narrow before use**:
+
+```ts
+async function getJson(url: string): Promise<unknown> {
+  const response = await fetch(url)
+  return response.json()
+}
+
+const data = await getJson('/api/v1/users')
+data.map((user) => user.email)
+//   ~~~~ 'data' is of type 'unknown'
+```
+
+The fix is validation, not casting — which is exactly what the Express and fullstack lessons do with Zod. Rule of thumb: **`any` in application code is a bug; `unknown` at boundaries is correct.**
+
+## Generics: types as parameters
+
+A generic is a type that takes type arguments, like a function that takes values:
+
+```ts
+function first<T>(items: T[]): T | undefined {
+  return items[0]
+}
+
+const firstTag = first(['a', 'b'])       // string | undefined
+const firstPage = first([12, 34])        // number | undefined
+```
+
+Without generics you would need `any` (losing safety) or one function per type (losing reach). Generics preserve the relationship between inputs and outputs.
+
+```ts
+// Constrain what T can be
+function pluck<T, K extends keyof T>(items: T[], key: K): T[K][] {
+  return items.map((item) => item[key])
+}
+
+const users: User[] = []
+const emails = pluck(users, 'email')      // string[]
+pluck(users, 'password')                  // error: not a key of User
+```
+
+You will read far more generics than you write at first — `Promise<T>`, `Array<T>`, `Record<K, V>`, and library signatures like `useState<T>`. The mental model: “a function, but for types.”
+
+## Utility types you will actually use
+
+TypeScript ships transformations for every day data modeling:
+
+```ts
+interface Post {
+  id: string
+  title: string
+  body: string
+  publishedAt: Date | null
+}
+
+type PostDraft = Omit<Post, 'id' | 'publishedAt'>   // create input
+type PostUpdate = Partial<PostDraft>                // patch input
+type PostSummary = Pick<Post, 'id' | 'title'>       // list row
+type PostsByAuthor = Record<string, Post[]>          // grouped lookup
+```
+
+`Partial<T>` makes every field optional, `Required<T>` the opposite, `Pick`/`Omit` compose from existing shapes, and `ReturnType<F>` extracts a function's return type. Deriving types from a single source of truth beats writing parallel interfaces that drift.
+
+<Callout type="warning" title="Types disappear at runtime">
+  No runtime code may depend on types: you cannot `instanceof` an interface, enumerate its fields, or validate JSON with a type. That is a validation library's job. If a value arrives from outside your program — HTTP, database, `JSON.parse` — its type is a **claim**, and the code at that boundary must check the claim.
+</Callout>
+
+## Try it
+
+<TryIt title="Your first strict TypeScript file" hint="Create a folder, run npm init -y && npm i -D typescript && npx tsc --init (set strict true), save this as app.ts, and run npx tsc --noEmit to see it check. Introduce each mistake deliberately to watch the errors.">
+```ts
+type Task =
+  | { status: 'todo'; title: string }
+  | { status: 'doing'; title: string; assignee: string }
+  | { status: 'done'; title: string; completedAt: Date }
+
+function describe(task: Task): string {
+  switch (task.status) {
+    case 'todo':
+      return `${task.title} — not started`
+    case 'doing':
+      return `${task.title} — ${task.assignee} is on it`
+    case 'done':
+      return `${task.title} — finished ${task.completedAt.toISOString()}`
+    default: {
+      const exhaustive: never = task
+      throw new Error(`Unhandled task: ${JSON.stringify(exhaustive)}`)
+    }
+  }
+}
+
+function first<T>(items: T[]): T | undefined {
+  return items[0]
+}
+
+const tasks: Task[] = [
+  { status: 'todo', title: 'Write the lesson' },
+  { status: 'doing', title: 'Review PR', assignee: 'Aki' },
+]
+
+console.log(describe(first(tasks)!))
+```
+</TryIt>
+
+## Check your understanding
+
+<Quiz
+  question="What is the practical difference between any and unknown?"
+  options={[
+    'They are aliases for the same thing',
+    'any disables checking for that value; unknown requires narrowing before use',
+    'unknown only works with JSON',
+    'any is stricter than unknown'
+  ]}
+  answer={1}
+  explanation="Assigning to any turns off safety for everything downstream. unknown accepts every value but forces you to prove the shape (with typeof checks or a validation library) before accessing anything."
+/>
+
+<Quiz
+  question="Why does the never assignment in an exhaustive switch matter?"
+  options={[
+    'It makes runtime code faster',
+    'It converts values to string',
+    'It fails compilation when a new variant is added but not handled',
+    'It is required by strict mode'
+  ]}
+  answer={2}
+  explanation="When all cases are handled, the remaining value has type never. Adding a variant makes that assignment an error, turning “we forgot to update this switch” into a build failure instead of a production bug."
+/>
+
+<Exercise title="Convert a JavaScript utility to strict TypeScript" difficulty="medium">
+Take a small JS file — or write this one from scratch — and bring it under `strict` mode with zero errors and zero `any`.
+
+1. Model a reading list with a discriminated union: `Book` has `title`, `author`, and a `status` that is either `'unread'`, `'reading'` (with `progress: number` 0–100), or `'finished'` (with `rating: number` 1–5).
+2. Write `describe(book: Book): string` with an exhaustive switch and a `never` check.
+3. Write a generic `groupBy<T, K extends keyof T>(items: T[], key: K): Record<string, T[]>`. Use it to group books by `status`.
+4. Add `updateProgress(book: Book, percent: number): Book` that only accepts `status: 'reading'` books (hint: narrow with a type guard or accept the union and return a result union).
+5. Define `BookSummary` with `Pick` or `Omit` and a `BookPatch` with `Partial`. Use them in a `mergeBook(book: Book, patch: BookPatch): Book` function.
+6. Run `npx tsc --noEmit` until clean, then deliberately break something — misspell a property, pass a string where a number belongs — and read the error before fixing it. Getting fluent at reading type errors is half of TypeScript.
+7. Bonus: enable `noUncheckedIndexedAccess` in `tsconfig.json` and fix the fallout in `groupBy` and `first`-style helpers.
+</Exercise>
+
+## Summary
+
+- TypeScript adds a compile-time type layer that is erased at runtime — the payoff is errors in your editor instead of production.
+- Inference covers most code; annotate boundaries (parameters, public returns, shared shapes).
+- Interfaces suit entity shapes; type aliases handle unions and compositions.
+- Discriminated unions plus `never` exhaustiveness turn forgotten cases into compile errors.
+- `unknown` at boundaries forces validation; `any` is a hole in your safety net.
+- Generics preserve type relationships; utility types (`Pick`, `Omit`, `Partial`, `Record`) derive new shapes from existing ones.
+- Runtime values must still be validated — types are claims, not checks.
+
+Next: putting these tools to work on the server — typing requests, responses, middleware, and Mongoose models in an Express API.
