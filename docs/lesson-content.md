@@ -3,7 +3,7 @@
 The current curriculum has **30 unique lessons**. The developer track reuses the
 same lesson IDs as the beginner track, so a lesson is authored once.
 
-**Authored: 18 / 30**
+**Authored: 24 / 30**
 
 ## Web Foundations
 
@@ -34,12 +34,12 @@ same lesson IDs as the beginner track, so a lesson is authored once.
 
 ## React
 
-- [ ] `react-intro` — React Fundamentals
-- [ ] `react-hooks` — Hooks Deep Dive
-- [ ] `react-router` — React Router v6+
-- [ ] `react-state-management` — State Management
-- [ ] `react-forms` — Forms & Data Fetching
-- [ ] `react-performance` — React Performance
+- [x] `react-intro` — React Fundamentals
+- [x] `react-hooks` — Hooks Deep Dive
+- [x] `react-router` — React Router v6+
+- [x] `react-state-management` — State Management
+- [x] `react-forms` — Forms & Data Fetching
+- [x] `react-performance` — React Performance
 
 ## Full Stack Mastery
 

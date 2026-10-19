@@ -1,0 +1,364 @@
+A React component re-renders whenever its state changes. So what happens when the component needs to do something *outside* rendering — fetch data, start a timer, focus an input, subscribe to an event? That is what hooks like `useEffect` and `useRef` are for.
+
+This lesson covers the hooks you will use in every real app: `useState` in depth, `useEffect` with correct dependencies and cleanup, `useRef` for DOM and mutable values, `useMemo`/`useCallback` as performance tools, `useReducer` for complex state, and **custom hooks** — the feature that makes React code reusable without components.
+
+## The rules of hooks
+
+Hooks are functions whose names start with `use`. Two rules govern all of them:
+
+1. **Call them at the top level** of a component or another hook. Never inside conditions, loops, or nested functions.
+2. **Only call them from components or custom hooks**, never from plain functions.
+
+React relies on call order to associate state with the right hook. An `if` that skips a hook breaks that mapping — which is why the rule exists, not as a style preference. The ESLint plugin `eslint-plugin-react-hooks` enforces both rules; keep it enabled.
+
+## useState in depth
+
+State is a snapshot for one render. Two details improve almost every component:
+
+```jsx
+const [query, setQuery] = useState('')                    // primitive
+
+const [filters, setFilters] = useState({ genre: 'all' })  // object: replace, don't mutate
+setFilters((f) => ({ ...f, genre: 'sci-fi' }))
+
+const [items, setItems] = useState([])                    // array: new array each update
+setItems((current) => [...current, newItem])
+setItems((current) => current.filter((item) => item.id !== id))
+```
+
+- **Updater functions** (`setX((current) => ...)`) read the latest value, so multiple updates in the same tick compose correctly.
+- **Lazy initialization** runs once and is useful for expensive defaults:
+
+```jsx
+const [catalog, setCatalog] = useState(() => buildLargeCatalog())
+```
+
+React 18+ automatically **batches** multiple state updates inside the same event handler into one re-render — another reason to think in terms of state snapshots rather than step-by-step DOM edits.
+
+## useEffect: synchronizing with the outside world
+
+An **effect** is code that runs after React renders, used to synchronize with systems outside React: the network, the browser APIs, timers, subscriptions — anything that is not render output.
+
+```jsx
+import { useEffect, useState } from 'react'
+
+function Clock() {
+  const [now, setNow] = useState(() => new Date())
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000)
+    return () => clearInterval(id)   // cleanup: run before unmount and before re-running
+  }, [])                             // []: run once after the first render
+
+  return <p>{now.toLocaleTimeString()}</p>
+}
+```
+
+The dependency array controls **when the effect re-runs**:
+
+| Dependencies | Behavior |
+|--------------|----------|
+| omitted | Runs after every render — rarely what you want |
+| `[]` | Runs once after mount; cleanup on unmount |
+| `[userId]` | Runs after mount and whenever `userId` changes |
+
+The **cleanup function** returned by the effect runs before the next execution and on unmount. Every subscription, timer, or listener must be cleaned up, or you leak memory and update unmounted components.
+
+### Fetching with an effect (and a race condition)
+
+```jsx
+useEffect(() => {
+  const controller = new AbortController()
+
+  async function load() {
+    try {
+      const response = await fetch(`/api/posts/${postId}`, { signal: controller.signal })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      setPost(await response.json())
+    } catch (error) {
+      if (error.name !== 'AbortError') setError(error.message)
+    }
+  }
+
+  load()
+  return () => controller.abort()   // cancel when postId changes or the component unmounts
+}, [postId])
+```
+
+Without the abort, a slow response for post `1` could land after you navigated to post `2` and overwrite it — a classic race condition.
+
+<Callout type="warning" title="Do not use an effect for derived state">
+  If a value can be computed from props or state during render, compute it during render:
+
+  ```jsx
+  // Wrong: an effect plus state for something derivable
+  const [total, setTotal] = useState(0)
+  useEffect(() => setTotal(items.reduce((s, i) => s + i.price, 0)), [items])
+
+  // Right: derive it
+  const total = items.reduce((sum, item) => sum + item.price, 0)
+  ```
+
+  Effects are for synchronizing with external systems — not for reacting to your own state.
+</Callout>
+
+<Callout type="danger" title="Missing dependencies are bugs, not optimizations">
+  If the effect uses a value from the component (props, state, or a function defined inside), it belongs in the dependency array. Removing it to “run once” freezes a stale value — the source of the infamous “why is my effect reading old state?” bug. The lint rule catches these; do not silence it.
+</Callout>
+
+## useRef: values that do not trigger renders
+
+A ref is a mutable box that persists across renders. Changing `.current` **does not** re-render, which makes it perfect for two jobs:
+
+```jsx
+function SearchBox() {
+  const inputRef = useRef(null)
+
+  useEffect(() => {
+    inputRef.current.focus()
+  }, [])
+
+  return <input ref={inputRef} placeholder="Search…" />
+}
+```
+
+```jsx
+function Stopwatch() {
+  const [seconds, setSeconds] = useState(0)
+  const intervalRef = useRef(null)  // timer id lives here; no re-render needed
+
+  function start() {
+    if (intervalRef.current) return
+    intervalRef.current = setInterval(() => setSeconds((s) => s + 1), 1000)
+  }
+
+  function stop() {
+    clearInterval(intervalRef.current)
+    intervalRef.current = null
+  }
+
+  return (
+    <>
+      <p>{seconds}s</p>
+      <button onClick={start}>Start</button>
+      <button onClick={stop}>Stop</button>
+    </>
+  )
+}
+```
+
+Use a ref when a value must survive renders but should **not** appear in the UI. If it appears in the UI, it belongs in state.
+
+## useMemo and useCallback
+
+These two cache things between renders:
+
+- `useMemo` caches a **computed value**.
+- `useCallback` caches a **function identity**.
+
+```jsx
+const visible = useMemo(
+  () => items.filter((item) => item.name.toLowerCase().includes(query.toLowerCase())),
+  [items, query]                     // recompute only when these change
+)
+
+const handleSelect = useCallback(
+  (id) => setSelectedId(id),
+  []                                 // stable function identity across renders
+)
+```
+
+They pay off when a computation is genuinely expensive or when a stable reference prevents downstream re-renders or effect loops. They cost memory and add noise, so use them where the profiler proves they help — the performance lesson goes deep on this. Measure first; memoize second.
+
+## useReducer: state transitions as a reducer
+
+When several state values change together or the next state depends on complex rules, a **reducer** centralizes the logic. You dispatch an action; a pure function decides the next state:
+
+```jsx
+import { useReducer } from 'react'
+
+function todosReducer(state, action) {
+  switch (action.type) {
+    case 'added':
+      return [...state, { id: crypto.randomUUID(), text: action.text, done: false }]
+    case 'toggled':
+      return state.map((todo) =>
+        todo.id === action.id ? { ...todo, done: !todo.done } : todo
+      )
+    case 'removed':
+      return state.filter((todo) => todo.id !== action.id)
+    default:
+      throw new Error(`Unknown action: ${action.type}`)
+  }
+}
+
+function TodoApp() {
+  const [todos, dispatch] = useReducer(todosReducer, [])
+  const [text, setText] = useState('')
+
+  function submit(event) {
+    event.preventDefault()
+    if (!text.trim()) return
+    dispatch({ type: 'added', text: text.trim() })
+    setText('')
+  }
+
+  return (
+    <form onSubmit={submit}>
+      <input value={text} onChange={(e) => setText(e.target.value)} />
+      <ul>
+        {todos.map((todo) => (
+          <li key={todo.id}>
+            <button onClick={() => dispatch({ type: 'toggled', id: todo.id })}>
+              {todo.done ? '☑' : '☐'} {todo.text}
+            </button>
+            <button onClick={() => dispatch({ type: 'removed', id: todo.id })}>✕</button>
+          </li>
+        ))}
+      </ul>
+    </form>
+  )
+}
+```
+
+Benefits: the reducer is a testable pure function, every way the state can change is listed in one place, and components dispatch intent instead of manipulating data.
+
+<KeyPoint>
+`useState` for one value with simple updates. `useReducer` when several fields update together or the rules are nontrivial. Both are just ways to hold state — pick by complexity, not by fashion.
+</KeyPoint>
+
+## Custom hooks
+
+A custom hook is a function starting with `use` that calls other hooks. It extracts **stateful logic** — not UI — so components stop repeating it:
+
+```jsx
+import { useEffect, useState } from 'react'
+
+export function useLocalStorage(key, initialValue) {
+  const [value, setValue] = useState(() => {
+    try {
+      const stored = localStorage.getItem(key)
+      return stored === null ? initialValue : JSON.parse(stored)
+    } catch {
+      return initialValue
+    }
+  })
+
+  useEffect(() => {
+    localStorage.setItem(key, JSON.stringify(value))
+  }, [key, value])
+
+  return [value, setValue]
+}
+```
+
+```jsx
+function ThemeToggle() {
+  const [theme, setTheme] = useLocalStorage('theme', 'light')
+
+  return (
+    <button onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}>
+      Theme: {theme}
+    </button>
+  )
+}
+```
+
+This is the real power of hooks: the same state logic works in any component, tested once. A debounce hook shows the pattern for effects:
+
+```jsx
+export function useDebounce(value, delay = 400) {
+  const [debounced, setDebounced] = useState(value)
+
+  useEffect(() => {
+    const id = setTimeout(() => setDebounced(value), delay)
+    return () => clearTimeout(id)
+  }, [value, delay])
+
+  return debounced
+}
+```
+
+## Try it
+
+<TryIt title="A persisted counter" hint="Create a Vite React app, save this as App.jsx, and reload the page a few times — the count survives.">
+```jsx
+import { useEffect, useState } from 'react'
+
+function useLocalStorage(key, initial) {
+  const [value, setValue] = useState(() => {
+    const stored = localStorage.getItem(key)
+    return stored === null ? initial : JSON.parse(stored)
+  })
+
+  useEffect(() => {
+    localStorage.setItem(key, JSON.stringify(value))
+  }, [key, value])
+
+  return [value, setValue]
+}
+
+export default function App() {
+  const [count, setCount] = useLocalStorage('count', 0)
+
+  return (
+    <div style={{ padding: 24, fontFamily: 'system-ui' }}>
+      <h1>{count}</h1>
+      <button onClick={() => setCount((c) => c + 1)}>+1</button>
+      <button onClick={() => setCount(0)}>Reset</button>
+    </div>
+  )
+}
+```
+</TryIt>
+
+## Check your understanding
+
+<Quiz
+  question="An effect fetches data using a userId prop. What should the dependency array be?"
+  options={[
+    'An empty array, so it runs once',
+    '[userId], so it re-fetches when the user changes',
+    'No array, so it runs after every render',
+    '[setPost], because the setter is used inside'
+  ]}
+  answer={1}
+  explanation="The effect reads userId, so userId belongs in the dependencies. An empty array would fetch the first user and never update. Setters from useState are stable and do not need to be listed."
+/>
+
+<Quiz
+  question="When is useRef the right tool instead of useState?"
+  options={[
+    'When the value should be displayed in the UI',
+    'When the value must persist across renders but changing it should not re-render',
+    'When the value is derived from props',
+    'When the value is a string'
+  ]}
+  answer={1}
+  explanation="Refs are escape hatches for persistent, non-rendering data: DOM nodes, timer ids, previous values, scroll positions. If the value appears on screen, use state so the UI stays in sync."
+/>
+
+<Exercise title="Extract hooks from a search UI" difficulty="medium">
+Build a user search page and extract its logic into custom hooks.
+
+1. Create a Vite app. Add an input bound to `query` state and render matches from `https://jsonplaceholder.typicode.com/users` fetched once on mount.
+2. Extract the fetch into `useUsers()`: an effect with `AbortController`, returning `{ users, loading, error }`. Handle the abort without setting state.
+3. Write `useDebounce(value, 400)` and use it so filtering runs on the debounced query, not on every keystroke.
+4. Filter users during render by name (derive — do not store the filtered list in state).
+5. Refactor the stopwatch from this lesson into its own component using a ref for the interval id, and make sure the interval is cleared on unmount.
+6. Convert a set of checkbox filters (role, city) to a `useReducer` with actions `toggled` and `cleared`.
+7. Bonus: add `useLocalStorage` for the query so the search survives a reload, and verify with React DevTools that typing does not cause a fetch per keystroke.
+</Exercise>
+
+## Summary
+
+- Hooks follow two rules: top level only, and only inside components or other hooks.
+- `useState` holds snapshots; update immutably and use updater functions when the next value depends on the previous one.
+- `useEffect` synchronizes with external systems; the dependency array controls re-runs and cleanup prevents leaks and races.
+- Do not put derived values in effects — compute them during render.
+- `useRef` holds mutable values and DOM nodes without causing re-renders.
+- `useMemo` and `useCallback` cache values and function identities; reach for them when measurement shows a benefit.
+- `useReducer` centralizes complex state transitions into a pure, testable function.
+- Custom hooks share stateful logic between components — the real payoff of the hooks model.
+
+Next: React Router, so your single-page app gets real URLs, nested layouts, and protected pages.

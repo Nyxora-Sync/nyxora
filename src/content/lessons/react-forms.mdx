@@ -1,0 +1,478 @@
+Forms are where users create data, and data problems always end up back at the form. This lesson covers the whole pipeline: capturing input reliably, validating it properly with **Zod**, submitting it to your Express API, and managing the **server state** around it with **TanStack Query**.
+
+By the end you will have the pattern used by production MERN apps: React Hook Form for input, Zod for validation, and TanStack Query for loading, caching, and mutating server data.
+
+## Controlled inputs
+
+A controlled input takes its value from React state and reports every change back:
+
+```jsx
+import { useState } from 'react'
+
+export default function SignupForm() {
+  const [form, setForm] = useState({ email: '', password: '' })
+
+  function handleChange(event) {
+    const { name, value } = event.target
+    setForm((current) => ({ ...current, [name]: value }))
+  }
+
+  function handleSubmit(event) {
+    event.preventDefault()
+    console.log(form)
+  }
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <label htmlFor="email">Email</label>
+      <input
+        id="email"
+        name="email"
+        type="email"
+        value={form.email}
+        onChange={handleChange}
+      />
+
+      <label htmlFor="password">Password</label>
+      <input
+        id="password"
+        name="password"
+        type="password"
+        value={form.password}
+        onChange={handleChange}
+      />
+
+      <button type="submit">Sign up</button>
+    </form>
+  )
+}
+```
+
+The `name` attribute plus a computed key (`[name]: value`) keeps one handler for every field. Other control types follow the same idea:
+
+```jsx
+// Checkbox — note: checked, not value
+<input
+  type="checkbox"
+  name="terms"
+  checked={form.terms}
+  onChange={(event) => setForm((f) => ({ ...f, terms: event.target.checked }))}
+/>
+
+// Select
+<select name="role" value={form.role} onChange={handleChange}>
+  <option value="user">User</option>
+  <option value="author">Author</option>
+</select>
+
+// Radio group
+<label><input type="radio" name="plan" value="free"
+  checked={form.plan === 'free'} onChange={handleChange} /> Free</label>
+<label><input type="radio" name="plan" value="pro"
+  checked={form.plan === 'pro'} onChange={handleChange} /> Pro</label>
+```
+
+<Callout type="warning" title="value without onChange is read-only">
+  React prints a console warning and the input stops accepting typing. If you want an uncontrolled field with just an initial value, use `defaultValue` instead.
+</Callout>
+
+## Uncontrolled inputs
+
+An uncontrolled input keeps its own DOM state; you read it through a ref when you need it:
+
+```jsx
+import { useRef } from 'react'
+
+function QuickSearch({ onSearch }) {
+  const inputRef = useRef(null)
+
+  function submit(event) {
+    event.preventDefault()
+    onSearch(inputRef.current.value)
+  }
+
+  return (
+    <form onSubmit={submit}>
+      <input ref={inputRef} defaultValue="" placeholder="Search…" />
+      <button>Go</button>
+    </form>
+  )
+}
+```
+
+Uncontrolled is required for **file inputs** (`<input type="file">` cannot be controlled) and is fine for simple one-shot reads. But it cannot drive live UI — disabled buttons, character counters, or instant validation — and programmatic resets are awkward. When a form has real behavior, go controlled or use a library.
+
+## Validation done right: Zod
+
+Hand-rolling validation means an `errors` object, a validate function per field, and subtle drift between client and server rules. A schema fixes all three: define the shape once, parse anywhere.
+
+```bash
+npm install zod
+```
+
+```js
+// schemas/signup.js
+import { z } from 'zod'
+
+export const signupSchema = z
+  .object({
+    email: z.email('Enter a valid email address'),
+    password: z
+      .string()
+      .min(8, 'At least 8 characters')
+      .max(72, 'Too long'),
+    confirmPassword: z.string(),
+    terms: z.literal(true, {
+      errorMap: () => ({ message: 'You must accept the terms' }),
+    }),
+  })
+  .refine((data) => data.password === data.confirmPassword, {
+    message: 'Passwords do not match',
+    path: ['confirmPassword'], // attach the error to this field
+  })
+```
+
+```js
+const result = signupSchema.safeParse(form)
+if (!result.success) {
+  // result.error.issues: [{ path, message }, ...]
+} else {
+  // result.data is typed and safe
+}
+```
+
+Zod runs in the browser for fast feedback and in your Express route for the real guarantee. One schema, two runtimes — that is the consistency win.
+
+## React Hook Form: less state, fewer re-renders
+
+A controlled form re-renders on every keystroke for every field. [React Hook Form](https://react-hook-form.com/) (RHF) keeps inputs **uncontrolled internally** — it registers them, collects values at submit time, and only re-renders for errors and status changes. For anything beyond a toy form it is the better default.
+
+```bash
+npm install react-hook-form @hookform/resolvers
+```
+
+```jsx
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { signupSchema } from './schemas/signup.js'
+
+export default function SignupForm() {
+  const {
+    register,
+    handleSubmit,
+    reset,
+    setError,
+    formState: { errors, isSubmitting },
+  } = useForm({
+    resolver: zodResolver(signupSchema),
+    defaultValues: { email: '', password: '', confirmPassword: '', terms: false },
+  })
+
+  async function onSubmit(data) {
+    try {
+      const response = await fetch('/api/v1/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: data.email, password: data.password }),
+      })
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => null)
+        throw new Error(body?.error?.message ?? 'Registration failed')
+      }
+
+      reset()
+    } catch (error) {
+      // Server-side errors land on the right field
+      if (error.message.includes('email')) {
+        setError('email', { message: error.message })
+      } else {
+        setError('root', { message: error.message })
+      }
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit(onSubmit)} noValidate>
+      <div>
+        <label htmlFor="email">Email</label>
+        <input id="email" type="email" {...register('email')} />
+        {errors.email && <p role="alert">{errors.email.message}</p>}
+      </div>
+
+      <div>
+        <label htmlFor="password">Password</label>
+        <input id="password" type="password" {...register('password')} />
+        {errors.password && <p role="alert">{errors.password.message}</p>}
+      </div>
+
+      <div>
+        <label htmlFor="confirmPassword">Confirm password</label>
+        <input id="confirmPassword" type="password" {...register('confirmPassword')} />
+        {errors.confirmPassword && <p role="alert">{errors.confirmPassword.message}</p>}
+      </div>
+
+      <label>
+        <input type="checkbox" {...register('terms')} /> I accept the terms
+      </label>
+      {errors.terms && <p role="alert">{errors.terms.message}</p>}
+
+      {errors.root && <p role="alert">{errors.root.message}</p>}
+
+      <button type="submit" disabled={isSubmitting}>
+        {isSubmitting ? 'Creating account…' : 'Sign up'}
+      </button>
+    </form>
+  )
+}
+```
+
+The pieces worth memorizing:
+
+- `register('field')` wires an input to the form; spread it onto the element.
+- `handleSubmit(onSubmit)` runs validation first, and only calls your handler with **valid, parsed data**.
+- `formState.errors` drives inline messages; `isSubmitting` drives the button state.
+- `setError('field', ...)` maps server errors back onto fields.
+- `reset()` clears the form after success.
+
+<KeyPoint>
+Validation is a loop, not a gate: schema → errors on fields → fix → resubmit. Server rules must exist even when the client validates, because the client can be bypassed.
+</KeyPoint>
+
+## Server state with TanStack Query
+
+Fetching inside `useEffect` works until you need caching, deduplication, refetching, and mutations that update related lists — then it becomes a pile of state flags. [TanStack Query](https://tanstack.com/query/latest) manages the whole lifecycle.
+
+```bash
+npm install @tanstack/react-query
+```
+
+Set up the client once:
+
+```jsx
+// main.jsx
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,      // data is fresh for 30s; no refetch on quick remounts
+      retry: 1,
+    },
+  },
+})
+
+createRoot(document.getElementById('root')).render(
+  <QueryClientProvider client={queryClient}>
+    <App />
+  </QueryClientProvider>
+)
+```
+
+### Reading with useQuery
+
+```jsx
+import { useQuery } from '@tanstack/react-query'
+
+function usePosts() {
+  return useQuery({
+    queryKey: ['posts'],
+    queryFn: async () => {
+      const response = await fetch('https://jsonplaceholder.typicode.com/posts')
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      return response.json()
+    },
+  })
+}
+
+export default function Posts() {
+  const { data: posts, isPending, isError, error, refetch } = usePosts()
+
+  if (isPending) return <p>Loading posts…</p>
+  if (isError) {
+    return (
+      <p>
+        Could not load posts: {error.message}{' '}
+        <button onClick={() => refetch()}>Retry</button>
+      </p>
+    )
+  }
+
+  return (
+    <ul>
+      {posts.slice(0, 10).map((post) => (
+        <li key={post.id}>{post.title}</li>
+      ))}
+    </ul>
+  )
+}
+```
+
+- `queryKey` is the cache address. `['posts']` for the list, `['posts', id]` for one item.
+- `isPending` means no data yet; `isFetching` means a background refetch is in flight (show a subtle spinner, keep the old data).
+- Components that call the same query share one cache entry — mount the list three times and it fetches once.
+
+### Writing with useMutation
+
+```jsx
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+
+function useCreatePost() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (newPost) => {
+      const response = await fetch('https://jsonplaceholder.typicode.com/posts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newPost),
+      })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      return response.json()
+    },
+    onSuccess: () => {
+      // The list is now stale — refetch it
+      queryClient.invalidateQueries({ queryKey: ['posts'] })
+    },
+  })
+}
+```
+
+```jsx
+function NewPostForm() {
+  const createPost = useCreatePost()
+  const { register, handleSubmit, reset, formState: { errors } } = useForm({
+    defaultValues: { title: '', body: '' },
+  })
+
+  async function onSubmit(values) {
+    await createPost.mutateAsync(values)
+    reset()
+  }
+
+  if (createPost.isError) {
+    // createPost.error.message
+  }
+
+  return (
+    <form onSubmit={handleSubmit(onSubmit)}>
+      <input placeholder="Title" {...register('title', { required: 'Title is required' })} />
+      {errors.title && <p role="alert">{errors.title.message}</p>}
+      <textarea placeholder="Body" {...register('body')} />
+      <button disabled={createPost.isPending}>
+        {createPost.isPending ? 'Publishing…' : 'Publish'}
+      </button>
+    </form>
+  )
+}
+```
+
+`invalidateQueries` marks cached data stale and refetches active queries — the whole mutation story in one line. When latency hurts, `onMutate` enables **optimistic updates**: write the expected result into the cache immediately, roll back in `onError`. Add it after the simple version works.
+
+<Callout type="info" title="What TanStack Query replaced">
+  The naive version of that form is an effect with `AbortController`, `loading`/`error`/`data` state, manual refetch after submit, and duplicated logic in every component that needs the list. TanStack Query owns caching, retries, staleness, deduplication, and invalidation so your components own only UI.
+</Callout>
+
+## The full picture
+
+```text
+User types ──▶ React Hook Form (uncontrolled inputs, Zod per keystroke on submit)
+                    │
+                    ▼
+            onSubmit(data) — validated
+                    │
+                    ▼
+            useMutation ──▶ Express API ──▶ MongoDB
+                    │
+                    ▼
+        invalidateQueries(['posts']) ──▶ useQuery refetches ──▶ UI updates
+```
+
+Every MERN feature you build from here follows this path.
+
+## Try it
+
+<TryIt title="A validated newsletter form" hint="Scaffold a Vite app, install react-hook-form, @hookform/resolvers, and zod, then run this component.">
+```jsx
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { z } from 'zod'
+
+const schema = z.object({
+  email: z.email('Enter a valid email'),
+})
+
+export default function App() {
+  const { register, handleSubmit, reset, formState: { errors, isSubmitting, isSubmitSuccessful } } = useForm({
+    resolver: zodResolver(schema),
+  })
+
+  async function onSubmit(data) {
+    await new Promise((resolve) => setTimeout(resolve, 800)) // pretend API
+    console.log('Subscribed:', data.email)
+    reset()
+  }
+
+  return (
+    <form onSubmit={handleSubmit(onSubmit)} style={{ padding: 24, fontFamily: 'system-ui' }} noValidate>
+      <label htmlFor="email">Email</label>
+      <input id="email" {...register('email')} />
+      {errors.email && <p role="alert" style={{ color: 'crimson' }}>{errors.email.message}</p>}
+      <button disabled={isSubmitting}>{isSubmitting ? 'Subscribing…' : 'Subscribe'}</button>
+      {isSubmitSuccessful && <p>You are on the list.</p>}
+    </form>
+  )
+}
+```
+</TryIt>
+
+## Check your understanding
+
+<Quiz
+  question="Why does React Hook Form re-render less than a fully controlled form?"
+  options={[
+    'It batches state updates internally',
+    'It keeps inputs uncontrolled and subscribes to changes instead of storing every keystroke in state',
+    'It uses useMemo for every field',
+    'It validates only on submit'
+  ]}
+  answer={1}
+  explanation="RHF registers DOM inputs and reads their values when needed (validation and submit), so typing does not set React state and does not re-render the form for every character."
+/>
+
+<Quiz
+  question="After a successful POST that creates a post, what makes the list component show the new post with TanStack Query?"
+  options={[
+    'Calling window.location.reload()',
+    'Copying the new post into useState',
+    'Invalidating the posts query, which refetches the list',
+    'Setting staleTime to zero permanently'
+  ]}
+  answer={2}
+  explanation="The mutation's onSuccess invalidates queryKey ['posts']; every active useQuery with that key refetches, and the list re-renders with fresh server data — no manual state copying."
+/>
+
+<Exercise title="A create-and-list feature with validation" difficulty="medium">
+Build a small posts feature end to end against JSONPlaceholder. Zero page reloads.
+
+1. Scaffold a Vite app; install `react-hook-form`, `@hookform/resolvers`, `zod`, and `@tanstack/react-query`; set up `QueryClientProvider` with `staleTime: 30_000`.
+2. Write a Zod schema for a post: `title` (3–120 chars), `body` (minimum 20 chars), `tags` (array of strings, at most 5). Add a Zod refine that rejects titles containing only whitespace.
+3. Build `NewPostForm` with React Hook Form and `zodResolver`: inline errors on every field, a disabled submit while pending, and a reset after success.
+4. Implement `usePosts()` with `useQuery` and `['posts']`; add a distinct loading state (`isPending`), a background refetch indicator (`isFetching`), an error state with a Retry button, and render the first 20 posts.
+5. Implement `useCreatePost()` with `useMutation`; on success, invalidate `['posts']` and show a success message.
+6. Add a search input above the list that filters posts by title during render. Notice that typing does not refetch — the cache is doing its job.
+7. Add a "Delete" button per post using `useMutation` + `invalidateQueries`, and handle its pending state per row.
+8. Bonus: add an optimistic delete — remove the post from the cache in `onMutate`, snapshot the previous value, and roll back in `onError`.
+9. Bonus: open React Query DevTools and watch cache states (`fresh`, `stale`, `fetching`) as you interact.
+</Exercise>
+
+## Summary
+
+- Controlled inputs store every keystroke in state; uncontrolled inputs keep DOM state and are read via refs or at submit time.
+- Zod schemas define validation once and parse in both the browser and Express; `safeParse` never throws.
+- React Hook Form keeps inputs uncontrolled, re-renders only for errors and status, and pairs with `zodResolver` in one line.
+- Map server errors back to fields with `setError`; disable submit while `isSubmitting`.
+- TanStack Query owns caching, staleness, retries, and deduplication for reads via `useQuery` and `queryKey`.
+- `useMutation` plus `invalidateQueries` updates the UI after writes without copying state — optimistic updates are an enhancement, not the foundation.
+
+Next: React performance — profiling, memoization, virtualized lists, and code splitting for apps that stay fast as they grow.

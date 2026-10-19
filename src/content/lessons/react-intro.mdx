@@ -1,0 +1,331 @@
+In the DOM lesson you built a counter by hand: select elements, create nodes, attach listeners, and remember to update every piece of the UI when state changed. It worked, but the responsibility for keeping the screen in sync with your data was entirely yours.
+
+**React** removes that responsibility. You describe what the UI should look like for a given state, and React updates the DOM when state changes. That inversion — thinking in descriptions instead of instructions — is the whole idea, and it is why MERN apps use React on the frontend.
+
+## Declarative UI
+
+Imperative code says *how*: create an element, append it, set its text. Declarative code says *what*: the screen shows a count. When the count changes, React figures out the minimal DOM updates.
+
+```jsx
+function Counter() {
+  const [count, setCount] = useState(0)
+
+  return (
+    <button onClick={() => setCount(count + 1)}>
+      Clicked {count} times
+    </button>
+  )
+}
+```
+
+There is no `querySelector`, no `appendChild`, no manual re-rendering. You declared the output for any value of `count`, and React does the rest.
+
+## Create a project with Vite
+
+```bash
+npm create vite@latest recipe-book -- --template react
+cd recipe-book
+npm install
+npm run dev
+```
+
+Vite gives you a dev server with instant refresh and a production build. The files that matter:
+
+```text
+recipe-book/
+├── index.html          # single HTML file; contains <div id="root">
+└── src/
+    ├── main.jsx        # mounts React into #root
+    ├── App.jsx         # your root component
+    └── index.css
+```
+
+```jsx
+// src/main.jsx
+import { StrictMode } from 'react'
+import { createRoot } from 'react-dom/client'
+import App from './App.jsx'
+import './index.css'
+
+createRoot(document.getElementById('root')).render(
+  <StrictMode>
+    <App />
+  </StrictMode>
+)
+```
+
+<Callout type="info" title="StrictMode renders twice in development">
+  In development, StrictMode intentionally runs components and effects twice to surface bugs like missing cleanup. It does not happen in production builds. If you see double logs while learning, that is the reason.
+</Callout>
+
+## JSX
+
+JSX looks like HTML inside JavaScript. It compiles to function calls, and it follows JavaScript rules:
+
+```jsx
+const name = 'Aki'
+const favorite = 'ramen'
+
+const element = (
+  <div className="profile">
+    <h1>{name}</h1>
+    <p>Favorite food: {favorite}</p>
+    <p>2 + 2 = {2 + 2}</p>
+  </div>
+)
+```
+
+Rules that trip up every beginner:
+
+- Curly braces `{ }` switch from markup to JavaScript — variables, expressions, function calls.
+- Attribute names are camelCase: `className` (not `class`), `htmlFor` (not `for`), `onClick` (not `onclick`).
+- A component must return **one** root element. Wrap siblings in a fragment: `<>{/* ... */}</>`.
+- Tags must close: `<img />`, `<br />`, `<input />`.
+- Comments inside JSX use `{/* like this */}`.
+
+## Components and props
+
+A component is a function whose name starts with a capital letter and returns JSX. **Props** are its arguments:
+
+```jsx
+function RecipeCard({ title, minutes, servings = 2, children }) {
+  return (
+    <article className="card">
+      <h3>{title}</h3>
+      <p>{minutes} minutes · serves {servings}</p>
+      {children}
+    </article>
+  )
+}
+
+export default function App() {
+  return (
+    <>
+      <RecipeCard title="Miso soup" minutes={20} />
+      <RecipeCard title="Ramen" minutes={45} servings={4}>
+        <p>My favorite.</p>
+      </RecipeCard>
+    </>
+  )
+}
+```
+
+- Props are read-only. A component must never reassign them — data flows **down**, one way.
+- `servings = 2` sets a default for when the prop is missing.
+- `children` is whatever you put between the opening and closing tags. It is how components wrap other components.
+
+<KeyPoint>
+Props go down, events go up. A child receives data as props and asks its parent for changes by calling a function the parent passed down. Every React pattern is built on this rule.
+</KeyPoint>
+
+## State with useState
+
+Props come from outside; **state** is data a component owns and can change. `useState` returns the current value and a setter:
+
+```jsx
+import { useState } from 'react'
+
+function Counter() {
+  const [count, setCount] = useState(0)
+
+  return (
+    <>
+      <p>Count: {count}</p>
+      <button onClick={() => setCount(count + 1)}>+1</button>
+      <button onClick={() => setCount(0)}>Reset</button>
+    </>
+  )
+}
+```
+
+Three facts that matter:
+
+- Calling a setter schedules a re-render. The function runs again from the top with the new value.
+- State is a **snapshot**. `count` inside the current render never changes; the next render gets the next value.
+- When the new value depends on the old one, use the updater form so rapid updates cannot clobber each other:
+
+```jsx
+<button onClick={() => setCount((c) => c + 1)}>+1</button>
+```
+
+<Callout type="warning" title="Never mutate state directly">
+  `count++` or `items.push(x)` changes the value without telling React, so nothing re-renders. Always create a new value: `setItems([...items, newItem])`, or copy and modify: `setItems(items.filter((item) => item.id !== id))`.
+</Callout>
+
+## Conditional rendering
+
+No special syntax — use JavaScript:
+
+```jsx
+function Status({ error, loading, posts }) {
+  if (loading) return <p>Loading…</p>
+  if (error) return <p>Something went wrong.</p>
+  if (posts.length === 0) return <p>No posts yet.</p>
+
+  return <PostList posts={posts} />
+}
+```
+
+Inside JSX, the two most common patterns are the ternary and the `&&` short-circuit:
+
+```jsx
+{isLoggedIn ? <Profile /> : <LoginButton />}
+{items.length > 0 && <p>{items.length} items</p>}
+```
+
+Be careful with `&&` and numbers: `{count && <Badge />}` renders `0` when count is zero. Use `{count > 0 && <Badge />}`.
+
+## Lists and keys
+
+Render collections with `map`. Each item needs a **key** — a stable, unique identifier that lets React match elements between renders:
+
+```jsx
+function RecipeList({ recipes }) {
+  return (
+    <ul>
+      {recipes.map((recipe) => (
+        <li key={recipe.id}>
+          {recipe.title} — {recipe.minutes} min
+        </li>
+      ))}
+    </ul>
+  )
+}
+```
+
+Use a database id (or `crypto.randomUUID()` for locally created items). The array index is acceptable only for static lists that never reorder, because on reorder React would associate the wrong state with the wrong item.
+
+## Putting it together
+
+A small app with state, props, lists, and conditional rendering:
+
+```jsx
+import { useState } from 'react'
+
+function RecipeCard({ recipe, onDelete }) {
+  return (
+    <li className="card">
+      <h3>{recipe.title}</h3>
+      <p>{recipe.minutes} minutes</p>
+      <button onClick={() => onDelete(recipe.id)}>Remove</button>
+    </li>
+  )
+}
+
+export default function App() {
+  const [recipes, setRecipes] = useState([
+    { id: 1, title: 'Miso soup', minutes: 20 },
+    { id: 2, title: 'Ramen', minutes: 45 },
+  ])
+  const [title, setTitle] = useState('')
+
+  function addRecipe(event) {
+    event.preventDefault()
+    if (!title.trim()) return
+
+    setRecipes((current) => [
+      ...current,
+      { id: crypto.randomUUID(), title: title.trim(), minutes: 30 },
+    ])
+    setTitle('')
+  }
+
+  function deleteRecipe(id) {
+    setRecipes((current) => current.filter((recipe) => recipe.id !== id))
+  }
+
+  return (
+    <main>
+      <h1>Recipe book</h1>
+
+      <form onSubmit={addRecipe}>
+        <input
+          value={title}
+          onChange={(event) => setTitle(event.target.value)}
+          placeholder="Recipe name"
+        />
+        <button>Add</button>
+      </form>
+
+      {recipes.length === 0 ? (
+        <p>No recipes yet. Add your first one.</p>
+      ) : (
+        <ul>
+          {recipes.map((recipe) => (
+            <RecipeCard key={recipe.id} recipe={recipe} onDelete={deleteRecipe} />
+          ))}
+        </ul>
+      )}
+    </main>
+  )
+}
+```
+
+Notice the shape of the data flow: `App` owns the state, passes `recipe` down as a prop, and passes `onDelete` as a callback. The child reports the click upward; the parent decides what happens.
+
+## Try it
+
+<TryIt title="A counter with history" hint="Run npm create vite@latest to scaffold a project, paste this into App.jsx, and save to see hot reload.">
+```jsx
+import { useState } from 'react'
+
+export default function App() {
+  const [count, setCount] = useState(0)
+
+  return (
+    <div style={{ padding: 24, fontFamily: 'system-ui' }}>
+      <h1>{count}</h1>
+      <button onClick={() => setCount((c) => c + 1)}>+1</button>
+      <button onClick={() => setCount((c) => c - 1)}>-1</button>
+      <button onClick={() => setCount(0)}>Reset</button>
+      {count >= 5 && <p>You have clicked quite a lot.</p>}
+    </div>
+  )
+}
+```
+</TryIt>
+
+## Check your understanding
+
+<Quiz
+  question="Which prop name attaches a CSS class in JSX?"
+  options={['class', 'className', 'css', 'styleClass']}
+  answer={1}
+  explanation="JSX uses className because class is a reserved word in JavaScript. Similarly, for becomes htmlFor."
+/>
+
+<Quiz
+  question="A component receives items as a prop and needs to add one. What is the correct approach?"
+  options={[
+    'Mutate the array: items.push(newItem)',
+    'Call a function passed down from the parent, which updates state with a new array',
+    'Set items = [...items, newItem] inside the child',
+    'Re-render the page with window.location.reload()'
+  ]}
+  answer={1}
+  explanation="Props are read-only and mutate silently. The parent owns the state, so the child calls an onAdd callback and the parent updates state with a new array, which triggers the re-render."
+/>
+
+<Exercise title="Build a recipe book" difficulty="easy">
+Create a Vite React app and build a small recipe book. Split it into at least three components in separate files.
+
+1. `App.jsx` owns a `recipes` array in state, each item shaped `{ id, title, minutes, vegetarian }`, seeded with three recipes.
+2. `RecipeCard.jsx` receives one recipe as a prop and renders its title, minutes, and a "vegetarian" badge only when `vegetarian` is true.
+3. `RecipeList.jsx` receives the array and renders a card per recipe with a correct stable `key`; it renders a friendly empty message when the array is empty.
+4. Add a form that appends a new recipe using the updater form of the setter and `crypto.randomUUID()` for the id. Clear the input after submitting and ignore empty titles.
+5. Add a "Remove" button on each card; verify the correct card disappears by checking the ids.
+6. Add a filter: a checkbox that, when checked, shows only vegetarian recipes (compute the filtered list during render; do not create separate state for it).
+7. Open React DevTools and watch the component tree update as you add and remove recipes.
+</Exercise>
+
+## Summary
+
+- React is declarative: you describe the UI for a given state and React updates the DOM.
+- Vite scaffolds the project; `main.jsx` mounts the root component into `#root`.
+- JSX is JavaScript: curly braces for expressions, camelCase attributes, one root element, closed tags.
+- Components are functions with capitalized names; props flow down and are read-only.
+- `useState` returns a value and a setter; state updates are immutable and trigger re-renders.
+- Conditional rendering uses plain JavaScript; lists use `map` with stable keys.
+- Data flows down as props, events flow up through callback props.
+
+Next: hooks in depth — effects, refs, reducers, and custom hooks that turn component logic into reusable pieces.

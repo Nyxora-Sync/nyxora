@@ -1,0 +1,329 @@
+React is fast by default. Most apps never need performance work. But when it is needed — a list that lags while typing, a dashboard that feels sticky, a first load that takes seconds — the fixes fall into a few well-defined categories, and guessing wastes hours.
+
+This lesson is about measuring first, then applying the right remedy: `memo`, `useMemo`/`useCallback`, structural changes, virtualized lists, code splitting, and the concurrent features that keep input responsive.
+
+## Measure before you optimize
+
+Two tools tell you the truth:
+
+1. **React DevTools Profiler** — record an interaction, then read the flame graph. Gray components did not re-render; yellow and orange are slow ones. The **Ranked** view sorts by time spent, and clicking a component shows *why* it rendered (props, state, or parent).
+2. **Browser Performance panel** — for non-React costs: layout thrash, long tasks, images.
+
+<Callout type="info" title="React Compiler changes the calculus, not the principles">
+  React 19's optional compiler can auto-memoize components, reducing the need for hand-written `memo` and `useMemo`. It is adoption-gated, so most codebases still optimize by hand — and the mental model below (renders, identity, reconciliation) is what makes either approach work.
+</Callout>
+
+<KeyPoint>
+A slow app is a symptom. The Profiler tells you which component and which interaction. Fix that component; do not sprinkle memoization everywhere and hope.
+</KeyPoint>
+
+## How React decides to re-render
+
+- A component re-renders when **its own state** changes, when **its parent re-renders**, or when a **context value it consumes** changes.
+- When a parent re-renders, React re-renders all children **unless** they are wrapped in `memo` and receive the same props.
+- Re-rendering is not the same as updating the DOM: React reconciles and touches the DOM only where output changed. The cost you are optimizing is often render work — component functions, hooks, objects — not DOM mutations.
+
+Two consequences drive every optimization:
+
+- **Stable props**: `memo` helps only if props do not get a new identity every render. `{ style={{ color: 'red' }} }` is a new object each time.
+- **State placement**: state living high in the tree re-renders everything below it. Moving it down is often the single best fix.
+
+## React.memo
+
+`memo` skips re-rendering a component when its props are shallow-equal:
+
+```jsx
+import { memo } from 'react'
+
+const Row = memo(function Row({ item, onSelect }) {
+  console.log('render', item.id)
+  return (
+    <li onClick={() => onSelect(item.id)}>
+      {item.name}
+    </li>
+  )
+})
+```
+
+It pays off when:
+
+- The component is expensive (large subtree, complex markup, many hooks).
+- It re-renders often with the same props.
+- Its props are stable primitives, or memoized objects/functions.
+
+It does **nothing** when props change on every render — a new inline callback or object defeats it. That is what `useCallback` and `useMemo` are for:
+
+```jsx
+const handleSelect = useCallback((id) => setSelectedId(id), [])
+const sorted = useMemo(() => [...items].sort(byName), [items])
+```
+
+<Callout type="warning" title="Do not wrap everything in memo">
+  Every `memo` adds a props comparison on every render and another thing to keep correct. Apply it where the Profiler shows wasted renders of an expensive component — typically list rows, chart components, and heavy editors. A custom comparator (`memo(Component, areEqual)`) is a last resort.
+</Callout>
+
+## Structural fixes beat memoization
+
+Before reaching for hooks, restructure:
+
+**Colocate state.** A search box whose query state lives in the page re-renders the entire page per keystroke. Move the state into the search component, and only it re-renders:
+
+```jsx
+// Before: query lives in <Page />; typing re-renders the whole page tree
+// After: query lives in <SearchBox />; typing re-renders one small component
+function SearchBox({ onSearch }) {
+  const [query, setQuery] = useState('')
+  // ...
+}
+```
+
+**Push components through as children.** Passing a subtree as `children` keeps it from re-rendering when the wrapper's state changes, because the element identity is created by the parent that owns it:
+
+```jsx
+function Layout({ children }) {
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  // toggling sidebarOpen re-renders Layout, but `children` is the same element
+  return (
+    <div>
+      <button onClick={() => setSidebarOpen((open) => !open)}>Menu</button>
+      {children}
+    </div>
+  )
+}
+```
+
+**Split lists into row components** wrapped in `memo`, and never recreate arrays in render without `useMemo` when they feed memoized children.
+
+## Virtualize long lists
+
+Rendering 10,000 rows is slow no matter how well each row is memoized, because the DOM itself pays. **Virtualization** renders only the rows in (and near) the viewport. The virtualizer reports a large scroll area and absolutely positions the visible window.
+
+```bash
+npm install @tanstack/react-virtual
+```
+
+```jsx
+import { useRef } from 'react'
+import { useVirtualizer } from '@tanstack/react-virtual'
+
+export function VirtualList({ items }) {
+  const parentRef = useRef(null)
+
+  const virtualizer = useVirtualizer({
+    count: items.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 44, // assumed row height in px
+    overscan: 8,            // render a few rows beyond the viewport
+  })
+
+  return (
+    <div ref={parentRef} style={{ height: 480, overflowY: 'auto' }}>
+      <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
+        {virtualizer.getVirtualItems().map((row) => (
+          <div
+            key={row.key}
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              transform: `translateY(${row.start}px)`,
+            }}
+          >
+            {items[row.index].name}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+```
+
+[react-window](https://github.com/bvaughn/react-window) offers a simpler fixed-size API. Whichever you choose, virtualize when lists pass a few hundred rows — log viewers, tables, chat history, autocomplete results.
+
+## Split code with lazy and Suspense
+
+A fast render means nothing if the bundle takes eight seconds to download. Split routes and heavy features so users load only what they need:
+
+```jsx
+import { lazy, Suspense } from 'react'
+import { Routes, Route } from 'react-router'
+
+const Home = lazy(() => import('./pages/Home.jsx'))
+const Dashboard = lazy(() => import('./pages/Dashboard.jsx'))
+const ReportEditor = lazy(() => import('./features/report/ReportEditor.jsx'))
+
+export default function App() {
+  return (
+    <Suspense fallback={<p>Loading…</p>}>
+      <Routes>
+        <Route path="/" element={<Home />} />
+        <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/reports/new" element={<ReportEditor />} />
+      </Routes>
+    </Suspense>
+  )
+}
+```
+
+- `lazy` requires a **default export** from the imported module.
+- Each dynamic import becomes its own chunk, fetched on first navigation.
+- Put the `Suspense` boundary so the fallback does not replace the whole page if you want to keep chrome visible; nested boundaries allow finer control.
+- Start with **route-level** splitting, then split heavyweight widgets (chart libraries, rich text editors) that are not on the critical path.
+
+<Callout type="tip" title="Preload on intent">
+  Fetch the chunk when the user shows intent — hover or focus on a link — with an import promise cached in a module variable, and the lazy component will render instantly on click. Libraries like React Router's `lazy` route option and framework prefetching do this for you.
+</Callout>
+
+## Keep typing smooth with concurrent features
+
+When a heavy list filters on every keystroke, the input itself starts to lag because React renders the expensive work at the same priority. `useDeferredValue` lets the slow part lag behind the fast part:
+
+```jsx
+import { useDeferredValue, useMemo, useState } from 'react'
+
+export function SearchableList({ items }) {
+  const [query, setQuery] = useState('')
+  const deferredQuery = useDeferredValue(query) // lags one render behind, by design
+
+  const visible = useMemo(
+    () =>
+      items.filter((item) =>
+        item.name.toLowerCase().includes(deferredQuery.toLowerCase())
+      ),
+    [items, deferredQuery]
+  )
+
+  const isStale = query !== deferredQuery
+
+  return (
+    <section>
+      <input value={query} onChange={(event) => setQuery(event.target.value)} />
+      <ul style={{ opacity: isStale ? 0.6 : 1 }}>
+        {visible.map((item) => (
+          <li key={item.id}>{item.name}</li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+```
+
+The input updates immediately; the list renders at a lower priority with the previous query until React has time. `startTransition` does the same for state updates you trigger programmatically. Both are cheaper and more predictable than hand-rolled debouncing for **rendering** work (debouncing still wins for **network** requests).
+
+## The optimization checklist
+
+Work top to bottom; stop when the Profiler says the problem is gone.
+
+| Symptom | First move |
+|---------|-----------|
+| Input lags while a list filters | Colocate input state, then `useDeferredValue` |
+| Whole page re-renders on a small change | Move state down; pass children through; split components |
+| Heavy child re-renders with unchanged props | `memo` + stable props (`useCallback`/`useMemo`) |
+| 10,000-row list is slow to scroll | Virtualize |
+| Second and later pages load slowly | Route-level code splitting with `lazy` + `Suspense` |
+| Everything feels slow on load | Profile the bundle (`npm run build` output), split at routes, check images |
+
+## Try it
+
+<TryIt title="Memo vs no memo, measured" hint="Scaffold a Vite app, run this component, then open React DevTools Profiler and type in the input. Watch how often SlowRow renders with and without memo.">
+```jsx
+import { memo, useState } from 'react'
+
+function SlowRow({ label }) {
+  // Fake heavy work — stands in for an expensive chart or editor
+  const started = performance.now()
+  while (performance.now() - started < 2) {}
+  return <li>{label}</li>
+}
+
+const MemoRow = memo(SlowRow)
+
+export default function App() {
+  const [query, setQuery] = useState('')
+  const [memoOn, setMemoOn] = useState(true)
+
+  const labels = Array.from({ length: 200 }, (_, i) => `Row ${i}`)
+
+  return (
+    <div style={{ padding: 24, fontFamily: 'system-ui' }}>
+      <input
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder="Type here — watch the profiler"
+      />
+      <label style={{ marginLeft: 8 }}>
+        <input
+          type="checkbox"
+          checked={memoOn}
+          onChange={(e) => setMemoOn(e.target.checked)}
+        />{' '}
+        memo on
+      </label>
+
+      <ul>
+        {labels.map((label) =>
+          memoOn ? (
+            <MemoRow key={label} label={label} />
+          ) : (
+            <SlowRow key={label} label={label} />
+          )
+        )}
+      </ul>
+    </div>
+  )
+}
+```
+</TryIt>
+
+## Check your understanding
+
+<Quiz
+  question="A child wrapped in React.memo still re-renders on every keystroke of the parent. What is the most likely cause?"
+  options={[
+    'memo does not work with function components',
+    'The parent passes a new object, array, or function as a prop on every render',
+    'The child has hooks inside',
+    'The parent is not wrapped in memo'
+  ]}
+  answer={1}
+  explanation="memo compares props shallowly. A fresh object literal, inline arrow function, or new array breaks the comparison every render, so memo never sees equal props — fix it with useMemo/useCallback or move the value out of render."
+/>
+
+<Quiz
+  question="When does code splitting with React.lazy actually help load time?"
+  options={[
+    'Always, for every component',
+    'When heavy code is deferred out of the initial bundle and fetched only when the user reaches it',
+    'Only in development',
+    'When the component has no state'
+  ]}
+  answer={1}
+  explanation="Splitting at routes and heavy widgets keeps the first payload small; the chunk downloads on demand and is cached afterward. Splitting tiny components adds requests without real savings."
+/>
+
+<Exercise title="Optimize a deliberately slow app" difficulty="hard">
+Build the slow app first, measure it, then fix it in observable steps. Keep a table of Profiler timings before and after each step.
+
+1. **Build it:** a page with an input and a list of 5,000 items (`{ id, name, price }`, generated once). Every keystroke filters by name, renders all matches, and each row renders a fake-expensive block (a `while` loop of ~1 ms, as in the TryIt). Also render a counter button elsewhere on the page that increments a value shown in the header.
+2. **Measure.** Record the interaction time and which components re-render on each keystroke using React DevTools Profiler. Note that the header counter re-renders when you type, and every one of the 5,000 rows re-renders even when the filtered list is unchanged.
+3. **Colocate state.** Move the query state into the search component so typing no longer re-renders the header or the rest of the page. Measure again.
+4. **Use `useDeferredValue`** for the filtered list so typing stays responsive; show a subtle opacity change while the list is stale.
+5. **Memoize rows.** Split a `Row` component, wrap it in `memo`, and pass stable props. Confirm with the Profiler that unchanged rows no longer render.
+6. **Virtualize.** Install `@tanstack/react-virtual` (or `react-window`) and render only visible rows. Record memory usage in the browser Task Manager before and after.
+7. **Split code.** Move a heavy `RevenueChart` component (import any chart code, or a big fake module) behind `React.lazy` + `Suspense`, loaded when a tab is opened. Run `npm run build` and compare the initial bundle size.
+8. **Write it down.** In your README, list each change with the before/after Profiler numbers, and one sentence on why it helped — that record is what interviewers and teammates actually want to see.
+</Exercise>
+
+## Summary
+
+- Profile first with React DevTools; fix the component the profiler points at, not everything you can.
+- Re-renders happen on state change, parent re-render, or context change; bail out of them selectively and deliberately.
+- `React.memo` skips renders for unchanged props — only useful when props are stable.
+- `useMemo` caches values; `useCallback` caches function identities; both exist to support memo children and effect dependencies, not as decoration.
+- Structural fixes — colocating state, passing children through, splitting components — are often the highest-leverage change.
+- Virtualize lists past a few hundred rows; memoize rows and use stable keys.
+- Split code at routes and heavy widgets with `React.lazy` + `Suspense`.
+- `useDeferredValue` / `startTransition` keep input responsive while expensive rendering catches up.
+
+The React module is complete. Next module: Full Stack Mastery — architecture, connecting the frontend to your own API, real-time features, uploads, deployment, and a capstone that puts all of it together.
