@@ -1,0 +1,354 @@
+As soon as your app has users, it has questions: how many orders per month? Which products sell best? What is the average rating per genre? You could load every document into Node and compute in JavaScript — and your database would hate you for it.
+
+The **aggregation pipeline** makes MongoDB do the work. Documents flow through stages, each transforming the stream, like shell pipes. It is the most powerful feature of MongoDB and the one that separates people who use MongoDB from people who understand it.
+
+## The mental model
+
+```text
+orders  ─▶  $match  ─▶  $unwind  ─▶  $group  ─▶  $sort  ─▶  $limit  ─▶  results
+           filter      flatten     summarize   order     cut
+```
+
+Each stage takes documents in, produces documents out. Stages are composable, and where you put a stage matters — a filter early means less work for everything after it.
+
+## A sample dataset
+
+```js
+db.orders.insertMany([
+  {
+    customer: 'aki@example.com',
+    status: 'paid',
+    createdAt: ISODate('2026-01-15'),
+    items: [
+      { productId: 'keyboard', price: 80, qty: 1 },
+      { productId: 'cable', price: 12, qty: 2 }
+    ]
+  },
+  {
+    customer: 'mina@example.com',
+    status: 'paid',
+    createdAt: ISODate('2026-02-03'),
+    items: [{ productId: 'monitor', price: 240, qty: 1 }]
+  },
+  {
+    customer: 'aki@example.com',
+    status: 'refunded',
+    createdAt: ISODate('2026-02-20'),
+    items: [{ productId: 'cable', price: 12, qty: 1 }]
+  }
+])
+```
+
+## The stages you will use most
+
+### $match — filter
+
+Same syntax as `find`. Put it first, always, so indexes can be used:
+
+```js
+{ $match: { status: 'paid' } }
+{ $match: { createdAt: { $gte: ISODate('2026-01-01') } } }
+```
+
+### $project — shape the output
+
+Include, exclude, rename, or compute fields:
+
+```js
+{
+  $project: {
+    _id: 0,
+    customer: 1,
+    month: { $month: '$createdAt' },
+    itemCount: { $size: '$items' }
+  }
+}
+```
+
+### $addFields and $unset — modify the stream
+
+```js
+{ $addFields: { year: { $year: '$createdAt' } } }
+{ $unset: 'internalNotes' }
+```
+
+### $sort, $skip, $limit — order and page
+
+```js
+{ $sort: { createdAt: -1 } }
+{ $skip: 20 }
+{ $limit: 10 }
+```
+
+### $unwind — flatten an array
+
+One document with three items becomes three documents:
+
+```js
+{ $unwind: '$items' }
+```
+
+This is the stage that makes per-product analysis possible.
+
+### $group — summarize
+
+`_id` is the grouping key; accumulators compute values per group:
+
+```js
+{
+  $group: {
+    _id: '$customer',
+    orderCount: { $sum: 1 },
+    totalSpent: { $sum: '$total' },
+    firstOrder: { $min: '$createdAt' },
+    lastOrder: { $max: '$createdAt' }
+  }
+}
+```
+
+| Accumulator | Result |
+|-------------|--------|
+| `$sum` | Total (of a field or `1` for counting) |
+| `$avg` | Mean value |
+| `$min` / `$max` | Extremes |
+| `$push` | Array of every value in the group |
+| `$addToSet` | Array of unique values |
+| `$first` / `$last` | Value from the first/last document (use with `$sort`) |
+
+### $count — a shortcut for totals
+
+```js
+{ $count: 'totalOrders' }
+```
+
+## A complete pipeline
+
+Top products by revenue, with their names attached:
+
+```js
+db.orders.aggregate([
+  // 1. Only paid orders, and only recent ones
+  { $match: { status: 'paid', createdAt: { $gte: ISODate('2026-01-01') } } },
+
+  // 2. One document per line item
+  { $unwind: '$items' },
+
+  // 3. Group by product, compute revenue
+  {
+    $group: {
+      _id: '$items.productId',
+      revenue: { $sum: { $multiply: ['$items.price', '$items.qty'] } },
+      units: { $sum: '$items.qty' }
+    }
+  },
+
+  // 4. Biggest first, top 5
+  { $sort: { revenue: -1 } },
+  { $limit: 5 },
+
+  // 5. Join product details
+  {
+    $lookup: {
+      from: 'products',
+      localField: '_id',
+      foreignField: '_id',
+      as: 'product'
+    }
+  },
+  { $unwind: '$product' },
+
+  // 6. Final shape
+  {
+    $project: {
+      _id: 0,
+      product: '$product.name',
+      revenue: 1,
+      units: 1
+    }
+  }
+])
+```
+
+Read it as a sentence: *paid orders → per line item → summed per product → sorted → top five → joined to product names → projected.* Each stage does one thing.
+
+<KeyPoint>
+If you can describe a report as a sequence of “filter, break apart, group, sort, join”, you can write it as an aggregation. Translate the sentence stage by stage.
+</KeyPoint>
+
+## $lookup — the join
+
+`$lookup` pulls documents from another collection:
+
+```js
+{
+  $lookup: {
+    from: 'users',          // actual collection name
+    localField: 'customerId',
+    foreignField: '_id',
+    as: 'customer'
+  }
+}
+```
+
+The result is an **array** (a lookup can match many documents), so most joins are followed by `$unwind: '$customer'`. For complex conditions use the pipeline form of `$lookup`, which supports `let`, `$match`, and limiting returned fields:
+
+```js
+{
+  $lookup: {
+    from: 'users',
+    let: { customerId: '$customerId' },
+    pipeline: [
+      { $match: { $expr: { $eq: ['$_id', '$$customerId'] } } },
+      { $project: { name: 1, email: 1 } }
+    ],
+    as: 'customer'
+  }
+}
+```
+
+## $facet — several reports in one pass
+
+`$facet` runs multiple sub-pipelines over the same input. The classic use is pagination: page data and total count at the same time.
+
+```js
+db.orders.aggregate([
+  { $match: { status: 'paid' } },
+  {
+    $facet: {
+      data: [
+        { $sort: { createdAt: -1 } },
+        { $skip: 0 },
+        { $limit: 10 },
+        { $project: { customer: 1, createdAt: 1 } }
+      ],
+      meta: [{ $count: 'total' }]
+    }
+  }
+])
+```
+
+One query, one pass over the matching documents, both answers.
+
+## Aggregations from Mongoose
+
+`Model.aggregate()` takes the same pipeline. Note that results are **plain objects**, not Mongoose documents — no virtuals, no `.save()`:
+
+```js
+const revenueByMonth = await Order.aggregate([
+  { $match: { status: 'paid' } },
+  {
+    $group: {
+      _id: { $dateToString: { format: '%Y-%m', date: '$createdAt' } },
+      revenue: { $sum: '$total' },
+      orders: { $sum: 1 }
+    }
+  },
+  { $sort: { _id: 1 } }
+])
+```
+
+<Callout type="warning" title="Cast your inputs">
+  Everything from `req.query` is a string. `$match` will happily compare strings to numbers and return nothing. Cast with `Number()`, `new Date()`, or validate with Zod before the pipeline.
+</Callout>
+
+## Performance: indexes and explain
+
+An aggregation is only as fast as the stages that can use an index. Two rules:
+
+1. **`$match` and `$sort` first.** A `$match` at the top can use an index; after `$unwind` it cannot.
+2. **Index what you match and sort on.** `{ status: 1, createdAt: -1 }` supports both the filter and the sort in the pipeline above.
+
+Inspect what MongoDB actually did with `explain`:
+
+```js
+const plan = await Order.aggregate([
+  { $match: { status: 'paid' } },
+  { $sort: { createdAt: -1 } },
+  { $limit: 10 }
+]).explain('executionStats')
+
+console.log(plan.stages?.[0]?.$cursor?.executionStats)
+```
+
+Look for:
+
+- `IXSCAN` (index used) versus `COLLSCAN` (full collection scan — fix the index).
+- `totalDocsExamined` close to `nReturned`. If it examines 100,000 to return 10, the index is wrong.
+- `executionTimeMillis` — compare before and after adding an index.
+
+```js
+// Cover the pipeline's filter + sort
+orderSchema.index({ status: 1, createdAt: -1 })
+```
+
+<Callout type="info" title="Index types at a glance">
+  Single-field, compound (`{ a: 1, b: -1 }`), unique, text (`{ title: 'text' }`), TTL (`{ expiresAt: 1 }, { expireAfterSeconds: 0 }` for sessions and tokens), partial (index only documents matching a filter), and multikey (automatic for arrays). Every index speeds reads and slows writes — add them for real queries, not by habit.
+</Callout>
+
+## Try it
+
+<TryIt title="First aggregation in mongosh" hint="Insert the sample orders above into mongosh, then run this pipeline. Add $unwind and $group yourself to see revenue per product.">
+```js
+db.orders.aggregate([
+  { $match: { status: 'paid' } },
+  {
+    $group: {
+      _id: '$customer',
+      orders: { $sum: 1 }
+    }
+  },
+  { $sort: { orders: -1 } }
+])
+```
+</TryIt>
+
+## Check your understanding
+
+<Quiz
+  question="Why should $match come before $group and $unwind whenever possible?"
+  options={[
+    'It is required by MongoDB',
+    'It reduces the number of documents processed by later stages and can use an index',
+    'It sorts the results automatically',
+    'It prevents duplicate documents'
+  ]}
+  answer={1}
+  explanation="Filtering first means less work for every stage that follows, and only a $match at the start of the pipeline can use an index. The same filter after $unwind runs on many more documents."
+/>
+
+<Quiz
+  question="In a $group stage, what does the _id field represent?"
+  options={[
+    'The document _id from the original collection',
+    'The grouping key — the expression whose values define each group',
+    'A required unique identifier',
+    'The output document count'
+  ]}
+  answer={1}
+  explanation="In $group, _id is the key you group by: a field path, an object of several fields, or an expression like a date format. It is unrelated to the original documents' _id unless you explicitly group by it."
+/>
+
+<Exercise title="Build an order analytics API" difficulty="hard">
+You are the backend developer for a small store. Build aggregation endpoints that answer real business questions. Use an `orders` collection with `customer`, `status`, `total`, `createdAt`, and `items: [{ productId, name, price, qty }]`.
+
+1. **Top products:** an endpoint returning the five products with the highest revenue. Use `$match`, `$unwind`, `$group` with `$multiply`, `$sort`, and `$limit`.
+2. **Monthly revenue:** revenue and order count per month for the last 12 months, using `$match` on a date, `$dateToString` in the `_id`, and `$sort` by month.
+3. **Customer leaderboard:** per customer: order count, total spent, first and last order dates. Sort by total spent.
+4. **Product detail join:** extend the top-products endpoint with a `$lookup` to a `products` collection, then `$project` a clean shape (product name, revenue, units).
+5. **Paginated order list:** one endpoint using `$facet` that returns page `data` and a `meta` object with the total count in a single query.
+6. **Index it:** add `{ status: 1, createdAt: -1 }` and `{ customer: 1 }`. Run each pipeline with `.explain('executionStats')` before and after, and record `totalDocsExamined` and `executionTimeMillis` in your README.
+7. **Cast inputs:** accept `?months=` and `?limit=` from the query string, cast to numbers, and clamp them.
+8. Expose each pipeline through Express routes under `/api/v1/analytics/` and test with curl.
+</Exercise>
+
+## Summary
+
+- The aggregation pipeline transforms documents stage by stage: filter, shape, flatten, group, sort, join.
+- `$match`, `$group`, `$sort`, `$project`, `$unwind`, and `$limit` cover most reports.
+- `$lookup` joins collections; it returns arrays, so `$unwind` usually follows.
+- `$facet` runs multiple sub-pipelines — ideal for paginated data plus a total count.
+- Mongoose `Model.aggregate()` returns plain objects; cast query-string inputs before using them.
+- Put `$match` and `$sort` first and back them with indexes; verify with `explain('executionStats')`.
+- Aim for `IXSCAN`, not `COLLSCAN`, and `totalDocsExamined` close to `nReturned`.
+
+The database module is complete. Next module: React — building the frontend that consumes all of these APIs.

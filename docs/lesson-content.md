@@ -3,7 +3,7 @@
 The current curriculum has **30 unique lessons**. The developer track reuses the
 same lesson IDs as the beginner track, so a lesson is authored once.
 
-**Authored: 14 / 30**
+**Authored: 18 / 30**
 
 ## Web Foundations
 
@@ -27,10 +27,10 @@ same lesson IDs as the beginner track, so a lesson is authored once.
 
 ## MongoDB & Mongoose
 
-- [ ] `mongodb-intro` — MongoDB Fundamentals
-- [ ] `mongoose-schemas` — Mongoose Schemas & Models
-- [ ] `mongoose-relationships` — Data Relationships & Population
-- [ ] `mongodb-aggregation` — Aggregation Pipeline
+- [x] `mongodb-intro` — MongoDB Fundamentals
+- [x] `mongoose-schemas` — Mongoose Schemas & Models
+- [x] `mongoose-relationships` — Data Relationships & Population
+- [x] `mongodb-aggregation` — Aggregation Pipeline
 
 ## React
 

@@ -1,0 +1,342 @@
+MongoDB will happily store `{ year: "banana" }` in a field full of numbers. That flexibility is a feature at the database level and a bug factory at the application level. **Mongoose** is the Object Data Modeling (ODM) library that sits between your Express code and MongoDB, enforcing structure, validation, and relationships.
+
+It is the M in MERN. From this lesson on, every in-memory array you wrote in the backend module gets replaced by a real Mongoose model.
+
+## Connecting
+
+```bash
+npm install mongoose
+```
+
+```js
+// db.js
+import mongoose from 'mongoose'
+
+export async function connectDB(uri = process.env.MONGODB_URI) {
+  mongoose.set('strictQuery', true)
+  await mongoose.connect(uri)
+  console.log('MongoDB connected:', mongoose.connection.name)
+}
+```
+
+```js
+// server.js
+import { connectDB } from './db.js'
+
+await connectDB()
+// ...start Express only after a successful connection
+```
+
+Details worth knowing:
+
+- `mongoose.connect` returns a promise; a rejected connection usually means a wrong URI, an IP not allowed in Atlas, or a bad password.
+- `strictQuery: true` strips unknown fields from queries, avoiding accidental full-collection scans.
+- The default connection has a 30-second server-selection timeout. Fail fast in development with a custom `serverSelectionTimeoutMS` if you prefer.
+- Mongoose buffers model operations until the connection is ready; a slow first request is usually a cold connection.
+
+## Schemas and models
+
+A **schema** declares the shape and rules. A **model** is the compiled, queryable version of that schema:
+
+```js
+import mongoose from 'mongoose'
+
+const movieSchema = new mongoose.Schema(
+  {
+    title: { type: String, required: true, trim: true, maxlength: 200 },
+    year: { type: Number, required: true, min: 1888 },
+    genres: [{ type: String, enum: ['action', 'comedy', 'drama', 'sci-fi', 'animation'] }],
+    rating: { type: Number, min: 0, max: 10, default: 0 },
+    director: {
+      name: { type: String, required: true },
+      country: String,
+    },
+    isPublished: { type: Boolean, default: false },
+    releasedAt: Date,
+  },
+  {
+    timestamps: true, // adds createdAt and updatedAt automatically
+    toJSON: { virtuals: true },
+  }
+)
+
+export const Movie = mongoose.model('Movie', movieSchema)
+```
+
+`mongoose.model('Movie', ...)` creates a collection named **`movies`** — Mongoose pluralizes and lowercases the model name. `createdAt` and `updatedAt` are maintained for you with `timestamps: true`.
+
+### Types and options you will actually use
+
+| Option | Effect |
+|--------|--------|
+| `required` | Rejects missing values on save |
+| `unique: true` | Creates a **unique index** (not a validator — see the callout) |
+| `default` | Value applied when the field is missing |
+| `min` / `max` | Numeric bounds |
+| `minlength` / `maxlength` | String length |
+| `enum` | Allowed values only |
+| `match` | Regex test for strings |
+| `trim`, `lowercase`, `uppercase` | Transform the value before saving |
+| `select: false` | Excludes the field from queries unless explicitly requested |
+
+<Callout type="warning" title="unique is not a validator">
+  `unique: true` builds an index that makes duplicates fail **at write time** with error code `11000`. It does not run during `validate()`, and `findOneAndUpdate` may skip validation entirely unless you pass `runValidators: true`. Handle duplicate-key errors explicitly in your API.
+</Callout>
+
+## CRUD the Mongoose way
+
+```js
+// Create
+const movie = await Movie.create({ title: 'Akira', year: 1988, genres: ['animation'] })
+
+// Read
+const all = await Movie.find().sort('-year').limit(20).lean()
+const sciFi = await Movie.find({ genres: 'sci-fi', rating: { $gte: 8 } })
+const one = await Movie.findById(id)
+const exists = await Movie.exists({ title: 'Akira' })
+
+// Update
+const updated = await Movie.findByIdAndUpdate(
+  id,
+  { $set: { rating: 9.1 } },
+  { new: true, runValidators: true } // return the updated doc; validate the change
+)
+
+// Delete
+const deleted = await Movie.findByIdAndDelete(id)
+```
+
+Three refinements that separate beginner code from production code:
+
+- **`.lean()`** on read-only queries returns plain objects instead of Mongoose documents — faster and lighter. Do not use it when you need virtuals or document methods.
+- **`runValidators: true`** on update operations; otherwise `findByIdAndUpdate` blindly writes whatever it receives.
+- **Never trust route params.** `findById('not-an-id')` throws a `CastError`; catch it and return a 400, not a 500.
+
+```js
+import mongoose from 'mongoose'
+
+if (!mongoose.isValidObjectId(id)) {
+  return res.status(400).json({ error: { code: 'INVALID_ID', message: 'Invalid movie id' } })
+}
+```
+
+## Validation and error handling
+
+Mongoose validation runs on `save()` and `create()` (and on updates when you ask). Failures throw a `ValidationError` with per-field details:
+
+```js
+try {
+  await Movie.create({ title: '', year: 1200 })
+} catch (error) {
+  if (error.name === 'ValidationError') {
+    // error.errors.title.message, error.errors.year.message
+  }
+  if (error.code === 11000) {
+    // duplicate key: error.keyValue
+  }
+  throw error
+}
+```
+
+Map those two cases in Express and let everything else reach your central error handler:
+
+```js
+export function mongoErrorHandler(err, req, res, next) {
+  if (err.name === 'ValidationError') {
+    return res.status(422).json({
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'Invalid data',
+        details: Object.values(err.errors).map((e) => ({
+          field: e.path,
+          message: e.message,
+        })),
+      },
+    })
+  }
+
+  if (err.code === 11000) {
+    return res.status(409).json({
+      error: { code: 'DUPLICATE_KEY', message: 'That value is already taken' },
+    })
+  }
+
+  next(err)
+}
+```
+
+### Custom validators
+
+```js
+const slugSchema = new mongoose.Schema({
+  slug: {
+    type: String,
+    required: true,
+    validate: {
+      validator: (value) => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value),
+      message: 'Slug must be lowercase words separated by hyphens',
+    },
+  },
+})
+```
+
+Keep custom validators **synchronous and cheap**. Anything async (checking a remote service) belongs in the route or in a hook, not in a schema validator.
+
+## Virtuals
+
+A virtual is a computed property that is not stored in MongoDB:
+
+```js
+movieSchema.virtual('summary').get(function () {
+  return `${this.title} (${this.year})`
+})
+```
+
+With `toJSON: { virtuals: true }` it appears in API responses automatically. Virtuals are perfect for things like `fullName`, `initials`, or `commentCount` — derived values that should never go stale in the database.
+
+## Methods and statics
+
+**Instance methods** work on one document; **statics** work on the model:
+
+```js
+movieSchema.methods.isClassic = function () {
+  return this.year < 1980
+}
+
+movieSchema.statics.findByDecade = function (decade) {
+  return this.find({ year: { $gte: decade, $lt: decade + 10 } })
+}
+
+const recent = await Movie.findByDecade(1990)
+```
+
+<KeyPoint>
+Put **data rules** in the schema (types, required, enum, custom validators) and **queries** in statics. Routes should read like a summary of intent, not like SQL.
+</KeyPoint>
+
+## Middleware hooks
+
+Hooks run before or after model operations. The classic use case is hashing passwords — exactly what the auth lesson needed:
+
+```js
+import bcrypt from 'bcrypt'
+
+userSchema.pre('save', async function () {
+  if (!this.isModified('password')) return
+  this.password = await bcrypt.hash(this.password, 12)
+})
+
+userSchema.post('save', function (doc) {
+  console.log('User created:', doc.email)
+})
+```
+
+Notes:
+
+- Use `function () {}`, not an arrow function — hooks need `this` bound to the document.
+- Guard with `isModified` so hashing does not run on every save.
+- `pre('findOneAndUpdate')` runs **before** the update; `this` refers to the query, not the document. Read `this.getUpdate()` if you need the incoming data, and be aware validation does not automatically run.
+- Mongoose 8 removed document `remove()` hooks; use `findOneAndDelete`.
+
+## Indexes
+
+Indexes make queries fast; they also slow down writes and consume memory. Define them deliberately:
+
+```js
+movieSchema.index({ title: 'text' })          // full-text search
+movieSchema.index({ year: 1, rating: -1 })    // compound: filter by year, sort by rating
+movieSchema.index({ slug: 1 }, { unique: true })
+```
+
+Rule of thumb: index fields you filter, sort, or join on. A compound index supports queries on its **prefix** — `{ year: 1, rating: -1 }` helps `{ year }` and `{ year, rating }`, but not `{ rating }` alone.
+
+<Callout type="info" title="Indexes in production">
+  Mongoose builds indexes automatically in development (`autoIndex`), which is convenient. In production, disable auto-building and create indexes through a migration or deployment step so a large collection does not index itself at the wrong moment.
+</Callout>
+
+## Try it
+
+<TryIt title="Define a validated schema" hint="Run npm install mongoose in a scratch folder. This example needs a MongoDB connection to save — read through it first, then use the playground for the same exercise.">
+```js
+import mongoose from 'mongoose'
+
+const postSchema = new mongoose.Schema(
+  {
+    title: { type: String, required: true, trim: true, maxlength: 120 },
+    body: { type: String, required: true, minlength: 10 },
+    tags: [{ type: String, lowercase: true }],
+    publishedAt: Date,
+  },
+  { timestamps: true, toJSON: { virtuals: true } }
+)
+
+postSchema.virtual('excerpt').get(function () {
+  return this.body.length > 80 ? `${this.body.slice(0, 80)}…` : this.body
+})
+
+postSchema.index({ title: 'text' })
+
+const Post = mongoose.model('Post', postSchema)
+
+const post = new Post({ title: 'Hello Mongo', body: 'This is a post about Mongoose schemas.' })
+await post.validate()
+console.log(post.excerpt)
+```
+</TryIt>
+
+## Check your understanding
+
+<Quiz
+  question="What does unique: true actually do on a schema field?"
+  options={[
+    'Adds a validator that runs with validate()',
+    'Creates a unique index so duplicate inserts fail with error code 11000',
+    'Encrypts the field',
+    'Makes the field required'
+  ]}
+  answer={1}
+  explanation="It is an index, not a validator. It is enforced when MongoDB writes the document, and update operations only check it when they hit the index — which is why you must also handle code 11000 in your API."
+/>
+
+<Quiz
+  question="A virtual property like excerpt is…"
+  options={[
+    'stored in MongoDB and indexed',
+    'computed on the fly and never stored',
+    'a synonym for a static method',
+    'only available in the shell'
+  ]}
+  answer={1}
+  explanation="Virtuals are getters: computed from the document each time they are read, included in JSON only when toJSON: { virtuals: true } is set. Nothing is written to the database."
+/>
+
+<Exercise title="Replace the movies API store with Mongoose" difficulty="medium">
+Take the in-memory movies API from the Express module and move it to MongoDB.
+
+1. Create a free Atlas cluster (or reuse one) and store the URI in `.env` as `MONGODB_URI`.
+2. Write `db.js` with `connectDB()` and `server.js` that connects before listening.
+3. Define a `Movie` schema with:
+   - `title`: required, trimmed, max 200
+   - `year`: required, integer, min 1888
+   - `genres`: array of strings from an enum
+   - `rating`: 0–10, default 0
+   - `director`: nested `{ name, country }`
+   - `timestamps: true`, a `summary` virtual, and a `slug` unique index
+4. Rewrite every route with Mongoose: list (with filters, sort, limit), read by id, create, patch with `runValidators: true`, delete.
+5. Add a `mongoErrorHandler` that maps `ValidationError` to 422 and duplicate keys to 409; guard invalid ObjectIds with 400.
+6. Test with curl: successful create, invalid body (422), duplicate slug (409), invalid id (400), missing id (404).
+7. Verify in Compass that the documents, indexes, and timestamps look right.
+8. Bonus: add `Movie.findByDecade(1990)` as a static and use it from a route.
+</Exercise>
+
+## Summary
+
+- Mongoose connects your Express app to MongoDB with schemas, models, validation, and casting.
+- A schema declares rules; a model gives you `create`, `find`, `findByIdAndUpdate`, `findByIdAndDelete` and friends.
+- `unique` is an index, not a validator — handle duplicate-key errors (code 11000) and use `runValidators: true` on updates.
+- `.lean()` speeds up reads; guard `ObjectId` inputs to avoid `CastError` 500s.
+- Virtuals compute values that should never be stored; methods and statics keep query logic out of routes.
+- Hooks like `pre('save')` centralize cross-cutting behavior such as password hashing.
+- Add indexes for fields you filter, sort, and join on — and question every index you add.
+
+Next: relationships — deciding what to embed, what to reference, and how `populate` stitches documents back together.

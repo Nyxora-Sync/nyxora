@@ -1,0 +1,286 @@
+A movie has reviews. A user writes posts. A post has comments written by other users. MongoDB gives you two ways to model every one of those links, and the choice you make determines how fast the app is and how painful it is to change.
+
+This lesson is about that decision — **embed** or **reference** — and the tools Mongoose gives you to work with references: `populate`, virtuals, and cascade deletes.
+
+## Two ways to connect documents
+
+**Embedding** stores related data inside the parent document:
+
+```js
+{
+  _id: ObjectId('...'),
+  title: 'Spirited Away',
+  reviews: [
+    { author: 'Mina', rating: 9, body: 'A masterpiece.' },
+    { author: 'Kenji', rating: 8, body: 'Beautiful animation.' }
+  ]
+}
+```
+
+**Referencing** stores just an id and keeps the related data in its own collection:
+
+```js
+// posts collection
+{
+  _id: ObjectId('p1'),
+  title: 'Learning MERN',
+  author: ObjectId('u7')     // reference to users
+}
+
+// users collection
+{
+  _id: ObjectId('u7'),
+  name: 'Aki'
+}
+```
+
+One read returns everything in the embedded case. The referenced case needs a second query — or a `$lookup`/`populate` — but each piece of data lives in exactly one place.
+
+## The decision table
+
+| Choose **embed** when | Choose **reference** when |
+|-----------------------|----------------------------|
+| Data is owned by the parent (deleting the parent deletes it) | Data exists independently of the parent |
+| You always read it together | You often read it on its own |
+| The array is **bounded** and small (tags, order items, addresses) | The list can grow without limit (comments, likes, logs) |
+| Updates touch the parent and child together | Both sides change frequently |
+| You need one atomic write | You need to share the data across many parents |
+
+The most common mistake is embedding an **unbounded** array. A `comments` array inside a post grows forever, eventually hits MongoDB's 16MB document limit, and makes every post read expensive. Reference those. A `tags` array of ten strings will never hurt you; embed it.
+
+<KeyPoint>
+Model for your access patterns. The question is never “what is the relationship?” but “how do I read and write this data, and how large can it get?”
+</KeyPoint>
+
+## One-to-one
+
+A user profile page with settings is a one-to-one. Reference it with a unique index so the relationship cannot be duplicated:
+
+```js
+const profileSchema = new mongoose.Schema({
+  user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
+  bio: String,
+  website: String,
+})
+```
+
+Embedding is also reasonable when the profile is always read with the user and stays small.
+
+## One-to-many: the common case
+
+A user has many posts. Put the reference on the **many** side — the child knows its parent:
+
+```js
+const postSchema = new mongoose.Schema({
+  title: { type: String, required: true },
+  content: String,
+  author: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+}, { timestamps: true })
+```
+
+Why not an array of post ids on the user? Because that array grows forever, and loading a user would drag every post id along. The child-side reference keeps each document small and makes `Post.find({ author: userId })` a one-index query.
+
+## Many-to-many
+
+A post can have many tags; a tag can belong to many posts. Two options:
+
+- **Arrays of references on both sides** — fine when both arrays stay small and you rarely update one side.
+- **A join collection** — the professional choice when the link itself has data (role, joinedAt) or when either side is large:
+
+```js
+const enrollmentSchema = new mongoose.Schema({
+  student: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  course: { type: mongoose.Schema.Types.ObjectId, ref: 'Course', required: true },
+  joinedAt: { type: Date, default: Date.now },
+  role: { type: String, enum: ['student', 'assistant'], default: 'student' },
+})
+
+enrollmentSchema.index({ student: 1, course: 1 }, { unique: true })
+```
+
+## Populating references
+
+`populate` replaces an id field with the referenced document in one extra query per path:
+
+```js
+const posts = await Post.find({ author: userId })
+  .populate('author', 'name email')   // second arg: only these fields
+  .lean()
+
+// posts[0].author is now { _id, name, email }, not just an ObjectId
+```
+
+Populate supports nesting and options:
+
+```js
+await Post.findById(id).populate({
+  path: 'comments',
+  options: { sort: { createdAt: -1 }, limit: 5 },
+  populate: { path: 'author', select: 'name' },
+})
+```
+
+<Callout type="warning" title="Always limit populated fields">
+  A bare `.populate('author')` returns the entire user document — including fields like `passwordHash` if you forgot `select: false`. Pass `'name email'` or an object with `select`. Data you never send cannot leak.
+</Callout>
+
+### Virtual populate: the reverse direction
+
+A post does not store its comments; the comments store their post. To read comments as `post.comments`, define a **virtual**:
+
+```js
+postSchema.virtual('comments', {
+  ref: 'Comment',
+  localField: '_id',
+  foreignField: 'post',
+})
+
+postSchema.set('toJSON', { virtuals: true })
+
+const post = await Post.findById(id).populate('comments')
+```
+
+This is the clean pattern for one-to-many: the child owns the foreign key, the parent gets a virtual view.
+
+### Index the foreign key
+
+Whatever you populate on, index it:
+
+```js
+commentSchema.index({ post: 1, createdAt: -1 })
+```
+
+Without an index, every `Comment.find({ post })` scans the whole collection.
+
+## Cascade deletes
+
+In SQL, `ON DELETE CASCADE` is automatic. In MongoDB, **you** decide what happens when a parent disappears. Pick one strategy and write it down:
+
+**Delete children in the route** — explicit and readable:
+
+```js
+app.delete('/api/v1/posts/:id', async (req, res) => {
+  const post = await Post.findByIdAndDelete(req.params.id)
+  if (!post) {
+    return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Post not found' } })
+  }
+
+  await Comment.deleteMany({ post: post._id })
+  res.status(204).end()
+})
+```
+
+**Or use a query hook** so no route can forget:
+
+```js
+postSchema.pre('findOneAndDelete', async function () {
+  const Comment = mongoose.model('Comment') // resolved lazily, avoids circular imports
+  await Comment.deleteMany({ post: this.getQuery()._id })
+})
+```
+
+<Callout type="danger" title="Choose soft deletes for user data">
+  Hard deletes are unrecoverable. For anything a user might want back, set `deletedAt` instead of deleting, and filter it out in queries. Reserve true deletion for GDPR-style requests and temporary data.
+</Callout>
+
+## Denormalization: speed with a maintenance cost
+
+For list views you often need only the author's name, not a full populate. Copying the name onto the post — a **denormalized snapshot** — removes the extra query:
+
+```js
+const postSchema = new mongoose.Schema({
+  author: { type: ObjectId, ref: 'User', required: true },
+  authorName: { type: String, required: true }, // snapshot for fast lists
+})
+```
+
+The cost: when the user changes their name, every snapshot is stale until updated. Keep snapshots for values that rarely change (usernames, product names at purchase time) and populate for values that must be current.
+
+<Callout type="info" title="Order items are a snapshot, not a reference">
+  An order line should embed the product name and price **as they were when the order was placed**. If you merely reference the product, a later price change rewrites history. This is one of the clearest cases where embedding is not just faster — it is correct.
+</Callout>
+
+## Try it
+
+<TryIt title="Virtual populate in action" hint="Run npm install mongoose in a scratch folder and connect to your Atlas cluster to see results. Without a connection, read it as a template.">
+```js
+import mongoose from 'mongoose'
+
+const postSchema = new mongoose.Schema({ title: String, author: { type: mongoose.Schema.Types.ObjectId, ref: 'User' } })
+const commentSchema = new mongoose.Schema({
+  body: String,
+  post: { type: mongoose.Schema.Types.ObjectId, ref: 'Post' },
+  author: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+})
+
+postSchema.virtual('comments', {
+  ref: 'Comment',
+  localField: '_id',
+  foreignField: 'post',
+})
+
+const Post = mongoose.model('Post', postSchema)
+const Comment = mongoose.model('Comment', commentSchema)
+
+const post = await Post.create({ title: 'Hello' })
+await Comment.create({ body: 'First!', post: post._id })
+
+const withComments = await Post.findById(post._id).populate('comments')
+console.log(withComments.comments.length) // 1
+```
+</TryIt>
+
+## Check your understanding
+
+<Quiz
+  question="A post has an unlimited number of comments. What is the right modeling choice?"
+  options={[
+    'Embed all comments inside the post document',
+    'Reference the post from each comment document',
+    'Duplicate comments in both collections',
+    'Store comments in the users collection'
+  ]}
+  answer={1}
+  explanation="The comments array would grow forever and eventually hit the 16MB limit. Put the post reference on the comment (child side), index it, and use virtual populate to read them from the post."
+/>
+
+<Quiz
+  question="What does populate('author', 'name email') do?"
+  options={[
+    'Adds the author fields to every post document permanently',
+    'Replaces the author id with the referenced user document, returning only name and email',
+    'Joins the collections at the database level',
+    'Creates an index on the author field'
+  ]}
+  answer={1}
+  explanation="Populate runs an extra query and substitutes documents for ids in the result set. The second argument limits which fields come back — it does not modify stored data and it is not a $lookup."
+/>
+
+<Exercise title="Model a blog with real relationships" difficulty="medium">
+Build the data layer for a blog API with three models. Do not write routes yet — this exercise is about modeling.
+
+1. **User:** `name`, `email` (unique), `role` (`user` / `author` / `admin`).
+2. **Post:** `title`, `content`, `author` (User reference, required), `tags` (embedded array of strings), `publishedAt`, timestamps.
+3. **Comment:** `body`, `post` (Post reference, required), `author` (User reference, required), timestamps.
+4. Add these indexes: `{ author: 1, createdAt: -1 }` on posts; `{ post: 1, createdAt: -1 }` on comments; unique email on users.
+5. Add a virtual `comments` on Post and a virtual `commentCount`.
+6. Write a seed script that creates two users, three posts, and five comments.
+7. Verify with these queries:
+   - all posts by one author, newest first, author name populated
+   - one post with its 5 most recent comments, each comment's author name populated
+   - comment count per post using your virtual
+8. Implement cascade behavior: deleting a post deletes its comments — first in the route, then refactor it into a `findOneAndDelete` hook.
+9. Explore all three collections in Compass and confirm the indexes exist under the Indexes tab.
+</Exercise>
+
+## Summary
+
+- Embed when data is owned, bounded, and read together; reference when it is independent, shared, or unbounded.
+- Put the foreign key on the child for one-to-many, and use a join collection for rich many-to-many links.
+- `populate` substitutes referenced documents and always deserves a field list to avoid leaking data.
+- Virtual populate gives parents a read-only view of children that reference them.
+- Index every foreign key you query on.
+- MongoDB has no cascade deletes — decide explicitly between route deletion, hooks, and soft deletes.
+- Denormalize snapshots for speed, but only for values that rarely change.
+
+Next: the aggregation pipeline — turning raw documents into reports, stats, and dashboards without loading everything into Node.
