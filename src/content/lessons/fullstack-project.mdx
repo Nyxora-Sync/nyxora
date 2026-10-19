@@ -1,0 +1,282 @@
+This is it: one application, from empty repository to deployed product, using every module of the curriculum. No new concepts — the capstone is about **integrating** what you know under realistic constraints: authorization, consistency, real-time, files, deployment, and documentation.
+
+You will build **TeamBoard**, a collaborative task board. It is small enough to finish in a few solid sessions and deep enough to hit every skill in the curriculum: authentication, ownership and membership authorization, CRUD with pagination, validation shared between client and server, a real-time layer, file uploads, tests, CI, and a real deployment.
+
+## What you are building
+
+**TeamBoard** — users create projects, invite members, and manage tasks on a board that updates live for everyone viewing it.
+
+| Feature area | Requirements |
+|---|---|
+| Accounts | Register, log in, log out; passwords hashed with bcrypt; JWT sessions; profile with avatar |
+| Projects | Create, rename, archive; owner and members; membership list with roles (`owner`, `member`) |
+| Tasks | Create, edit, move between `todo` / `doing` / `done`; assign to a member; due date; comments |
+| Real-time | Task changes and comments appear on other users' open boards without refresh; presence list per project |
+| Files | Avatar upload (Cloudinary), size and type validated server-side |
+| Quality | Zod validation on both sides, loading/error/empty states everywhere, integration tests for auth and tasks, CI on every PR, deployed with docs |
+
+Three rules for this build:
+
+1. **Reuse the patterns, not the code.** Copy your auth middleware shape, your API client, your SocketProvider — then adapt names to TeamBoard. Understanding why each piece exists matters more than speed.
+2. **Commit per milestone.** Each milestone below is one or more clean commits with a working app at the end. Broken main branches are how capstones die.
+3. **Definition of done per milestone** is written below — do not move on until it passes, in a fresh browser session, not just on the happy path you were testing.
+
+## Milestone 0 — Plan (first hour)
+
+Write before you code — this is a work product your reviewers will read.
+
+1. **README skeleton:** project name, one-paragraph pitch, feature list, planned stack, setup instructions placeholder.
+2. **Data model** in a doc or on paper:
+
+```text
+User     { name, email (unique), passwordHash, avatarUrl, avatarPublicId }
+Project  { name, owner: User, members: [{ user: User, role }], archivedAt }
+Task     { project, title, notes, status: todo|doing|done, assignee?: User,
+           dueDate?, createdBy: User, order, timestamps }
+Comment  { task, author: User, text, timestamps }
+```
+
+3. **API contract** as a table — every endpoint, method, auth requirement, and response shape. For example:
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| POST | `/api/v1/auth/register` | — | Create account |
+| POST | `/api/v1/auth/login` | — | Get a token |
+| GET | `/api/v1/projects` | token | Projects the user belongs to |
+| POST | `/api/v1/projects` | token | Create (creator becomes owner) |
+| PATCH | `/api/v1/projects/:id` | owner | Rename / archive |
+| POST | `/api/v1/projects/:id/members` | owner | Add a member by email |
+| GET | `/api/v1/projects/:id/tasks` | member | Tasks for the board |
+| POST | `/api/v1/projects/:id/tasks` | member | Create a task |
+| PATCH | `/api/v1/tasks/:id` | member or assignee | Edit fields / move status |
+| DELETE | `/api/v1/tasks/:id` | project owner or task creator | Delete |
+| POST | `/api/v1/tasks/:id/comments` | member | Add a comment |
+| POST | `/api/v1/users/me/avatar` | token | Upload an avatar (multipart) |
+
+4. **Wireframes** — three screens minimum: project list, board with columns, task detail drawer with comments and an activity feed.
+
+<Callout type="tip" title="The contract is the schedule">
+  Every hour spent sharpening the endpoint table and data model at this stage saves several in rework — because server and client development can then proceed independently against a shared spec, exactly as they do on a team.
+</Callout>
+
+## Milestone 1 — Backend foundation: auth
+
+Set up the monorepo layout from the architecture lesson: `server/`, `client/`, root workspace scripts, `.env.example`, and the Zod-validated env config.
+
+**Server shape:** `config/`, `models/`, `routes/`, `controllers/`, `middleware/`, `utils/`, `app.js`, `server.js`.
+
+1. `User` model: unique lowercase email, `passwordHash`, `name`, default role-free profile fields.
+2. `POST /api/v1/auth/register` — validate with Zod, reject duplicates with `409`, hash with bcrypt (12 rounds), and never return the hash.
+3. `POST /api/v1/auth/login` — compare with bcrypt; respond `401` with a generic message for both wrong email and wrong password.
+4. `POST /api/v1/auth/logout` (or token discard on the client, documented).
+5. `requireAuth` middleware verifying `Authorization: Bearer <token>` and attaching `req.user`.
+6. Error-handling middleware mapping Mongoose `ValidationError`, `CastError`, duplicates, and auth failures to `{ error: { code, message } }`.
+7. **Tests:** register, duplicate register, login success/failure, and a protected route without a token — in Vitest + Supertest against a test database.
+
+**Definition of done:** `npm test --workspace server` green; a manual register-login-fetch cycle returns `401` without a token and `200` with one.
+
+## Milestone 2 — Core domain: projects, tasks, comments
+
+This is where authorization gets real: every endpoint that touches a project or task checks **membership first**.
+
+```js
+// server/src/middleware/require-project-member.js
+import { Project } from '../models/project.js'
+
+export async function requireProjectMember(req, res, next) {
+  const projectId = req.params.projectId ?? req.params.id
+
+  const project = await Project.findOne({
+    _id: projectId,
+    'members.user': req.user.id,
+  })
+
+  if (!project) {
+    // The same response whether it does not exist or the user is not a member
+    return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Project not found' } })
+  }
+
+  req.project = project
+  req.membership = project.members.find((m) => m.user.equals(req.user.id))
+  next()
+}
+```
+
+Note the design choice: **non-members get `404`, not `403`** — it avoids leaking which project IDs exist. `403` is reserved for members who lack a role for the action (for example, a `member` trying to add another member).
+
+Build out in this order, testing each with HTTP requests before touching the client:
+
+1. Projects CRUD with membership; `GET /projects` returns only the user's projects (`find({ 'members.user': req.user.id })`).
+2. Add-member by email (owner only, `403` otherwise; unknown email → `404`; already a member → `409`).
+3. Tasks CRUD scoped to a project; `status` and `order` fields; assignee must be a member.
+4. Comments on tasks with author populated.
+5. Validation schemas in the shared package — used by the server middleware **and** prepared for the client forms.
+6. Pagination on the tasks listing (`?page`, `?limit`, `meta.total`).
+7. **Tests:** cross-user isolation (user B cannot read or mutate user A's project), role checks, task lifecycle.
+
+**Definition of done:** integration tests prove user B receives `404` on user A's project and `403` for owner-only operations as a member; every mutation validates input.
+
+## Milestone 3 — Frontend foundation
+
+Scaffold the client with Vite, React Router, TanStack Query, and the API client from the integration lesson.
+
+1. **Auth:** register and login forms with React Hook Form + the shared Zod schemas; token kept in memory in an `AuthContext`; `RequireAuth` guard; automatic redirect to `/login` on any `401` from the API client.
+2. **Layout:** app shell with header (avatar, logout), project list page, and a project board route `/projects/:id`.
+3. **Project list:** create/rename/archive; every screen implements loading, error, empty, and success states.
+4. **Board:** three columns (`todo`, `doing`, `done`); create task inline; click to open a task detail drawer; edit fields, assign, set status, add comments. Mutations invalidate the `['projects', id, 'tasks']` query key.
+5. **Filtering:** a search input and assignee filter stored in `useSearchParams`.
+6. **Profile:** avatar upload wired to the Multer + Cloudinary endpoint with preview and error surfaces.
+
+**Definition of done:** two accounts can be created; each sees only their own projects in the UI because the API enforces it (not because the UI hides anything).
+
+## Milestone 4 — Real-time and presence
+
+Add `Socket.io` using the realtime lesson's `SocketProvider`, authenticated with the same JWT.
+
+Event contract — document it in the README:
+
+| Event | Direction | Payload | Effect |
+|---|---|---|---|
+| `project:join` | client → server | `projectId` | Authorize membership, join room |
+| `task:created` | server → room | task | Append to the correct column |
+| `task:updated` | server → room | task | Patch in place |
+| `task:deleted` | server → room | taskId | Remove |
+| `comment:created` | server → room | comment | Append to open drawers |
+| `presence:update` | server → room | `{ userId, online }` | Update avatar stack |
+
+Rules from the realtime lesson, applied: authorize `project:join` against real membership; persist before broadcasting; ack the sender's emits; clean up listeners on unmount; refetch on reconnect to close gaps.
+
+**Definition of done:** two browsers signed in as different members of one project; a task created in one appears in the other within a second, survives a reload, and a stale tab that reconnects resyncs.
+
+## Milestone 5 — Polish
+
+- Empty states with a call to action on every list (no blank screens).
+- Optimistic updates for task moves, with rollback on failure and a visible error.
+- Accessible basics: form labels bound to inputs, `role="alert"` on error messages, focus moved to the task drawer on open, contrast checked.
+- Keyboard flow: create a task with Enter, close the drawer with Escape.
+- Responsive check at 375px, 768px, and 1440px widths — the board columns become a vertical stack on mobile.
+- Seed script: `npm run seed --workspace server` creates a demo user, one project, and a dozen tasks so any reviewer sees a living app.
+
+## Milestone 6 — Deploy and document
+
+Follow the deployment lesson: Atlas (`app-prod`), API on Render/Railway with env vars and a health endpoint, client on Vercel with `VITE_API_URL` and SPA rewrites, CI workflow with the Mongo service container, and monitoring.
+
+Then write the README that makes the work visible:
+
+```markdown
+# TeamBoard
+
+Live: https://teamboard.vercel.app  ·  API: https://teamboard-api.onrender.com/api/v1/health
+Demo: demo@teamboard.dev / demo-password-123
+
+[ One screenshot of the board, one of the task drawer ]
+
+## Stack
+React 19, React Router, TanStack Query, Tailwind · Node 20, Express, Socket.io,
+Mongoose, Zod, Vitest + Supertest · MongoDB Atlas, Render, Vercel, GitHub Actions
+
+## Architecture
+[ diagram of client → API → Atlas with the socket layer ]
+
+## Local setup
+1. cp .env.example .env and fill values
+2. npm install && npm run seed --workspace server
+3. npm run dev   # api :3000, client :5173
+
+## What I would do next
+Notifications by email, drag-and-drop ordering, activity log pagination.
+```
+
+Honesty about rough edges plus a “next” section reads as senior, not as weakness. Reviewers know what a two-week project is.
+
+<Callout type="info" title="Record a two-minute demo">
+  Screen-record the core journey — register, create a project, add a member, create a task in one browser, watch it appear in the second, move it, comment, upload an avatar. Link the video at the top of the README. Most reviewers watch the video before they read a line of code.
+</Callout>
+
+## Grading rubric
+
+Score your own build honestly — each row is worth a lesson learned:
+
+| Criterion | Passes when |
+|---|---|
+| Auth | bcrypt hashing, JWT verification middleware, generic login failure messages, no hash ever serialized |
+| Authorization | cross-user tests exist and pass; owner/member roles enforced; non-members get 404 |
+| Validation | shared Zod schemas on both sides; server rejects what the client would; file limits enforced server-side |
+| Data | indexes on `members.user` and `task.project`; pagination on lists; no unbounded queries |
+| Real-time | authorized rooms; persist-then-broadcast; reconnect resync verified with two sessions |
+| Testing | integration tests for auth and task flows; CI green on the latest push |
+| UX | four states on every data screen; keyboard and screen-reader basics; mobile layout intact |
+| Deploy | deep links reload; CORS correct; secrets only in platform env; health endpoint monitored |
+| Docs | README with live URL, demo account, screenshot/video, architecture diagram, and next steps |
+
+## Try it
+
+<TryIt title="Scaffold TeamBoard" hint="Run in an empty folder. This gives you the monorepo skeleton; milestones 1-6 fill it in.">
+```bash
+mkdir teamboard && cd teamboard
+npm init -y
+npm pkg set private=true
+npm pkg set workspaces[0]=client workspaces[1]=server
+npm pkg set scripts.dev="concurrently -n api,web -c blue,green \"npm:dev --workspace server\" \"npm:dev --workspace client\""
+npm install -D concurrently
+
+npm create vite@latest client -- --template react
+npm init -y --workspace server
+npm pkg set type=module --workspace server
+npm pkg set scripts.dev="node --watch src/server.js --env-file=.env" --workspace server
+npm pkg set scripts.test="vitest run" --workspace server
+
+npm install --workspace server express mongoose bcrypt jsonwebtoken zod cors helmet multer socket.io
+npm install --workspace server -D vitest supertest mongodb-memory-server
+
+git init && git add -A && git commit -m "chore: scaffold TeamBoard monorepo"
+```
+</TryIt>
+
+## Check your understanding
+
+<Quiz
+  question="User B requests a project they do not belong to in TeamBoard. The API returns 404 rather than 403. Why?"
+  options={[
+    '404 is easier to implement',
+    '403 would confirm the project exists, leaking information to non-members',
+    'The database cannot express 403',
+    '404 pages rank better in search engines'
+  ]}
+  answer={1}
+  explanation="Authorization endpoints should not reveal which resources exist to users without access. Non-members get the same response as a missing ID; 403 is only for members who lack the role for a specific action."
+/>
+
+<Quiz
+  question="A task is created while one member's tab is offline. What makes their board correct when they return?"
+  options={[
+    'Socket.io replays missed broadcasts automatically',
+    'The client refetches current data on reconnect, closing the gap the socket missed',
+    'The server sends the whole database on every reconnect',
+    'Nothing — offline tabs stay stale until a manual reload'
+  ]}
+  answer={1}
+  explanation="Sockets deliver live events, but broadcasts do not queue for disconnected clients. Persisted data is the source of truth: refetch on reconnect (or on window focus) and the UI converges no matter how long the gap was."
+/>
+
+<Exercise title="Ship TeamBoard and write the retrospective" difficulty="hard">
+This is the capstone: complete all six milestones above, then finish with the parts most builders skip.
+
+1. **Build and commit per milestone** — six working states of the app, tagged in Git (`git tag milestone-1` …) so the history shows the progression.
+2. **Run the full verification pass** with two accounts in two browsers: isolation (each sees only their projects), membership flow (invite, then the invitee sees the project), task lifecycle, comments, avatar upload with a too-large file rejected, real-time updates, reconnect resync, deep-link reload.
+3. **Deploy** all three pieces per the deployment lesson; CI green on the latest push; the demo account seeded in production.
+4. **Write the retrospective** (half a page in the README or a `RETRO.md`): what was hardest, one decision you would change, one pattern from the curriculum that saved you the most time, and what the schema would need for 100× the data.
+5. **Extend by one feature of your choosing** — drag-and-drop between columns, email notifications via a queue, project activity log with pagination, or CSV export of tasks — built with the same standards: validation, authorization, tests, states.
+6. **Share it.** Update your portfolio and GitHub profile README with the live URL, the demo video, and the repo. This app is now the best answer you have to “tell me about a project you built.”
+</Exercise>
+
+## Summary
+
+- The capstone integrates everything: monorepo structure, layered Express, Mongoose modelling, shared Zod validation, React with TanStack Query, Socket.io, uploads, deployment, and CI.
+- Plan first: README skeleton, data model, API contract, wireframes — the spec is the schedule.
+- Membership-based authorization with non-leaking 404s is the domain rule that makes the app safe; tests prove it.
+- Real-time needs authorized rooms, persist-then-broadcast, and reconnect refetches — sockets complement the database, never replace it.
+- Polish and deployment are part of the build: four states everywhere, accessibility basics, seeded production data, monitoring.
+- Documentation and a demo video are what turn a deployed app into a portfolio piece.
+
+You have now built every layer of a production MERN application, by hand, and shipped it. The resources beside each lesson go deeper; the playgrounds and the pattern catalogue are there for reference. The next step is the one every developer takes from here: pick a problem you care about, and build it.

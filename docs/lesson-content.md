@@ -3,7 +3,7 @@
 The current curriculum has **30 unique lessons**. The developer track reuses the
 same lesson IDs as the beginner track, so a lesson is authored once.
 
-**Authored: 24 / 30**
+**Authored: 30 / 30 ✅ all lessons complete**
 
 ## Web Foundations
 
@@ -43,12 +43,12 @@ same lesson IDs as the beginner track, so a lesson is authored once.
 
 ## Full Stack Mastery
 
-- [ ] `fullstack-architecture` — Project Architecture & Monorepo
-- [ ] `fullstack-integration` — Connecting Frontend & Backend
-- [ ] `fullstack-realtime` — Real-time with Socket.io
-- [ ] `fullstack-uploads` — File Uploads
-- [ ] `fullstack-deployment` — Deployment & CI/CD
-- [ ] `fullstack-project` — Capstone: Full Stack App
+- [x] `fullstack-architecture` — Project Architecture & Monorepo
+- [x] `fullstack-integration` — Connecting Frontend & Backend
+- [x] `fullstack-realtime` — Real-time with Socket.io
+- [x] `fullstack-uploads` — File Uploads
+- [x] `fullstack-deployment` — Deployment & CI/CD
+- [x] `fullstack-project` — Capstone: Full Stack App
 
 ## Batch plan
 

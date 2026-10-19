@@ -1,0 +1,357 @@
+Every lesson so far sent JSON between client and server. Files break that pattern: a user picks a photo, and the browser must send **binary data** — hundreds of kilobytes or megabytes that `JSON.stringify` cannot express and `express.json()` will not parse.
+
+This lesson covers the whole upload pipeline: the multipart format, handling files with **Multer**, validating them (the part everyone skips and later regrets), and storing them properly with **Cloudinary** so they survive deploys and scale with a CDN.
+
+## Why uploads are different
+
+`fetch` bodies of JSON are text. A file is a byte stream, so uploads use `multipart/form-data`: one request body containing **parts** — some are text fields, some are files with filenames and content types, separated by boundaries.
+
+```text
+POST /api/v1/users/me/avatar HTTP/1.1
+Content-Type: multipart/form-data; boundary=----XzY9
+
+------XzY9
+Content-Disposition: form-data; name="caption"
+
+My new profile picture
+------XzY9
+Content-Disposition: form-data; name="avatar"; filename="me.jpg"
+Content-Type: image/jpeg
+
+<binary bytes of the image>
+------XzY9--
+```
+
+Consequences you need to know:
+
+- `express.json()` does not parse multipart bodies — you need file-handling middleware (Multer).
+- The browser sets the `Content-Type` header **with the boundary automatically** when you pass a `FormData` object. Setting it by hand breaks the boundary and the request fails.
+- Never base64-encode files into JSON as a workaround: it inflates payloads by ~33%, holds everything in memory, and defeats streaming.
+
+## Multer: parsing multipart requests
+
+```bash
+npm install multer
+```
+
+Multer gives you two storage strategies:
+
+- **`memoryStorage`** — the file lands in `req.file.buffer`. Ideal when you forward it to cloud storage (Cloudinary, S3) and never touch disk.
+- **`diskStorage`** — the file is written to a directory with a filename you control. Fine for local development or servers with persistent volumes.
+
+### Adding limits and a type filter
+
+Validation belongs in the Multer configuration so bad files are rejected before your handler runs:
+
+```js
+// server/src/middleware/upload.js
+import multer from 'multer'
+
+const ALLOWED = new Set(['image/jpeg', 'image/png', 'image/webp'])
+
+export const uploadAvatar = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 2 * 1024 * 1024,  // 2 MB
+    files: 1,
+  },
+  fileFilter(req, file, callback) {
+    if (!ALLOWED.has(file.mimetype)) {
+      return callback(new Error('Only JPEG, PNG, or WebP images are allowed'))
+    }
+    callback(null, true)
+  },
+}).single('avatar')   // the form-data field name
+```
+
+```js
+// server/src/routes/users.js
+import { Router } from 'express'
+import { requireAuth } from '../middleware/require-auth.js'
+import { uploadAvatar } from '../middleware/upload.js'
+import { setAvatar } from '../controllers/users.js'
+
+export const usersRouter = Router()
+
+usersRouter.post('/me/avatar', requireAuth, uploadAvatar, setAvatar)
+```
+
+<Callout type="danger" title="Client-provided types are claims, not facts">
+  `file.mimetype` comes from the request and a hostile client can send anything. The filter above stops accidental mistakes; for real security, verify the actual bytes (`file-type` package) or let your cloud provider validate — and never execute or serve uploaded files from your own origin without checks. Also treat every filename as hostile: reject `../` path tricks, and generate your own names.
+</Callout>
+
+### Disk storage done safely
+
+When you do write to disk, generate the filename yourself:
+
+```js
+import crypto from 'node:crypto'
+
+const storage = multer.diskStorage({
+  destination: 'uploads/avatars/',
+  filename(req, file, callback) {
+    const ext = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp' }[file.mimetype]
+    callback(null, `${crypto.randomUUID()}${ext}`)   // never trust file.originalname
+  },
+})
+```
+
+Serve them read-only from a dedicated path — and remember that local disk does not survive most hosts' redeploys, which is why cloud storage is the production answer.
+
+## Multer error handling
+
+Multer reports its failures (size, count, filter) as errors that reach your error middleware. Map them to clean `4xx` responses:
+
+```js
+// server/src/middleware/error-handler.js
+import multer from 'multer'
+
+export function errorHandler(error, req, res, next) {
+  if (error instanceof multer.MulterError) {
+    const message =
+      error.code === 'LIMIT_FILE_SIZE' ? 'File is too large (max 2 MB)' :
+      error.code === 'LIMIT_UNEXPECTED_FILE' ? 'Unexpected file field' :
+      'Upload failed'
+    return res.status(422).json({ error: { code: error.code, message } })
+  }
+
+  if (error.message?.startsWith('Only ')) {
+    return res.status(422).json({ error: { code: 'INVALID_FILE_TYPE', message: error.message } })
+  }
+
+  // ...existing handling for ValidationError, CastError, etc.
+  res.status(500).json({ error: { code: 'INTERNAL', message: 'Something went wrong' } })
+}
+```
+
+Clients get the same `{ error: { code, message } }` shape as every other failure, so the API client from the integration lesson handles it with no special cases.
+
+## Cloud storage with Cloudinary
+
+Storing user files on your server works until the first redeploy erases them, the disk fills up, or a page of thumbnails melts your bandwidth. **Cloudinary** (and its counterparts S3, UploadThing, Cloudflare R2) gives you durable storage, a CDN, and on-the-fly transformations — resize, crop, format conversion — via URL.
+
+```bash
+npm install cloudinary
+```
+
+```js
+// server/src/config/cloudinary.js
+import { v2 as cloudinary } from 'cloudinary'
+import { env } from './env.js'
+
+cloudinary.config({
+  cloud_name: env.CLOUDINARY_CLOUD_NAME,
+  api_key: env.CLOUDINARY_API_KEY,
+  api_secret: env.CLOUDINARY_API_SECRET,
+  secure: true,
+})
+
+export function uploadBuffer(buffer, { folder, transformation } = {}) {
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      { folder, resource_type: 'image', transformation },
+      (error, result) => (error ? reject(error) : resolve(result))
+    )
+    stream.end(buffer)   // write the memory buffer into the upload stream
+  })
+}
+
+export async function destroyAsset(publicId) {
+  await cloudinary.uploader.destroy(publicId)
+}
+```
+
+The controller ties it together: upload, store the URL and `public_id` on the user, delete the previous asset:
+
+```js
+// server/src/controllers/users.js
+import { uploadBuffer, destroyAsset } from '../config/cloudinary.js'
+
+export async function setAvatar(req, res, next) {
+  try {
+    if (!req.file) {
+      return res.status(422).json({ error: { code: 'NO_FILE', message: 'Attach an image in the avatar field' } })
+    }
+
+    const result = await uploadBuffer(req.file.buffer, {
+      folder: `avatars/${req.user.id}`,
+      transformation: [{ width: 400, height: 400, crop: 'fill', gravity: 'face' }],
+    })
+
+    const previous = req.user.avatarPublicId
+    req.user.avatarUrl = result.secure_url
+    req.user.avatarPublicId = result.public_id
+    await req.user.save()
+
+    if (previous) await destroyAsset(previous).catch(() => {})   // best-effort cleanup
+
+    res.json({ data: { avatarUrl: req.user.avatarUrl } })
+  } catch (error) {
+    next(error)
+  }
+}
+```
+
+<KeyPoint>
+Store the `public_id` next to the URL. The URL serves the image; the `public_id` is what lets you delete, overwrite, or transform it later. Without it, orphaned assets accumulate forever.
+</KeyPoint>
+
+Transformations then happen in the URL — no image code on your server:
+
+```text
+https://res.cloudinary.com/demo/image/upload/w_200,h_200,c_fill,q_auto,f_auto/avatars/123/abc.jpg
+```
+
+Ask for a 200×200 thumbnail with automatic quality and format; the CDN generates and caches it.
+
+## Uploading from React
+
+Two rules: build a `FormData` and let the browser set the boundary; attach auth headers yourself since `fetch` does not add them.
+
+```jsx
+import { useRef, useState } from 'react'
+
+export function AvatarUpload({ token, onUploaded }) {
+  const inputRef = useRef(null)
+  const [preview, setPreview] = useState(null)
+  const [error, setError] = useState(null)
+  const [uploading, setUploading] = useState(false)
+
+  function chooseFile(event) {
+    const file = event.target.files?.[0]
+    setError(null)
+    if (!file) return
+
+    if (file.size > 2 * 1024 * 1024) {
+      setError('Image must be under 2 MB')
+      return
+    }
+    setPreview(URL.createObjectURL(file))   // instant local preview
+  }
+
+  async function submit(event) {
+    event.preventDefault()
+    const file = inputRef.current?.files?.[0]
+    if (!file) return setError('Choose an image first')
+
+    const formData = new FormData()
+    formData.append('avatar', file)
+
+    setUploading(true)
+    try {
+      const response = await fetch('/api/v1/users/me/avatar', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },   // do NOT set Content-Type
+        body: formData,
+      })
+      const payload = await response.json()
+      if (!response.ok) throw new Error(payload?.error?.message ?? 'Upload failed')
+
+      onUploaded(payload.data.avatarUrl)
+      setPreview(null)
+      if (inputRef.current) inputRef.current.value = ''
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  return (
+    <form onSubmit={submit}>
+      <input ref={inputRef} type="file" accept="image/*" onChange={chooseFile} />
+      {preview && <img src={preview} alt="Preview" width={96} height={96} />}
+      {error && <p role="alert">{error}</p>}
+      <button disabled={uploading}>{uploading ? 'Uploading…' : 'Upload avatar'}</button>
+    </form>
+  )
+}
+```
+
+Showing the local preview immediately (`URL.createObjectURL`) makes the flow feel fast before a single byte is uploaded. Two refinements worth adding once the basic flow works:
+
+**Progress and cancellation** — `fetch` cannot report upload progress. Use `XMLHttpRequest` (`xhr.upload.onprogress`) or axios, which wraps it, if a progress bar matters for large files.
+
+**Server-driven file naming** — never accept the client's filename or extension; the server generates its own. The same rule applies to cloud folders: derive them from the authenticated user, not from the request.
+
+<Callout type="warning" title="Delete files when their records die">
+  If a post is deleted, its poster should be too. `destroyAsset(post.posterPublicId)` in the delete handler keeps storage consistent. Schedule a periodic sweep for orphans created by failed uploads, and use Cloudinary's signed uploads if you ever upload directly from the browser without passing through your API.
+</Callout>
+
+## Try it
+
+<TryIt title="A memory-buffer upload endpoint" hint="Add this to an Express server and test with curl or a FormData fetch. No cloud account needed — it just reports what Multer parsed.">
+```js
+import express from 'express'
+import multer from 'multer'
+
+const app = express()
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 1024 * 1024 },
+})
+
+app.post('/api/v1/echo-upload', upload.single('file'), (req, res) => {
+  if (!req.file) return res.status(422).json({ error: 'No file provided' })
+  res.json({
+    data: {
+      originalName: req.file.originalname,
+      mimetype: req.file.mimetype,
+      sizeBytes: req.file.size,
+      fields: req.body,   // text fields arrive here
+    },
+  })
+})
+
+app.listen(3000, () => console.log('upload demo on :3000'))
+```
+</TryIt>
+
+## Check your understanding
+
+<Quiz
+  question="Why must you avoid setting the Content-Type header when uploading a FormData body with fetch?"
+  options={[
+    'Content-Type is forbidden on POST requests',
+    'The browser must generate the multipart boundary itself; a manual header omits or contradicts it',
+    'It disables CORS preflight',
+    'Express rejects all requests with that header'
+  ]}
+  answer={1}
+  explanation="multipart/form-data is only parseable with the boundary that separates its parts. The browser knows the boundary and writes it into the header automatically — overwriting the header with a bare content type makes the body unparseable."
+/>
+
+<Quiz
+  question="You forward uploads straight to Cloudinary and never keep them on the server. Which Multer storage engine fits?"
+  options={[
+    'diskStorage, then read the file back with fs',
+    'memoryStorage, because the file arrives as a buffer to stream to the cloud',
+    'A custom engine that writes to /tmp',
+    'None — Multer is only for disk uploads'
+  ]}
+  answer={1}
+  explanation="The file only needs to exist in memory long enough to stream it to the provider. memoryStorage puts it in req.file.buffer, which upload_stream consumes directly — no disk writes, no cleanup, no redeploy surprises."
+/>
+
+<Exercise title="Poster uploads for the movies app" difficulty="medium">
+Add image uploads to the movies API and React client you built earlier.
+
+1. **Server setup:** install Multer; create `uploadImage` middleware with `memoryStorage`, a 3 MB limit, and an allowlist of JPEG/PNG/WebP. Map Multer errors to `422` responses with `{ error: { code, message } }`.
+2. **Cloudinary:** create a free account; add `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET` to your Zod env schema and `.env.example`. Write `uploadBuffer` and `destroyAsset` helpers.
+3. **Route:** `POST /api/v1/movies/:id/poster`, protected, owners only. Upload to `movies/<movieId>`, apply a `w_800,c_limit` transformation, save `posterUrl` and `posterPublicId` on the Movie document, and delete the previous asset.
+4. **Client:** a `PosterUpload` component with a local preview via `URL.createObjectURL`, client-side size check, per-error messages rendered from the API, uploading state on the button, and the new poster shown immediately after success.
+5. **Cleanup:** when a movie is deleted, destroy its `posterPublicId`; test that the asset disappears from Cloudinary.
+6. **Hardening:** send a 4 MB file, a `.txt` renamed to `.jpg`, and a request with the wrong field name; confirm each returns a clean `422` with a readable message and no server crash.
+7. **Docs:** write the upload flow — client `FormData`, Multer memory buffer, Cloudinary stream, Mongo record — as a diagram in your README.
+</Exercise>
+
+## Summary
+
+- Uploads use `multipart/form-data`, not JSON; `express.json()` cannot parse them and base64 is not a workaround.
+- Multer parses multipart bodies: `memoryStorage` for cloud forwarding, `diskStorage` for local files with generated names.
+- Enforce limits and type filters in the Multer config; treat client mimetypes and filenames as untrusted, and map Multer errors to your standard error shape.
+- Cloud storage (Cloudinary, S3, R2) provides durability, CDN delivery, and URL-based transformations; store `public_id` beside every URL.
+- From the client: `FormData` + auth header, no manual `Content-Type`, local preview for instant feedback, and XHR when upload progress is required.
+- Delete cloud assets when their records are removed, and sweep for orphans.
+
+The module continues with deployment — taking the whole stack live with MongoDB Atlas, Render/Railway, Vercel, and GitHub Actions.

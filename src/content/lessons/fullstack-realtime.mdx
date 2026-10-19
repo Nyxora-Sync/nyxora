@@ -1,0 +1,453 @@
+Everything you have built so far follows one direction: the client asks, the server answers. But chat messages, notifications, and live dashboards need the opposite — the server pushing data the moment something changes. That is **real-time**.
+
+This lesson covers how real-time actually works under the hood, then builds the canonical example with **Socket.io**: an authenticated, room-based chat that persists messages to MongoDB.
+
+## Polling vs WebSockets
+
+The naive way to fake real-time is **polling** — call the API every few seconds:
+
+```js
+setInterval(() => {
+  fetch('/api/v1/messages').then(/* update UI */)
+}, 3000)
+```
+
+It works, but it wastes requests when nothing changed, adds up to seconds of latency, and scales terribly — every client hammers the API forever. **Long polling** keeps a request open until the server has something, which cuts latency but is still one HTTP request per update.
+
+**WebSockets** replace the ask-and-answer model with a single, persistent, two-way connection. After a one-time HTTP handshake upgrades the connection, both sides can send messages at any moment with minimal overhead.
+
+| | Polling | WebSockets |
+|---|---|---|
+| Direction | Client pulls | Both push |
+| Latency | Up to the interval | Milliseconds |
+| Cost when idle | Constant requests | One open connection |
+| Server state | Stateless | Connectionful |
+| Best for | Rare updates, simple apps | Chat, presence, live data |
+
+**Socket.io** wraps WebSockets with the things raw sockets make you build yourself: automatic reconnection with backoff, rooms, event names, acknowledgments, and fallbacks for hostile networks. You use it on both ends.
+
+<Callout type="info" title="Server-Sent Events are the third option">
+  If you only need the server to push (live scores, feeds) and not the client, **Server-Sent Events (SSE)** is a simpler, HTTP-native choice. Socket.io wins when the communication is genuinely two-way.
+</Callout>
+
+## Setting up Socket.io on the server
+
+```bash
+npm install socket.io
+```
+
+Socket.io attaches to the HTTP server, so you stop calling `app.listen()` and create the HTTP server yourself:
+
+```js
+// server/src/socket.js
+import { Server } from 'socket.io'
+import { env } from './config/env.js'
+import { verifyToken } from './utils/jwt.js'
+
+export function createSocketServer(httpServer) {
+  const io = new Server(httpServer, {
+    cors: { origin: env.CLIENT_URL, credentials: true },
+  })
+
+  // Runs before every connection; reject here and the client is refused
+  io.use((socket, next) => {
+    const token = socket.handshake.auth?.token
+    try {
+      socket.user = verifyToken(token)   // throws if missing/invalid
+      next()
+    } catch {
+      next(new Error('Unauthorized'))
+    }
+  })
+
+  io.on('connection', (socket) => {
+    console.log(`${socket.user.email} connected (${socket.id})`)
+
+    socket.on('disconnect', () => {
+      console.log(`${socket.user.email} left`)
+    })
+  })
+
+  return io
+}
+```
+
+```js
+// server/src/server.js
+import { createServer } from 'node:http'
+import mongoose from 'mongoose'
+import { env } from './config/env.js'
+import { createApp } from './app.js'
+import { createSocketServer } from './socket.js'
+
+await mongoose.connect(env.MONGODB_URI)
+
+const httpServer = createServer(createApp())
+createSocketServer(httpServer)
+
+httpServer.listen(env.PORT, () => {
+  console.log(`API + WebSocket server on http://localhost:${env.PORT}`)
+})
+```
+
+<KeyPoint>
+Sockets are never trusted just because the handshake succeeded. Authenticate at connection time (as above) and authorize every action — the same rule as REST: a valid token proves identity, not permission.
+</KeyPoint>
+
+## Events: the two directions
+
+Socket.io is event-based; anything JSON-serializable travels both ways.
+
+```js
+// Server: helpers to understand
+io.emit('announcement', payload)                 // everyone
+socket.broadcast.emit('user-joined', payload)    // everyone except the sender
+socket.emit('welcome', payload)                  // just this connection
+socket.to('room-id').emit('message', payload)    // everyone in a room
+io.to(`user:${userId}`).emit('notification', p)  // every socket of one user
+```
+
+```js
+// Client
+socket.emit('join-room', 'general')
+socket.on('message', (message) => appendMessage(message))
+```
+
+Event names are your API — keep them consistent (`noun:verb` or just clear names like `message:new`) and document them in the README so the team does not invent variants.
+
+### Acknowledgments
+
+For anything important, confirm receipt so the UI can react:
+
+```js
+// Client
+socket.timeout(5000).emit('message:send', input, (err, saved) => {
+  if (err) showRetry(input)
+  else markSent(saved.id)
+})
+```
+
+```js
+// Server
+socket.on('message:send', async (input, callback) => {
+  try {
+    const message = await saveMessage(input, socket.user)
+    io.to(input.roomId).emit('message:new', message)
+    callback(null, message)   // ack success
+  } catch (error) {
+    callback({ error: 'Could not send message' })
+  }
+})
+```
+
+## Rooms: scoping the traffic
+
+A **room** is a server-side group a socket can join or leave. Emitting to a room reaches only its members — the mechanism behind chat channels, project boards, and one-to-one conversations.
+
+```js
+io.on('connection', (socket) => {
+  socket.on('room:join', async (roomId, callback) => {
+    // Authorize: is this user allowed in this room?
+    const room = await Room.findById(roomId)
+    if (!room?.members.includes(socket.user.id)) {
+      return callback({ error: 'Forbidden' })
+    }
+
+    socket.join(`room:${roomId}`)
+    socket.to(`room:${roomId}`).emit('room:presence', { userId: socket.user.id, joined: true })
+    callback(null)
+  })
+
+  socket.on('room:leave', (roomId) => {
+    socket.leave(`room:${roomId}`)
+  })
+})
+```
+
+Every socket joins a personal room automatically when you name one after the user — `socket.join('user:' + socket.user.id)` — which makes targeted notifications trivial: `io.to('user:123').emit(...)` notifies all of that user's devices.
+
+<Callout type="warning" title="Room membership is not authorization">
+  Rooms control who receives events, not who may perform actions. Check membership on every event that reads or writes data — a client can emit any event name at any time. Treat socket handlers exactly like route handlers: validate input, verify permissions, then act.
+</Callout>
+
+### Persist, then broadcast
+
+Real-time UIs still need history. The standard pattern: write to MongoDB first, then broadcast the saved document. Never broadcast before the database confirms — clients would show messages that do not exist, and a retry could duplicate them.
+
+```js
+// server/src/socket.js (inside connection)
+socket.on('message:send', async ({ roomId, text }, callback) => {
+  if (typeof text !== 'string' || !text.trim() || text.length > 2000) {
+    return callback({ error: 'Invalid message' })
+  }
+
+  const isMember = await Room.exists({ _id: roomId, members: socket.user.id })
+  if (!isMember) return callback({ error: 'Forbidden' })
+
+  const message = await Message.create({
+    room: roomId,
+    author: socket.user.id,
+    text: text.trim(),
+  })
+
+  const populated = await message.populate('author', 'name avatarUrl')
+  io.to(`room:${roomId}`).emit('message:new', populated)
+  callback(null, populated)
+})
+```
+
+Initial history still arrives over REST — `GET /api/v1/rooms/:id/messages` — and the socket delivers everything after that. A common refinement is to include a `since` timestamp or cursor so a reconnecting client can fetch only what it missed.
+
+## Connecting from React
+
+```bash
+npm install socket.io-client
+```
+
+Centralize the connection once and share it through context so every feature uses the same socket:
+
+```jsx
+// client/src/features/realtime/SocketProvider.jsx
+import { createContext, useContext, useEffect, useMemo, useState } from 'react'
+import { io } from 'socket.io-client'
+import { useAuth } from '../auth/AuthContext.jsx'
+
+const SocketContext = createContext(null)
+
+export function SocketProvider({ children }) {
+  const { token } = useAuth()
+  const [socket, setSocket] = useState(null)
+
+  useEffect(() => {
+    if (!token) return
+
+    const s = io(import.meta.env.VITE_API_URL ?? '', {
+      auth: { token },
+      transports: ['websocket'],
+    })
+
+    s.on('connect_error', (error) => console.warn('Socket error:', error.message))
+    setSocket(s)
+
+    return () => {
+      s.disconnect()          // closes this exact connection on logout/unmount
+    }
+  }, [token])
+
+  const value = useMemo(() => socket, [socket])
+  return <SocketContext.Provider value={value}>{children}</SocketContext.Provider>
+}
+
+export function useSocket() {
+  return useContext(SocketContext)
+}
+```
+
+```jsx
+// A room view
+import { useEffect, useState } from 'react'
+import { useSocket } from '../realtime/SocketProvider.jsx'
+import { roomsApi } from './api.js'
+
+export function ChatRoom({ roomId }) {
+  const socket = useSocket()
+  const [messages, setMessages] = useState([])
+  const [draft, setDraft] = useState('')
+  const [sending, setSending] = useState(false)
+
+  // History over REST
+  useEffect(() => {
+    let cancelled = false
+    roomsApi.messages(roomId).then((history) => {
+      if (!cancelled) setMessages(history)
+    })
+    return () => { cancelled = true }
+  }, [roomId])
+
+  // Live updates over the socket
+  useEffect(() => {
+    if (!socket) return
+
+    socket.emit('room:join', roomId, (response) => {
+      if (response?.error) console.error(response.error)
+    })
+    socket.on('message:new', (message) => {
+      setMessages((current) => [...current, message])
+    })
+
+    return () => {
+      socket.off('message:new')
+      socket.emit('room:leave', roomId)
+    }
+  }, [socket, roomId])
+
+  function send(event) {
+    event.preventDefault()
+    if (!draft.trim() || !socket) return
+
+    setSending(true)
+    socket.timeout(5000).emit('message:send', { roomId, text: draft }, (error, saved) => {
+      setSending(false)
+      if (error || saved?.error) return console.error('Send failed')
+      setDraft('')
+    })
+  }
+
+  return (
+    <section>
+      <ul>
+        {messages.map((message) => (
+          <li key={message.id ?? message._id}>
+            <strong>{message.author?.name ?? 'Someone'}:</strong> {message.text}
+          </li>
+        ))}
+      </ul>
+
+      <form onSubmit={send}>
+        <input value={draft} onChange={(e) => setDraft(e.target.value)} />
+        <button disabled={sending}>Send</button>
+      </form>
+    </section>
+  )
+}
+```
+
+Note what the effects clean up: the REST handler guards against setting state after unmount, and the socket effect removes its listener and leaves the room. Real-time code has more moving parts — cleanup discipline is what keeps it correct when users navigate quickly.
+
+<Callout type="tip" title="Optimistic sends">
+  To make chat feel instant, append a temporary message with `status: 'sending'` immediately, reconcile it with the ack (swap in the saved document), and show a retry affordance on failure. Do not skip the reconciliation — otherwise a refresh reveals a different history than the screen showed.
+</Callout>
+
+## Presence, typing, and notifications
+
+Three patterns that appear in almost every real-time app, all built from the primitives above:
+
+**Presence** — track who is online per room. On join, emit the current list; on join/leave/disconnect, broadcast the change. For accuracy across multiple tabs, reference-count sockets per user.
+
+**Typing indicators** — emit `typing:start` on the first keystroke and `typing:stop` after ~2 seconds of inactivity; broadcast to the room, and never persist. Keep it ephemeral.
+
+**Notifications** — write the notification to Mongo, then emit to the user's personal room (`'user:' + userId`). Because every device of that user is in the room, all of them update; because it is persisted, the bell icon still shows it after a reload.
+
+## Scaling real-time
+
+A single Node process handles thousands of socket connections. When you outgrow one process, the connection state becomes the challenge:
+
+- **Sticky sessions** — a client must reconnect to the same process during a session; load balancers need cookie- or IP-based stickiness.
+- **Redis adapter** — processes cannot see each other's sockets. The `@socket.io/redis-adapter` publishes every emit through Redis so a message on process A reaches a socket on process B:
+
+```js
+import { createAdapter } from '@socket.io/redis-adapter'
+import { createClient } from 'redis'
+
+const pubClient = createClient({ url: env.REDIS_URL })
+const subClient = pubClient.duplicate()
+await Promise.all([pubClient.connect(), subClient.connect()])
+
+io.adapter(createAdapter(pubClient, subClient))
+```
+
+- **Serverless caveats** — functions that spin down between requests (Vercel and Netlify functions) cannot hold persistent sockets. Host real-time as a long-running service (Render, Railway, Fly.io) and let the client connect to it directly; REST can stay wherever it runs best. One deployment serving REST + sockets together is the simplest arrangement.
+
+## Try it
+
+<TryIt title="A 40-line echo chat" hint="Run the server block in a Node project (npm install socket.io), the client block in a Vite app (npm install socket.io-client), open two browser tabs, and watch messages appear live in both.">
+```js
+// server.js — node --watch server.js
+import { createServer } from 'node:http'
+import { Server } from 'socket.io'
+
+const io = new Server(createServer((req, res) => res.end('ok')), {
+  cors: { origin: '*' },
+})
+
+io.on('connection', (socket) => {
+  socket.on('message:send', (text, callback) => {
+    io.emit('message:new', text)   // broadcast to everyone, including sender
+    callback({ ok: true })
+  })
+})
+
+io.httpServer.listen(3000, () => console.log('socket server on :3000'))
+```
+
+```jsx
+// App.jsx
+import { useEffect, useState } from 'react'
+import { io } from 'socket.io-client'
+
+export default function App() {
+  const [socket, setSocket] = useState(null)
+  const [messages, setMessages] = useState([])
+  const [draft, setDraft] = useState('')
+
+  useEffect(() => {
+    const s = io('http://localhost:3000')
+    s.on('message:new', (text) => setMessages((m) => [...m, text]))
+    setSocket(s)
+    return () => s.disconnect()
+  }, [])
+
+  return (
+    <div style={{ padding: 24, fontFamily: 'system-ui' }}>
+      <ul>{messages.map((m, i) => <li key={i}>{m}</li>)}</ul>
+      <form onSubmit={(e) => { e.preventDefault(); socket?.emit('message:send', draft); setDraft('') }}>
+        <input value={draft} onChange={(e) => setDraft(e.target.value)} />
+        <button>Send</button>
+      </form>
+    </div>
+  )
+}
+```
+</TryIt>
+
+## Check your understanding
+
+<Quiz
+  question="Why did the server stop calling app.listen() after adding Socket.io?"
+  options={[
+    'app.listen is deprecated in Express 5',
+    'Socket.io attaches to an HTTP server, so you create that server explicitly and let it listen',
+    'Socket.io runs in a separate process',
+    'It is only a naming convention'
+  ]}
+  answer={1}
+  explanation="Socket.io upgrades the same HTTP server that serves Express. You wrap the app in a node:http server, attach Socket.io to it, and call listen on the HTTP server so both REST and WebSocket traffic share one port."
+/>
+
+<Quiz
+  question="Two API processes run behind a load balancer. A user connected to process A should receive a message emitted on process B. What fixes this?"
+  options={[
+    'Server-Sent Events instead of WebSockets',
+    'The Redis adapter, which publishes every emit across all processes',
+    'Restarting the load balancer with sticky sessions only',
+    'Persisting messages and letting clients poll as a fallback'
+  ]}
+  answer={1}
+  explanation="The Redis adapter fans out every broadcast through Redis so any process delivers it to its own connected sockets. Sticky sessions keep a client on one process but cannot carry an emit to another process's sockets."
+/>
+
+<Exercise title="Real-time chat for the project board" difficulty="hard">
+Add chat to a project board — the feature used again in the capstone.
+
+1. **Model:** a `Message` schema with `room`, `author`, `text` (max 2000), and timestamps. A `Room` schema with `name` and `members`. Seed one room containing your chat users.
+2. **REST:** `GET /api/v1/rooms/:id/messages` returns the last 50 messages, oldest first, with authors populated; members only.
+3. **Socket auth:** issue JWTs from your login endpoint, authenticate the handshake, and reject invalid tokens. Log connection and disconnection with the user's email.
+4. **Rooms and messaging:** `room:join` with membership authorization; `message:send` that validates input, persists, populates, broadcasts to the room, and acks; sender sees their own message through the room broadcast — verify no duplicates.
+5. **Client:** a `SocketProvider` with token-based connection and clean disconnect on logout; a `ChatRoom` component with REST history plus live appends, disabled send during flight, and a retry on failure.
+6. **Typing indicator:** broadcast `typing:start` debounced to stop after 2 seconds; show "X is typing…" in the room; never persist it.
+7. **Presence:** show an online-members list per room; handle multi-tab users with a per-user socket count so the last disconnect is what marks them offline.
+8. **Reconnect:** kill the server while two tabs are open, restart it, and verify both clients reconnect and recover missed messages by refetching history on reconnect.
+9. **Scale check:** in the README, explain what would need to change (sticky sessions, Redis adapter) if this ran on two server processes, and why serverless functions cannot host the socket layer directly.
+</Exercise>
+
+## Summary
+
+- Polling fakes real-time with waste and latency; WebSockets give one persistent, two-way connection; SSE covers server-to-client-only cases.
+- Socket.io adds reconnection, rooms, events, and acknowledgments over raw WebSockets.
+- Attach Socket.io to the HTTP server; authenticate the handshake and authorize every event — rooms are for delivery, not permission.
+- Persist first, broadcast second; history goes over REST, live updates over the socket, with a cursor for reconnection gaps.
+- Personal rooms plus persisted notifications keep multi-device users in sync.
+- A shared `SocketProvider` centralizes connection, auth, and cleanup in React.
+- Scale with sticky sessions and the Redis adapter; serverless hosts cannot hold socket connections — run real-time as a long-lived service.
+
+Next: file uploads — multipart requests, Multer, validation, and storing images in the cloud.

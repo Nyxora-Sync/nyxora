@@ -1,0 +1,312 @@
+You have built both halves: an Express API and a React app. Now they need to live together as one product. How you organize that product — repositories, folders, environment configuration, and shared code — determines how painful the next year of changes will be.
+
+This lesson is about structure. It is unglamorous and it pays off every single day.
+
+## Monorepo or separate repositories?
+
+There are two ways to hold a full stack app:
+
+**Separate repositories** — one repo for the API, one for the client. Each has its own CI, its own deployments, and access can be granted independently. The cost: coordinating a change that touches both sides means two pull requests, two reviews, and version-matching questions (“which client works with which API?”).
+
+**Monorepo** — both apps in one repository, usually with workspaces. One clone, one install, one CI pipeline, one pull request for a feature that spans the stack. The cost: tooling needs to be set up carefully, and every team member can read (and break) everything.
+
+| | Separate repos | Monorepo |
+|---|---|---|
+| Cross-stack changes | Two PRs to coordinate | One PR |
+| Shared code | Published package or copy-paste | Imported directly |
+| CI/CD | Independent pipelines | One pipeline, path filters |
+| Access control | Per repo | All or nothing |
+| Tooling | Simple | Needs workspaces |
+
+For solo developers and most teams under this curriculum: **use a monorepo with npm workspaces**. It reduces the ceremony of shipping features and makes shared validation and types trivial.
+
+<KeyPoint>
+Architecture is about matching structure to the way work actually flows. If most changes touch both the client and the server, splitting the repos fights your reality.
+</KeyPoint>
+
+## A folder layout that scales
+
+```text
+mern-app/
+├── package.json            # workspace root
+├── .gitignore
+├── .env.example
+├── client/                 # React app
+│   ├── package.json
+│   ├── vite.config.js
+│   └── src/
+│       ├── components/
+│       ├── features/       # feature folders: auth/, posts/, cart/
+│       ├── lib/            # api client, hooks, utils
+│       ├── pages/
+│       ├── App.jsx
+│       └── main.jsx
+└── server/                 # Express API
+    ├── package.json
+    └── src/
+        ├── config/         # env validation, db connection
+        ├── models/
+        ├── routes/
+        ├── controllers/
+        ├── middleware/
+        ├── services/       # business logic, reused by routes and tests
+        ├── utils/
+        ├── app.js          # builds the Express app (testable)
+        └── server.js       # connects DB, starts listening
+```
+
+Two organizational ideas do most of the work:
+
+**On the client, group by feature, not by file type.** A `features/posts/` folder holding the list page, the detail page, the hooks, and the API calls keeps everything about posts together. The alternative — a global `components/` and a global `hooks/` — forces you to open five folders to change one feature.
+
+**On the server, separate routes from controllers from services:**
+
+```text
+Request ──▶ routes/       (path + method + middleware wiring)
+        ──▶ controllers/  (parse request, send response)
+        ──▶ services/     (business logic, reused by routes and tests)
+        ──▶ models/       (Mongoose schemas and queries)
+```
+
+A route file stays declarative:
+
+```js
+// server/src/routes/posts.js
+import { Router } from 'express'
+import { requireAuth } from '../middleware/require-auth.js'
+import { listPosts, getPost, createPost } from '../controllers/posts.js'
+
+export const postsRouter = Router()
+
+postsRouter.get('/', listPosts)
+postsRouter.get('/:id', getPost)
+postsRouter.post('/', requireAuth, createPost)
+```
+
+A controller handles HTTP concerns and delegates decisions to a service:
+
+```js
+// server/src/controllers/posts.js
+import { Post } from '../models/post.js'
+
+export async function listPosts(req, res, next) {
+  try {
+    const page = Math.max(Number(req.query.page ?? 1), 1)
+    const limit = Math.min(Number(req.query.limit ?? 20), 100)
+
+    const [posts, total] = await Promise.all([
+      Post.find().sort('-createdAt').skip((page - 1) * limit).limit(limit).lean(),
+      Post.countDocuments(),
+    ])
+
+    res.json({ data: posts, meta: { page, limit, total } })
+  } catch (error) {
+    next(error)
+  }
+}
+```
+
+When this app grows, the layered version lets you test `listPosts` through HTTP and swap implementations without touching route wiring. One-file Express demos are fine for learning; products deserve layers.
+
+## npm workspaces
+
+A workspace root manages dependencies and scripts for both packages:
+
+```json
+{
+  "name": "mern-app",
+  "private": true,
+  "workspaces": ["client", "server"],
+  "scripts": {
+    "dev": "npm run dev --workspace server & npm run dev --workspace client",
+    "dev:server": "npm run dev --workspace server",
+    "dev:client": "npm run dev --workspace client",
+    "test": "npm test --workspaces --if-present",
+    "build": "npm run build --workspace client"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0"
+  }
+}
+```
+
+```bash
+npm install          # installs dependencies for both workspaces
+npm run dev:server   # node --watch src/server.js
+npm run dev:client   # vite
+```
+
+Prefer `concurrently` for running both:
+
+```json
+"dev": "concurrently -n server,client -c blue,green \"npm:dev:server\" \"npm:dev:client\""
+```
+
+Each workspace keeps its own `package.json` with its own dependencies — the API does not need React, and the client should never bundle Express.
+
+<Callout type="info" title="When to reach for heavier tooling">
+  npm workspaces handle two or three packages comfortably. Larger monorepos often adopt **pnpm workspaces** (faster, stricter) and **Turborepo** (task caching and pipelines). The folder discipline above stays identical; only the tooling changes.
+</Callout>
+
+## Environment configuration
+
+Every environment — local, staging, production — has different secrets and URLs. The rules:
+
+- **Server-side secrets never reach the client.** `JWT_SECRET`, database URLs, and API keys live in the server's environment only.
+- **Only variables explicitly exposed to the bundler reach the browser.** Vite exposes `VITE_`-prefixed variables; Next.js exposes `NEXT_PUBLIC_`. Anything else is effectively private.
+- **Validate at boot, fail fast.** A server running with a missing `JWT_SECRET` should crash immediately with a clear message, not fail hours later on the first login.
+
+A config module with Zod catches misconfiguration at startup:
+
+```js
+// server/src/config/env.js
+import { z } from 'zod'
+
+const envSchema = z.object({
+  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  PORT: z.coerce.number().default(3000),
+  MONGODB_URI: z.string().min(1),
+  JWT_SECRET: z.string().min(32),
+  CLIENT_URL: z.string().url(),
+})
+
+export const env = envSchema.parse(process.env)
+```
+
+```js
+// server/src/server.js
+import { env } from './config/env.js'   // throws with a readable list of problems
+import { createApp } from './app.js'
+import mongoose from 'mongoose'
+
+await mongoose.connect(env.MONGODB_URI)
+createApp().listen(env.PORT, () => {
+  console.log(`API listening on http://localhost:${env.PORT} (${env.NODE_ENV})`)
+})
+```
+
+Keep a committed `.env.example` documenting every variable with fake values, and keep real `.env` files in `.gitignore`:
+
+```text
+# server/.env.example
+PORT=3000
+MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net/app
+JWT_SECRET=replace-with-32-plus-random-characters
+CLIENT_URL=http://localhost:5173
+```
+
+## Sharing code between client and server
+
+The reason to choose a monorepo is that some code genuinely belongs to both sides. The most valuable candidate: **validation schemas**.
+
+```text
+shared/
+├── package.json          # name: "@mern/shared"
+└── src/
+    └── schemas/
+        ├── auth.js
+        └── posts.js
+```
+
+```js
+// shared/src/schemas/posts.js
+import { z } from 'zod'
+
+export const createPostSchema = z.object({
+  title: z.string().trim().min(3).max(120),
+  body: z.string().min(20),
+  tags: z.array(z.string()).max(5).default([]),
+})
+```
+
+```js
+// server: validate with the shared schema
+import { createPostSchema } from '@mern/shared/schemas/posts'
+
+const parsed = createPostSchema.safeParse(req.body)
+```
+
+```jsx
+// client: validate the same rules in the form with React Hook Form
+import { createPostSchema } from '@mern/shared/schemas/posts'
+import { zodResolver } from '@hookform/resolvers/zod'
+
+useForm({ resolver: zodResolver(createPostSchema) })
+```
+
+One definition, identical rules on both sides, impossible to drift. The workspace package is wired by adding `"@mern/shared": "*"` to each package's dependencies.
+
+For TypeScript projects, the same folder exports interfaces and inferred types (`z.infer<typeof createPostSchema>`), which removes an entire category of API contract bugs. Even without TypeScript, sharing schemas pays for itself immediately.
+
+<Callout type="warning" title="Not everything belongs in shared">
+  Keep shared code small and dependency-light: schemas, constants, pure utilities, types. Never put database models or React components there — the first drags Mongoose into your browser bundle, the second drags React into your API.
+</Callout>
+
+## Try it
+
+<TryIt title="Scaffold the monorepo" hint="Run these in an empty folder. You can also start from your existing projects by moving folders rather than generating new ones.">
+```bash
+mkdir mern-app && cd mern-app
+npm init -y
+npm pkg set private=true
+npm pkg set workspaces[0]=client workspaces[1]=server
+
+# create the two workspaces
+npm create vite@latest client -- --template react
+npm init -y --workspace server
+npm pkg set type=module --workspace server
+
+npm install
+npm run dev --workspace client
+```
+</TryIt>
+
+## Check your understanding
+
+<Quiz
+  question="A feature requires a new field, validated on the client, stored by the API, and shown in the UI. What is the main benefit of a monorepo here?"
+  options={[
+    'The app runs faster in production',
+    'The whole feature ships as one reviewable pull request with shared validation',
+    'It removes the need for environment variables',
+    'It makes CORS unnecessary'
+  ]}
+  answer={1}
+  explanation="A monorepo lets one change touch client, server, and shared schemas in a single commit and review. Performance, env config, and CORS are unrelated concerns."
+/>
+
+<Quiz
+  question="Which variable is safe to expose to the browser bundle?"
+  options={[
+    'JWT_SECRET',
+    'MONGODB_URI',
+    'VITE_API_URL pointing at your public API',
+    'The Cloudinary API secret'
+  ]}
+  answer={2}
+  explanation="Anything in the client bundle is public. Only public values like API base URLs belong there; secrets stay server-side and are injected by the hosting platform at runtime."
+/>
+
+<Exercise title="Restructure your movies app into a production-shaped monorepo" difficulty="medium">
+Take the API and client you built in earlier modules and reorganize them without changing behavior.
+
+1. Create a root workspace with `client/` and `server/` packages and a root `dev` script using `concurrently`.
+2. Move the server into `src/` with `config/`, `models/`, `routes/`, `controllers/`, `middleware/`, and split `app.js` (builds the app) from `server.js` (connects and listens).
+3. Add `config/env.js` with a Zod schema for `PORT`, `MONGODB_URI`, `JWT_SECRET`, and `CLIENT_URL`; run the server once with a missing variable and confirm it fails with a readable error.
+4. Commit a `.env.example`; confirm `.env` is ignored by running `git status` after touching it.
+5. Create a `shared/` workspace exporting the movie Zod schema. Use it in the Express `validate` middleware and in the React form's `zodResolver`.
+6. Reorganize the client into `features/` (at least `movies/` and `auth/`), `lib/` (api client), and `pages/`.
+7. Update every import path, run both halves, and verify every endpoint still works.
+8. Verify no server-only dependency appears in the client's `package.json` and vice versa.
+</Exercise>
+
+## Summary
+
+- Monorepos trade tooling complexity for one-PR cross-stack changes; npm workspaces make them practical.
+- Group the client by feature and the server by layer: routes, controllers, services, models.
+- Split `app.js` from `server.js` so tests and tooling can import the app without listening.
+- Validate environment variables at boot and fail fast; keep secrets server-side and document them in `.env.example`.
+- Share Zod schemas (and types) through a small `shared` package — the highest-value shared code in a MERN app.
+- Keep shared code dependency-light: schemas, constants, pure utilities.
+
+Next: connecting the two halves for real — CORS, dev proxies, auth flows, and a typed API client.

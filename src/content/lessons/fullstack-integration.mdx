@@ -1,0 +1,325 @@
+Your React app runs on `localhost:5173`; your Express API runs on `localhost:3000`. They are neighbors on the same machine, but to the browser they are **different origins**, and the browser protects users with the same-origin policy. The first time you fetch from one to the other you will meet CORS, and the errors it produces confuse everyone exactly once.
+
+This lesson connects the halves properly: CORS and the dev proxy, cookie vs token auth flows across origins, a single API client every component uses, and the loading/error UX that follows from it.
+
+## Same-origin policy and CORS
+
+An **origin** is the combination of scheme, host, and port: `http://localhost:5173`. The browser only lets scripts read responses from the same origin by default — otherwise a malicious page could silently call your bank's API with your cookies attached.
+
+**CORS (Cross-Origin Resource Sharing)** is the mechanism that relaxes this rule *server-side*: the API explicitly says which origins may read its responses. It is a browser enforcement, not a security feature of the request itself — which is why tools like curl never see CORS errors.
+
+Two request types matter:
+
+- **Simple requests** (GET, or POST with form-friendly content types) go straight out; the browser checks the response headers afterward.
+- **Non-simple requests** (anything with `Content-Type: application/json`, `Authorization`, or non-safe methods) trigger a **preflight**: the browser first sends `OPTIONS` asking permission, and only proceeds if the server answers with the right headers.
+
+```text
+Browser                API
+   │  OPTIONS /api/posts
+   │  Origin: http://localhost:5173
+   │  Access-Control-Request-Method: POST
+   │  Access-Control-Request-Headers: content-type
+   │────────────────────────▶
+   │
+   │  204 No Content
+   │  Access-Control-Allow-Origin: http://localhost:5173
+   │  Access-Control-Allow-Methods: GET,POST,PATCH,DELETE
+   │  Access-Control-Allow-Headers: content-type,authorization
+   │◀────────────────────────
+   │
+   │  POST /api/posts        ← the real request, now allowed
+   │────────────────────────▶
+```
+
+Configure it with the `cors` package, explicitly listing your client:
+
+```js
+// server/src/app.js
+import cors from 'cors'
+import { env } from './config/env.js'
+
+app.use(
+  cors({
+    origin: env.CLIENT_URL,        // never a wildcard in production
+    credentials: true,             // allow cookies when the client sends credentials
+  })
+)
+```
+
+<Callout type="danger" title="Three CORS traps">
+  1. `Access-Control-Allow-Origin: *` cannot be combined with credentials — the browser rejects it. Echo the exact origin instead.
+  2. The `cors` middleware must run **before** your routes; place it right after `helmet()`.
+  3. If a request works in curl but a preflight fails in the browser, the fix is server-side headers, not the fetching code.
+</Callout>
+
+## The dev proxy: skip CORS while developing
+
+You do not have to cross origins in development at all. Vite can proxy `/api` to the Express server, so the browser talks only to `localhost:5173` and CORS never enters the picture:
+
+```js
+// client/vite.config.js
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+      },
+    },
+  },
+})
+```
+
+```js
+// now this relative fetch goes to the proxy, which forwards to Express
+fetch('/api/v1/posts')
+```
+
+In production the same relative URL works if the API is on the same domain (or served behind a reverse proxy / hosting rewrite). If the API lives on `api.example.com` and the client on `www.example.com`, configure CORS for production exactly as here.
+
+<KeyPoint>
+The proxy makes development frictionless; correct CORS makes production possible. Set up both — they are not alternatives, they cover different environments.
+</KeyPoint>
+
+## Cookies or tokens across origins?
+
+Both auth styles exist; each has cross-origin requirements.
+
+**httpOnly cookies** — the browser attaches them automatically:
+
+- The client must send requests with `credentials: 'include'` (or `withCredentials` in axios).
+- The server must respond with `Access-Control-Allow-Credentials: true` and an exact allowed origin.
+- For truly cross-site domains the cookie needs `SameSite=None; Secure` and HTTPS.
+- If the client and API share a parent domain (`www.example.com` and `api.example.com`), `SameSite=Lax` on the same site works with far less friction.
+
+**Bearer tokens** — the client holds the token (in memory, ideally) and sends `Authorization: Bearer <token>`:
+
+- No cookie attributes to fight; CORS still needs `authorization` in `Access-Control-Allow-Headers`.
+- You control the lifetime and refresh logic.
+- The token never touches `localStorage`, so XSS cannot read it after the fact.
+
+For first-party MERN apps, cookie-based auth with a dev proxy is the least error-prone path. For APIs serving mobile or third parties, bearer tokens are the norm. Either way: **never trust the client**, and verify on every request server-side.
+
+## One API client, used everywhere
+
+Never scatter `fetch` calls with hand-built URLs and duplicated error handling across components. Centralize them in a small client:
+
+```js
+// client/src/lib/api.js
+const BASE_URL = import.meta.env.VITE_API_URL ?? ''
+
+export class ApiError extends Error {
+  constructor(message, status, code) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.code = code
+  }
+}
+
+export async function api(path, { method = 'GET', body, token, signal } = {}) {
+  const headers = {}
+  if (body !== undefined) headers['Content-Type'] = 'application/json'
+  if (token) headers.Authorization = `Bearer ${token}`
+
+  let response
+  try {
+    response = await fetch(`${BASE_URL}${path}`, {
+      method,
+      headers,
+      signal,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    })
+  } catch (error) {
+    if (error.name === 'AbortError') throw error
+    throw new ApiError('Network error — is the API running?', 0, 'NETWORK_ERROR')
+  }
+
+  if (response.status === 204) return null
+
+  const data = await response.json().catch(() => null)
+
+  if (!response.ok) {
+    throw new ApiError(
+      data?.error?.message ?? `Request failed (${response.status})`,
+      response.status,
+      data?.error?.code ?? 'UNKNOWN'
+    )
+  }
+
+  return data
+}
+```
+
+```js
+// client/src/features/posts/api.js
+import { api } from '../../lib/api.js'
+
+export const postsApi = {
+  list: (signal) => api('/api/v1/posts', { signal }),
+  get: (id, signal) => api(`/api/v1/posts/${id}`, { signal }),
+  create: (input, token) => api('/api/v1/posts', { method: 'POST', body: input, token }),
+  remove: (id, token) => api(`/api/v1/posts/${id}`, { method: 'DELETE', token }),
+}
+```
+
+Every consumer now gets identical behavior: JSON headers, error shape normalization, 204 handling, network-error messages, and cancellation support. The API contract lives in one file.
+
+<Callout type="tip" title="The client is where the contract meets reality">
+  The server always returns `{ error: { code, message } }` (from the REST module); the client always throws `ApiError` with `status` and `code`. Components never parse raw responses — they catch one error type.
+</Callout>
+
+## Loading, error, and empty states — every time
+
+A screen that fetches data has **four** states, not two: loading, error, empty, and success. Provide all four in every feature; skipped states are where users get stuck.
+
+```jsx
+import { useQuery } from '@tanstack/react-query'
+import { postsApi } from './api.js'
+
+export function PostList() {
+  const { data, isPending, isError, error, refetch } = useQuery({
+    queryKey: ['posts'],
+    queryFn: ({ signal }) => postsApi.list(signal),
+  })
+
+  if (isPending) {
+    return <ul aria-busy="true">{Array.from({ length: 3 }, (_, i) => <li key={i}>Loading…</li>)}</ul>
+  }
+
+  if (isError) {
+    return (
+      <div role="alert">
+        <p>{error.status === 0 ? 'Cannot reach the server.' : `Failed to load posts: ${error.message}`}</p>
+        <button onClick={() => refetch()}>Try again</button>
+      </div>
+    )
+  }
+
+  if (data.length === 0) {
+    return <p>No posts yet. Write the first one.</p>
+  }
+
+  return (
+    <ul>
+      {data.map((post) => (
+        <li key={post.id}>{post.title}</li>
+      ))}
+    </ul>
+  )
+}
+```
+
+TanStack Query is doing the heavy lifting: caching, retries, cancellation when a component unmounts (`signal` is provided), and consistent states. Mutations should surface failures the same way:
+
+```jsx
+const createPost = useMutation({
+  mutationFn: (input) => postsApi.create(input, token),
+  onSuccess: () => queryClient.invalidateQueries({ queryKey: ['posts'] }),
+  onError: (error) => setFormError(error.message),
+})
+```
+
+## Auth, end to end
+
+The complete flow, with all the pieces from previous lessons:
+
+1. **Register/login** — client posts credentials to `/api/v1/auth/login` through the API client.
+2. **Token issuance** — server hashes/compares with bcrypt and returns either a token (bearer) or sets an httpOnly cookie.
+3. **Client stores auth state** — bearer: in memory (React context) and optionally refreshed on load; cookie: nothing to store, the browser handles it.
+4. **Every protected request** attaches credentials — `Authorization` header or `credentials: 'include'`.
+5. **Server verifies** with `requireAuth` middleware, attaches `req.user`, authorizes with `requireRole`/ownership checks.
+6. **On 401** — the client clears auth state and redirects to login; with cookies, hit `/api/v1/auth/refresh` first if you have short-lived access tokens.
+7. **On logout** — clear in-memory state and call the endpoint that clears/revokes the cookie or token.
+
+This loop is the backbone of the capstone project at the end of the module — build it once, reuse it everywhere.
+
+## Try it
+
+<TryIt title="A minimal API client with error normalization" hint="Add this file to a Vite app and call it from a component. Point it at your Express server and test a 404 by requesting a missing id.">
+```js
+// src/lib/api.js
+const BASE_URL = 'http://localhost:3000'
+
+export class ApiError extends Error {
+  constructor(message, status) {
+    super(message)
+    this.status = status
+  }
+}
+
+export async function api(path, options = {}) {
+  const response = await fetch(`${BASE_URL}${path}`, {
+    method: options.method ?? 'GET',
+    headers: options.body ? { 'Content-Type': 'application/json' } : {},
+    body: options.body ? JSON.stringify(options.body) : undefined,
+  })
+
+  const data = response.status === 204 ? null : await response.json().catch(() => null)
+
+  if (!response.ok) {
+    throw new ApiError(data?.error?.message ?? `HTTP ${response.status}`, response.status)
+  }
+  return data
+}
+
+// usage:
+// const posts = await api('/api/v1/posts')
+// await api('/api/v1/posts', { method: 'POST', body: { title: 'Hi' } })
+```
+</TryIt>
+
+## Check your understanding
+
+<Quiz
+  question="Why does a POST with Content-Type: application/json trigger a preflight OPTIONS request?"
+  options={[
+    'Because POST is always blocked cross-origin',
+    'Because JSON bodies and custom headers exceed what simple requests allow, so the browser asks permission first',
+    'Because the server requires authentication',
+    'Because the response is cached'
+  ]}
+  answer={1}
+  explanation="The preflight exists for requests that could have side effects beyond simple form posts: JSON content types, Authorization headers, and methods like PUT and DELETE. The server must answer the OPTIONS request with the right Access-Control-Allow-* headers."
+/>
+
+<Quiz
+  question="What should happen to the JWT_SECRET in a MERN monorepo?"
+  options={[
+    'It goes in the client .env with a VITE_ prefix',
+    'It goes in a shared package so both sides can sign tokens',
+    'It stays in the server environment only and never reaches the browser bundle',
+    'It is committed to the repository so deploys work'
+  ]}
+  answer={2}
+  explanation="Only the server signs and verifies tokens. A secret in the client bundle or a shared package is effectively public. Hosting platforms inject it as a server-side environment variable."
+/>
+
+<Exercise title="Connect your React client to your Express API" difficulty="medium">
+Wire the two halves of your movies app together the way a production app would.
+
+1. **Dev proxy:** add the Vite proxy so the client fetches `/api/...` without CORS in development. Verify in DevTools that requests to `/api` are served from the Vite origin.
+2. **CORS for production:** configure `cors({ origin: env.CLIENT_URL, credentials: true })` and prove a real cross-origin request works by running the client on a different port with the proxy disabled.
+3. **API client:** implement `client/src/lib/api.js` with `ApiError`, JSON handling, 204 support, token attachment, and `AbortController` pass-through. Build a `moviesApi` object for all five endpoints.
+4. **Error normalization:** make the server return `{ error: { code, message } }` for 400/404/409/422; confirm the client surfaces `error.code` and `error.message` from every failure case.
+5. **All four states:** build a movies page using TanStack Query with distinct loading skeleton, error-with-retry, empty, and success states. Verify each by simulating slow network, stopping the server, emptying the database, and seeding data.
+6. **Auth flow:** add login against your auth API; keep the token in memory in an auth context; attach it in the API client; protect `POST/PATCH/DELETE` on the server; and on any `401` clear the auth state and redirect to `/login`.
+7. **Offline touch:** use DevTools to set the network to offline and confirm the network-error path shows a clear message rather than a blank screen.
+8. Write a short README section documenting the request flow from a button click to a Mongo document and back.
+</Exercise>
+
+## Summary
+
+- Cross-origin requests are blocked by the browser unless the server sends CORS headers; JSON and `Authorization` trigger preflights.
+- Configure `cors` with an exact origin and `credentials: true` before your routes; never combine wildcard origins with credentials.
+- A Vite dev proxy removes CORS friction locally; production still needs correct CORS or same-origin hosting.
+- Cookies need `credentials` on both sides and careful `SameSite` settings; bearer tokens live in memory and travel in headers.
+- One API client centralizes URLs, JSON handling, token attachment, cancellation, and a single error type.
+- Every data screen needs loading, error, empty, and success states.
+- The auth loop — login, store, attach, verify, 401 handling, logout — is built once and reused by every feature.
+
+Next: real-time features with Socket.io, so data can flow the other way — from server to client without asking.

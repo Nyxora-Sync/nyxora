@@ -1,0 +1,319 @@
+Your app runs on `localhost`. Deployment is the work of making three pieces — database, API, and client — run on the public internet, connected to each other, updated automatically, and safe. This lesson walks the standard MERN topology end to end, then adds the CI/CD pipeline that keeps it healthy.
+
+## The deployment map
+
+```text
+                 ┌──────────────────────────┐
+   Browser ─────▶│  Client (static files)   │  Vercel / Netlify / Cloudflare Pages
+                 │  React build output      │  CDN, HTTPS, atomic deploys
+                 └─────────────┬────────────┘
+                               │ HTTPS (fetch to VITE_API_URL)
+                 ┌─────────────▼────────────┐
+                 │  API (Node process)      │  Render / Railway / Fly.io
+                 │  Express + Socket.io     │  env vars, health checks, logs
+                 └─────────────┬────────────┘
+                               │ mongodb+srv://
+                 ┌─────────────▼────────────┐
+                 │  Database                │  MongoDB Atlas
+                 │  managed replica set     │  backups, monitoring, network rules
+                 └──────────────────────────┘
+```
+
+Each piece deploys to the kind of host it needs:
+
+- The **client** is static files — always deploy to a CDN host for free TLS and global edge caching.
+- The **API** is a long-running Node process — needs a host that keeps it alive (and can hold WebSocket connections).
+- The **database** should never run on your own server — use a managed service.
+
+<KeyPoint>
+Match the host to the workload. Static build output belongs on a CDN; stateful Node processes belong on a platform that runs them continuously; a database belongs in managed hands where backups and failover are someone else's job.
+</KeyPoint>
+
+## MongoDB Atlas
+
+1. Create a free cluster at MongoDB Atlas.
+2. Create a **database user** (separate from your Atlas login) with a strong password — your app uses this, stored in the API's environment variables.
+3. Configure **Network Access**: allow the server host's IPs (or `0.0.0.0/0` for hosts with dynamic IPs, accepting the trade-off while your auth is strong).
+4. Copy the connection string: `mongodb+srv://app-user:<password>@cluster0.xxxxx.mongodb.net/<dbName>?retryWrites=true&w=majority`.
+
+Two production notes: URL-encode special characters in the password, and never point the same database at both development and production. Create a second database (`app-dev`, `app-prod`) — otherwise one bad `deleteMany()` in a debugging session wipes your live data.
+
+```bash
+# server/.env (never committed)
+MONGODB_URI=mongodb+srv://app-user:password@cluster0.xxxxx.mongodb.net/app-prod?retryWrites=true&w=majority
+```
+
+## Deploying the API to Render or Railway
+
+Both platforms work identically in spirit: connect the repository, set a start command, inject environment variables.
+
+```text
+Build command:  npm ci --workspace server
+Start command:  node server/src/server.js
+```
+
+What to set:
+
+- **Root directory**: repository root (so the workspace install works) or `server/` if you deploy the API as a standalone repo.
+- **Environment variables**: everything from `.env`, pasted into the platform's dashboard — `NODE_ENV=production`, `MONGODB_URI`, `JWT_SECRET`, `CLIENT_URL` (the deployed client URL, not localhost), plus service secrets like Cloudinary keys.
+- **Health check path**: add a trivial endpoint and point the platform at it:
+
+```js
+// server/src/app.js (add near the top of the routes)
+app.get('/api/v1/health', (req, res) => {
+  res.json({ status: 'ok', uptime: process.uptime() })
+})
+```
+
+The platform pings it and restarts unresponsive instances. It also gives you an uptime monitor URL.
+
+Two platform realities to expect:
+
+- **Free tiers sleep.** Render's free web services spin down after idle time; the next request takes ~30 seconds. Acceptable for portfolios; note it in your README so reviewers do not think the site is broken.
+- **Deploys are immutable.** Configuration lives in the dashboard plus your repo; never edit files on the server by hand.
+
+After the first deploy, verify from anywhere in the world:
+
+```bash
+curl -s https://your-api.onrender.com/api/v1/health
+```
+
+## Deploying the client to Vercel or Netlify
+
+The build output is a folder of static assets; the platforms handle CDN, TLS, and preview deployments (every pull request gets its own URL — a workflow worth learning to love).
+
+```text
+Build command:   npm run build --workspace client
+Output directory: client/dist
+Environment variable: VITE_API_URL=https://your-api.onrender.com
+```
+
+`VITE_API_URL` is **baked into the bundle at build time** — that is why it uses the `VITE_` prefix and why it must never hold a secret. Change the API URL, redeploy the client, and the new URL ships.
+
+### One required detail: SPA rewrites
+
+React Router manages URLs in the browser — `/projects/123` exists only client-side. When someone reloads that URL, the CDN host looks for that path as a file and returns 404. Tell the host to serve `index.html` for every path:
+
+```json
+// client/vercel.json
+{
+  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+}
+```
+
+```text
+# client/public/_redirects   (Netlify)
+/*  /index.html  200
+```
+
+Verify by deep-linking: open `https://your-app.vercel.app/dashboard` in a fresh tab after deploying — not by clicking through from the home page. The fresh load is what breaks without a rewrite.
+
+## CORS in production
+
+Your dev proxy no longer exists, so the API and client are genuinely cross-origin. Set the deployed client URL (and preview URLs) in the API's `CLIENT_URL` and restart it:
+
+```js
+// server/src/app.js
+app.use(cors({ origin: env.CLIENT_URL, credentials: true }))
+```
+
+If that env var still says `http://localhost:5173`, every browser request fails while curl keeps working — remember that the failing calls are server-configuration problems, and look at the API logs first.
+
+## CI with GitHub Actions
+
+Deployment platforms can auto-deploy on push, but the pipeline that stops broken code from reaching them is yours: run lint and tests on every pull request.
+
+```yaml
+# .github/workflows/ci.yml
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      mongo:
+        image: mongo:7
+        ports: ['27017:27017']
+        options: >-
+          --health-cmd "mongosh --eval 'db.runCommand({ping:1})'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      NODE_ENV: test
+      MONGODB_URI: mongodb://localhost:27017/app-test
+      JWT_SECRET: ci-only-secret-not-used-in-production-1234
+      CLIENT_URL: http://localhost:5173
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+      - run: npm run lint --workspaces --if-present
+      - run: npm test --workspaces --if-present
+      - run: npm run build --workspace client
+```
+
+What each piece buys you:
+
+- **`npm ci`** installs exactly the lockfile — reproducible builds.
+- **The Mongo service container** gives integration tests a real database on the runner; your `MONGODB_URI` in CI points at it.
+- **Tests with Vitest + Supertest** run the same way locally and in CI — this is why the testing lesson's setup matters now.
+- **The client build** catches import and type errors before deploy.
+- **`on: pull_request`** makes CI a required check; **`on: push` to master** guards the deploy branch.
+
+Add a deploy badge to your README:
+
+```markdown
+![CI](https://github.com/<you>/<repo>/actions/workflows/ci.yml/badge.svg)
+```
+
+<Callout type="info" title="Continuous delivery, when you are ready">
+  Automatic deploys from CI use a **deploy hook** — a secret URL each platform provides that triggers a deploy. Call it from a job that runs only after tests pass on master. This upgrades you from “CI checks code” to “CI checks code and ships it”, which is the definition of CD — one small, satisfying step further.
+</Callout>
+
+## Docker: portable environments
+
+If Render or Railway deploys feel like magic, **Docker** makes the environment explicit. A container packages your app with the exact Node version and dependencies it needs — the same artifact runs on any host that speaks Docker.
+
+```dockerfile
+# server/Dockerfile
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Install dependencies first — this layer caches across code changes
+COPY package*.json ./
+RUN npm ci --omit=dev
+
+COPY src ./src
+
+ENV NODE_ENV=production
+EXPOSE 3000
+USER node
+
+CMD ["node", "src/server.js"]
+```
+
+```text
+# server/.dockerignore
+node_modules
+.env
+tests
+*.md
+```
+
+```bash
+docker build -t mern-api ./server
+docker run --env-file server/.env -p 3000:3000 mern-api
+
+# compose the whole stack for local parity
+docker compose up -d mongo
+```
+
+Why containers matter even when the platform builds from source: dependency drift between your machine, CI, and production disappears (one image, everywhere), and you can run the whole stack — API plus a local Mongo — with one command. The `USER node` line matters too: running as root inside the container is an avoidable risk. The playground for this lesson walks through writing and running this Dockerfile.
+
+## The pre-launch checklist
+
+Run these once before calling it deployed:
+
+- [ ] `NODE_ENV=production`, `helmet()`, and rate limiting enabled on the API
+- [ ] Every secret lives in platform env vars; `git log` shows no committed `.env`
+- [ ] HTTPS on both domains (both hosts do this automatically)
+- [ ] Clientside deep links reload correctly (SPA rewrite verified)
+- [ ] Health endpoint returns `ok`; the host is watching it
+- [ ] `CLIENT_URL` and CORS match the deployed client; a real browser login works
+- [ ] A seeded demo account exists, or registration works end-to-end
+- [ ] Error monitoring attached (Sentry free tier) so production errors email you
+- [ ] Atlas backups enabled; dev and prod use different databases
+- [ ] README has the live URLs, demo credentials, and a screenshot
+
+<Callout type="warning" title="A live URL is not the finish line">
+  The most common portfolio mistake: the site is live and empty, or crashes on the second request. Seed data, test the flows yourself in an incognito window, and treat the checklist above as part of the build, not optional polish.
+</Callout>
+
+## Try it
+
+<TryIt title="Your first GitHub Actions workflow" hint="Create .github/workflows/ci.yml in a repo with a Node project, push, and watch the Actions tab run. Copy the YAML above, trimming the workspace flags for a single-package repo.">
+```yaml
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm test
+```
+</TryIt>
+
+## Check your understanding
+
+<Quiz
+  question="Your deployed app's deep link /projects/42 returns 404 on reload, but clicking through from the home page works. What is missing?"
+  options={[
+    'A CORS header on the client host',
+    'An SPA rewrite that serves index.html for all paths',
+    'A health check endpoint',
+    'A second database for production'
+  ]}
+  answer={1}
+  explanation="The static host looks for a real file at /projects/42 and finds none. A rewrite rule makes the host return index.html for every path, letting React Router resolve the URL in the browser."
+/>
+
+<Quiz
+  question="Why can VITE_API_URL be safely visible in the client bundle while JWT_SECRET cannot?"
+  options={[
+    'Vite encrypts VITE_ variables',
+    'The API URL is a public address; the JWT secret proves server authority and must never leave the server',
+    'The bundle is only visible to logged-in users',
+    'JWT_SECRET is too long for the bundle'
+  ]}
+  answer={1}
+  explanation="Everything in a client bundle is public by definition, so only public values belong there. The JWT secret signs tokens; anyone who has it can forge authentication — it stays in the server's environment variables."
+/>
+
+<Exercise title="Deploy your movies app to production" difficulty="hard">
+Take the full stack app you have built through this curriculum and put it on the public internet with an automated pipeline.
+
+1. **Database:** create an Atlas cluster, an app database user, and a separate `app-prod` database; connect from your local machine first with the shared `MONGODB_URI` to confirm it works.
+2. **API:** deploy `server/` to Render or Railway with production env vars, add the `/api/v1/health` endpoint, and confirm `curl https://<api>/api/v1/health` returns ok from outside your network.
+3. **Client:** deploy `client/` to Vercel or Netlify with `VITE_API_URL` pointing at the API; add the SPA rewrite; verify a **hard reload** of a nested route works.
+4. **CORS:** set `CLIENT_URL` to the deployed client URL; verify login and a protected mutation work in a browser (not curl).
+5. **CI:** add the GitHub Actions workflow with a Mongo service container; make tests run on pull requests; require the check before merging on master.
+6. **CD:** connect the platform's auto-deploy to master (or wire a deploy hook that fires only after CI passes). Push a trivial change and watch it ship without touching a dashboard.
+7. **Monitoring:** attach Sentry (or equivalent) to the API; trigger a deliberate error in a staging environment and confirm it appears with a stack trace.
+8. **Seed and document:** seed a demo account with sample data; update the README with live URLs, demo credentials, a screenshot, and a short architecture diagram.
+9. **Hostile test:** open the site in a private window on a different network (phone hotspot) and complete the core user journey end to end. Fix whatever breaks.
+</Exercise>
+
+## Summary
+
+- The standard MERN topology: static client on a CDN host, Node API on a long-running host, database managed in Atlas.
+- Atlas: separate app user, network rules, and separate dev/prod databases; URL-encode credentials.
+- APIs deploy with a build command, start command, env vars from the dashboard, and a health endpoint; expect free tiers to sleep.
+- Clients deploy as static builds with `VITE_`-prefixed public config — and an SPA rewrite so deep links survive reloads.
+- Production CORS means setting the real client origin; curl working proves nothing about the browser.
+- GitHub Actions runs lint, tests (against a real Mongo service container), and the client build on every PR; deploy hooks extend it to full CD.
+- Docker makes the runtime environment explicit and reproducible; run as a non-root user.
+- Launch with the checklist: security headers, secrets, HTTPS, monitoring, backups, seeded data, and docs.
+
+Next: the capstone — one more complete MERN application, from empty repository to deployed product.
