@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { useSession } from 'next-auth/react'
 import { useProgress, type ProgressState } from '@/hooks/use-progress'
 import { tracks, type Lesson } from '@/lib/curriculum'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -10,7 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import {
   Trophy, Zap, Flame, Target, BookOpen, CheckCircle2, ArrowRight,
-  Clock, Bookmark, RotateCcw, Play, Award, TrendingUp,
+  Clock, Bookmark, RotateCcw, Play, Award, TrendingUp, Cloud, CloudOff,
 } from 'lucide-react'
 import { calculateLevel, cn } from '@/lib/utils'
 
@@ -35,6 +36,7 @@ const badgeDefinitions: {
 
 export function DashboardClient() {
   const { state, isLoaded, xp, streak, resetProgress, bookmarks } = useProgress()
+  const { data: session } = useSession()
 
   if (!isLoaded) {
     return (
@@ -90,6 +92,41 @@ export function DashboardClient() {
 
   return (
     <div className="space-y-10">
+      {/* Sync status */}
+      <div
+        className={cn(
+          'flex flex-col gap-3 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between',
+          session
+            ? 'border-emerald-500/20 bg-emerald-500/5'
+            : 'border-border bg-muted/40'
+        )}
+      >
+        <div className="flex items-start gap-3">
+          {session ? (
+            <Cloud className="mt-0.5 h-5 w-5 shrink-0 text-emerald-500" aria-hidden="true" />
+          ) : (
+            <CloudOff className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" aria-hidden="true" />
+          )}
+          <div>
+            <p className="text-sm font-medium">
+              {session
+                ? `Synced to ${session.user?.email}`
+                : 'Saved in this browser only'}
+            </p>
+            <p className="text-sm text-muted-foreground">
+              {session
+                ? 'Your progress, XP, streaks, notes, and bookmarks follow you to any device.'
+                : 'Sign in to sync your progress across devices — everything you have now will be merged into your account.'}
+            </p>
+          </div>
+        </div>
+        {!session && (
+          <Button asChild variant="outline" className="shrink-0 gap-2">
+            <Link href="/auth/signin?callbackUrl=/dashboard">Sign in to sync</Link>
+          </Button>
+        )}
+      </div>
+
       {/* Stats Grid */}
       <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
         <Card>

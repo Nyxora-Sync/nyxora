@@ -1,79 +1,24 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import {
+  defaultProgressState,
+  getToday,
+  loadProgressState,
+  saveProgressState,
+  type ProgressState,
+} from '@/lib/progress-state'
 
-const STORAGE_KEY = 'mern-learn-progress'
-
-export interface LessonProgress {
-  completed: boolean
-  completedAt?: string
-  notes?: string
-}
-
-export interface ProgressState {
-  lessons: Record<string, LessonProgress> // lessonId -> progress
-  xp: number
-  streak: {
-    current: number
-    lastActiveDate: string | null
-    longest: number
-  }
-  bookmarks: string[]
-  lastVisited: {
-    track: string
-    module: string
-    lesson: string
-    timestamp: string
-  } | null
-}
-
-const defaultState: ProgressState = {
-  lessons: {},
-  xp: 0,
-  streak: {
-    current: 0,
-    lastActiveDate: null,
-    longest: 0,
-  },
-  bookmarks: [],
-  lastVisited: null,
-}
-
-function getToday(): string {
-  return new Date().toISOString().split('T')[0]
-}
-
-function loadState(): ProgressState {
-  if (typeof window === 'undefined') return defaultState
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY)
-    if (!stored) return defaultState
-    const parsed = JSON.parse(stored)
-    return { ...defaultState, ...parsed }
-  } catch {
-    return defaultState
-  }
-}
-
-function saveState(state: ProgressState) {
-  if (typeof window === 'undefined') return
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
-    // Dispatch custom event so other components can react
-    window.dispatchEvent(new CustomEvent('progress-updated', { detail: state }))
-  } catch (e) {
-    console.error('Failed to save progress:', e)
-  }
-}
+export type { LessonProgress, ProgressState } from '@/lib/progress-state'
 
 export function useProgress() {
-  const [state, setState] = useState<ProgressState>(defaultState)
+  const [state, setState] = useState<ProgressState>(defaultProgressState)
   const [isLoaded, setIsLoaded] = useState(false)
 
   useEffect(() => {
     // Hydrate from localStorage (external store) on mount.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setState(loadState())
+    setState(loadProgressState())
     setIsLoaded(true)
 
     const handleUpdate = (e: Event) => {
@@ -132,7 +77,7 @@ export function useProgress() {
         next = updateStreak(next)
       }
 
-      saveState(next)
+      saveProgressState(next)
       return next
     })
   }, [updateStreak])
@@ -146,7 +91,7 @@ export function useProgress() {
           [lessonId]: { ...prev.lessons[lessonId], completed: prev.lessons[lessonId]?.completed ?? false, notes },
         },
       }
-      saveState(next)
+      saveProgressState(next)
       return next
     })
   }, [])
@@ -157,7 +102,7 @@ export function useProgress() {
         ? prev.bookmarks.filter((id) => id !== lessonId)
         : [...prev.bookmarks, lessonId]
       const next = { ...prev, bookmarks }
-      saveState(next)
+      saveProgressState(next)
       return next
     })
   }, [])
@@ -168,14 +113,14 @@ export function useProgress() {
         ...prev,
         lastVisited: { track, module, lesson, timestamp: new Date().toISOString() },
       }
-      saveState(next)
+      saveProgressState(next)
       return next
     })
   }, [])
 
   const resetProgress = useCallback(() => {
-    saveState(defaultState)
-    setState(defaultState)
+    saveProgressState(defaultProgressState)
+    setState(defaultProgressState)
   }, [])
 
   const isCompleted = useCallback((lessonId: string) => {

@@ -65,14 +65,19 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   events: {
     async createUser({ user }) {
       if (!user.id) return
-      // Create default preferences for new user
-      await prisma.userPreferences.create({
-        data: {
-          userId: user.id,
-          theme: 'system',
-          track: 'beginner',
-        },
-      })
+      try {
+        // Create default preferences for new users. Never block sign-in if this
+        // fails (e.g. a transient database hiccup).
+        await prisma.userPreferences.create({
+          data: {
+            userId: user.id,
+            theme: 'system',
+            track: 'beginner',
+          },
+        })
+      } catch (error) {
+        console.error('Failed to create default user preferences:', error)
+      }
     },
   },
   debug: process.env.NODE_ENV === 'development',
