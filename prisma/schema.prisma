@@ -1,0 +1,203 @@
+// Prisma Schema for MERN Learn Platform
+// Run: npx prisma migrate dev --name init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  emailVerified DateTime?
+  name          String?
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts      Account[]
+  sessions      Session[]
+  progress      UserProgress[]
+  badges        UserBadge[]
+  projects      Project[]
+  preferences   UserPreferences?
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model UserPreferences {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  theme           String   @default("system") // light, dark, system
+  track           String   @default("beginner") // beginner, developer
+  emailUpdates    Boolean  @default(false)
+  showProgress    Boolean  @default(true)
+  anonymizeLeaderboard Boolean @default(true)
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// Learning Progress Tracking
+model UserProgress {
+  id        String   @id @default(cuid())
+  userId    String
+  lessonId  String
+  completed Boolean  @default(false)
+  notes     String?  @db.Text
+  xpEarned  Int      @default(0)
+  completedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lesson    Lesson   @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, lessonId])
+  @@index([userId])
+  @@index([lessonId])
+}
+
+// Gamification - Badges
+model Badge {
+  id          String   @id @default(cuid())
+  key         String   @unique // e.g., "first-api", "react-hooks-master"
+  name        String
+  description String
+  icon        String   // lucide icon name
+  category    String   // milestone, skill, streak, special
+  xpReward    Int      @default(0)
+  criteria    Json     // { type: "lesson_complete", count: 5, track: "developer" }
+  createdAt   DateTime @default(now())
+  userBadges  UserBadge[]
+}
+
+model UserBadge {
+  id        String   @id @default(cuid())
+  userId    String
+  badgeId   String
+  earnedAt  DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  badge     Badge    @relation(fields: [badgeId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, badgeId])
+  @@index([userId])
+}
+
+// Community - Project Showcase
+model Project {
+  id          String   @id @default(cuid())
+  userId      String
+  title       String
+  description String   @db.Text
+  githubUrl   String?
+  demoUrl     String?
+  imageUrl    String?
+  track       String   // beginner, developer
+  modules     String[] // which modules this project covers
+  tags        String[]
+  upvotes     Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([track])
+}
+
+// Content Structure (can also be file-based via MDX)
+model Track {
+  id          String   @id @default(cuid())
+  key         String   @unique // beginner, developer
+  name        String
+  description String   @db.Text
+  order       Int      @default(0)
+  modules     Module[]
+}
+
+model Module {
+  id          String   @id @default(cuid())
+  trackId     String
+  key         String   // e.g., "node-express", "mongodb", "react"
+  name        String
+  description String   @db.Text
+  order       Int      @default(0)
+  estimatedHours Int   @default(0)
+  track       Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  lessons     Lesson[]
+
+  @@unique([trackId, key])
+  @@index([trackId])
+}
+
+model Lesson {
+  id          String   @id @default(cuid())
+  moduleId    String
+  key         String   // e.g., "express-routing", "mongoose-schemas"
+  title       String
+  description String   @db.Text
+  content     String?  @db.Text // MDX content or reference to file
+  order       Int      @default(0)
+  estimatedMinutes Int  @default(0)
+  difficulty  String   @default("beginner") // beginner, intermediate, advanced
+  xpReward    Int      @default(10)
+  module      Module   @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  resources   Resource[]
+  progress    UserProgress[]
+
+  @@unique([moduleId, key])
+  @@index([moduleId])
+}
+
+model Resource {
+  id          String   @id @default(cuid())
+  lessonId    String
+  type        String   // video, article, docs, interactive, project, cheatsheet
+  title       String
+  url         String
+  description String?  @db.Text
+  duration    String?  // e.g., "15 min", "2 hours"
+  provider    String?  // freeCodeCamp, Net Ninja, Official Docs, etc.
+  isVerified  Boolean  @default(false) // official docs get this badge
+  order       Int      @default(0)
+  lesson      Lesson   @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@index([lessonId])
+}
