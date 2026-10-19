@@ -32,7 +32,7 @@ const ways = [
     title: 'Improve a lesson',
     description:
       'Fix an error, sharpen an explanation, add a worked example, or write a missing lesson. The authoring guide covers the format.',
-    href: 'https://github.com/mern-learn/mern-learn/blob/main/docs/lesson-authoring.md',
+    href: 'https://github.com/Nyxora-Sync/mern-learn/blob/main/docs/lesson-authoring.md',
     external: true,
     color: 'emerald',
   },
@@ -59,7 +59,7 @@ const ways = [
     title: 'Report a bug',
     description:
       'Broken code sample, incorrect claim, inaccessible control, or a 404. Include the page and what you expected.',
-    href: 'https://github.com/mern-learn/mern-learn/issues',
+    href: 'https://github.com/Nyxora-Sync/mern-learn/issues',
     external: true,
     color: 'amber',
   },
@@ -133,7 +133,7 @@ export default function ContributePage() {
             </p>
             <div className="mt-6 flex flex-wrap gap-3">
               <Button asChild className="gap-2">
-                <a href="https://github.com/mern-learn/mern-learn" target="_blank" rel="noopener noreferrer">
+                <a href="https://github.com/Nyxora-Sync/mern-learn" target="_blank" rel="noopener noreferrer">
                   <GithubIcon className="h-4 w-4" aria-hidden="true" />
                   Open the repository
                 </a>
@@ -254,7 +254,7 @@ export default function ContributePage() {
                   </p>
                   <Button asChild variant="outline" size="sm" className="mt-4 gap-2">
                     <a
-                      href="https://github.com/mern-learn/mern-learn/pulls"
+                      href="https://github.com/Nyxora-Sync/mern-learn/pulls"
                       target="_blank"
                       rel="noopener noreferrer"
                     >
@@ -275,7 +275,7 @@ export default function ContributePage() {
               <div className="mt-5 flex flex-col items-center justify-center gap-3 sm:flex-row">
                 <Button asChild className="gap-2">
                   <a
-                    href="https://github.com/mern-learn/mern-learn/issues/new"
+                    href="https://github.com/Nyxora-Sync/mern-learn/issues/new"
                     target="_blank"
                     rel="noopener noreferrer"
                   >

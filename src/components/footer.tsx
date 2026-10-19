@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { Mail, Heart, Code2 } from 'lucide-react'
-import { GithubIcon, XIcon, DiscordIcon } from '@/components/icons/brand'
+import { GithubIcon, XIcon } from '@/components/icons/brand'
 import { cn } from '@/lib/utils'
 
 interface FooterLink {
@@ -26,8 +26,8 @@ const footerLinks: FooterColumn = {
     { name: 'Roadmap', href: '/roadmap' },
   ],
   community: [
-    { name: 'Discord', href: 'https://discord.gg/mern-learn', external: true, icon: DiscordIcon },
-    { name: 'GitHub Discussions', href: 'https://github.com/mern-learn/mern-learn/discussions', external: true, icon: GithubIcon },
+    { name: 'Lesson Discussions', href: '/community' },
+    { name: 'GitHub Issues', href: 'https://github.com/Nyxora-Sync/mern-learn/issues', external: true, icon: GithubIcon },
     { name: 'Project Showcase', href: '/community/showcase' },
     { name: 'Contribute', href: '/contribute' },
     { name: 'Code of Conduct', href: '/code-of-conduct' },
@@ -37,21 +37,19 @@ const footerLinks: FooterColumn = {
     { name: 'Privacy Policy', href: '/privacy' },
     { name: 'Terms of Service', href: '/terms' },
     { name: 'Accessibility', href: '/accessibility' },
-    { name: 'Open Source', href: 'https://github.com/mern-learn/mern-learn', external: true, icon: GithubIcon },
+    { name: 'Open Source', href: 'https://github.com/Nyxora-Sync/mern-learn', external: true, icon: GithubIcon },
   ],
   connect: [
     { name: 'Newsletter', href: '/newsletter', icon: Mail },
     { name: 'Twitter', href: 'https://twitter.com/mernlearn', external: true, icon: XIcon },
-    { name: 'GitHub', href: 'https://github.com/mern-learn', external: true, icon: GithubIcon },
-    { name: 'Discord', href: 'https://discord.gg/mern-learn', external: true, icon: DiscordIcon },
+    { name: 'GitHub', href: 'https://github.com/Nyxora-Sync/mern-learn', external: true, icon: GithubIcon },
     { name: 'Contact', href: '/contact', icon: Mail },
   ],
 }
 
 const socialLinks: FooterLink[] = [
-  { name: 'GitHub', href: 'https://github.com/mern-learn', icon: GithubIcon },
+  { name: 'GitHub', href: 'https://github.com/Nyxora-Sync/mern-learn', icon: GithubIcon },
   { name: 'Twitter', href: 'https://twitter.com/mernlearn', icon: XIcon },
-  { name: 'Discord', href: 'https://discord.gg/mern-learn', icon: DiscordIcon },
   { name: 'Email', href: 'mailto:hello@mern-learn.dev', icon: Mail },
 ]
 
@@ -181,7 +179,7 @@ export function Footer() {
               CC BY-SA 4.0
             </a>{' '}
             • Code under{' '}
-            <a href="https://github.com/mern-learn/mern-learn/blob/main/LICENSE" target="_blank" rel="noopener noreferrer" className="underline hover:text-foreground">
+            <a href="https://github.com/Nyxora-Sync/mern-learn/blob/main/LICENSE" target="_blank" rel="noopener noreferrer" className="underline hover:text-foreground">
               MIT License
             </a>
           </p>

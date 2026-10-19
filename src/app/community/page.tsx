@@ -37,12 +37,12 @@ const channels = [
     external: false,
   },
   {
-    name: 'GitHub Discussions',
-    description: 'Longer questions, feature ideas, and show-and-tell that outgrow a single lesson.',
+    name: 'GitHub',
+    description: 'Source code, issues, and the roadmap behind the curriculum.',
     icon: GithubIcon,
     color: 'slate',
-    cta: 'Browse discussions',
-    href: 'https://github.com/mern-learn/mern-learn/discussions',
+    cta: 'Open the repository',
+    href: 'https://github.com/Nyxora-Sync/mern-learn',
     external: true,
   },
   {
@@ -68,7 +68,7 @@ const guidelines = [
 const waysToContribute = [
   { icon: Code2, title: 'Contribute Lessons', description: 'Write or improve lesson content via pull request.', color: 'emerald', href: '/contribute' },
   { icon: ExternalLink, title: 'Submit Resources', description: 'Found an amazing free resource? Add it to the directory.', color: 'blue', href: '/contribute#resources' },
-  { icon: Star, title: 'Star the Repo', description: 'Help others discover the project on GitHub.', color: 'amber', href: 'https://github.com/mern-learn/mern-learn' },
+  { icon: Star, title: 'Star the Repo', description: 'Help others discover the project on GitHub.', color: 'amber', href: 'https://github.com/Nyxora-Sync/mern-learn' },
   { icon: HandHeart, title: 'Translate', description: 'Help translate lessons into Spanish, Portuguese, Hindi, and more.', color: 'rose', href: '/contribute#translate' },
 ]
 

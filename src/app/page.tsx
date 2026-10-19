@@ -296,7 +296,7 @@ export default function HomePage() {
                     Ready to start your MERN journey?
                   </h2>
                   <p className="mt-4 text-lg text-muted-foreground">
-                    Join thousands of developers learning the MERN stack for free. No credit card, no commitments.
+                    Join learners building real projects with the MERN stack — free, self-paced, and open source.
                   </p>
                   <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
                     <Button size="lg" asChild className="gap-2 w-full sm:w-auto">
@@ -306,7 +306,7 @@ export default function HomePage() {
                       </Link>
                     </Button>
                     <Button size="lg" variant="outline" asChild className="gap-2 w-full sm:w-auto">
-                      <Link href="https://github.com/mern-learn/mern-learn" target="_blank" rel="noopener noreferrer">
+                      <Link href="https://github.com/Nyxora-Sync/mern-learn" target="_blank" rel="noopener noreferrer">
                         <GithubIcon className="h-5 w-5" aria-hidden="true" />
                         View on GitHub
                       </Link>

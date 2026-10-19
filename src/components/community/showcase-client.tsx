@@ -26,6 +26,7 @@ export function ShowcaseClient() {
   const [debouncedQuery, setDebouncedQuery] = useState('')
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [loadingMore, setLoadingMore] = useState(false)
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null)
   const [shareOpen, setShareOpen] = useState(false)
   const [reloadKey, setReloadKey] = useState(0)
 
@@ -40,6 +41,7 @@ export function ShowcaseClient() {
     async function load() {
       setLoading(true)
       setError(null)
+      setLoadMoreError(null)
       try {
         const params = new URLSearchParams({ limit: '12', sort })
         if (track !== 'all') params.set('track', track)
@@ -81,7 +83,7 @@ export function ShowcaseClient() {
       setProjects((current) => [...current, ...(body.data as ProjectListItem[])])
       setNextCursor(body.nextCursor ?? null)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load more projects.')
+      setLoadMoreError(err instanceof Error ? err.message : 'Could not load more projects.')
     } finally {
       setLoadingMore(false)
     }
@@ -199,6 +201,11 @@ export function ShowcaseClient() {
                 {loadingMore ? 'Loading...' : 'Load more projects'}
               </Button>
             </div>
+          )}
+          {loadMoreError && (
+            <p className="text-center text-sm text-destructive" role="alert">
+              {loadMoreError}
+            </p>
           )}
         </>
       )}
