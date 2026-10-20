@@ -92,7 +92,7 @@ Nyxora Sync is open source and welcomes contributions:
 - Share a project for the showcase
 - Help with translations or design improvements
 
-Open a [GitHub issue](https://github.com/Nyxora-Sync/mern-learn/issues) or submit a pull request. Read the [contribution guide](https://nyxora-sync.nyxora.workers.dev/contribute) and [Code of Conduct](https://nyxora-sync.nyxora.workers.dev/code-of-conduct) first.
+Open a [GitHub issue](https://github.com/Nyxora-Sync/nyxora-sync/issues) or submit a pull request. Read the [contribution guide](https://nyxora-sync.nyxora.workers.dev/contribute) and [Code of Conduct](https://nyxora-sync.nyxora.workers.dev/code-of-conduct) first.
 
 ## License
 

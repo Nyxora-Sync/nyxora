@@ -360,7 +360,7 @@ export default function HomePage() {
                       </Link>
                     </Button>
                     <Button size="lg" variant="outline" asChild className="gap-2 w-full sm:w-auto">
-                      <Link href="https://github.com/Nyxora-Sync/mern-learn" target="_blank" rel="noopener noreferrer">
+                      <Link href="https://github.com/Nyxora-Sync/nyxora-sync" target="_blank" rel="noopener noreferrer">
                         <GithubIcon className="h-5 w-5" aria-hidden="true" />
                         View on GitHub
                       </Link>

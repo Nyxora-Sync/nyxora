@@ -46,7 +46,7 @@ const channels = [
     icon: GithubIcon,
     color: 'slate',
     cta: 'Open the repository',
-    href: 'https://github.com/Nyxora-Sync/mern-learn',
+    href: 'https://github.com/Nyxora-Sync/nyxora-sync',
     external: true,
   },
   {
@@ -72,7 +72,7 @@ const guidelines = [
 const waysToContribute = [
   { icon: Code2, title: 'Contribute Lessons', description: 'Write or improve lesson content via pull request.', color: 'emerald', href: '/contribute' },
   { icon: ExternalLink, title: 'Submit Resources', description: 'Found an amazing free resource? Add it to the directory.', color: 'blue', href: '/contribute#resources' },
-  { icon: Star, title: 'Star the Repo', description: 'Help others discover the project on GitHub.', color: 'amber', href: 'https://github.com/Nyxora-Sync/mern-learn' },
+  { icon: Star, title: 'Star the Repo', description: 'Help others discover the project on GitHub.', color: 'amber', href: 'https://github.com/Nyxora-Sync/nyxora-sync' },
   { icon: HandHeart, title: 'Translate', description: 'Help translate lessons into Spanish, Portuguese, Hindi, and more.', color: 'rose', href: '/contribute#translate' },
 ]
 

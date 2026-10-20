@@ -99,7 +99,7 @@ export default function ContactPage() {
                     </p>
                     <Button asChild variant="outline" size="sm" className="mt-4 gap-2">
                       <a
-                        href="https://github.com/Nyxora-Sync/mern-learn/issues"
+                        href="https://github.com/Nyxora-Sync/nyxora-sync/issues"
                         target="_blank"
                         rel="noopener noreferrer"
                       >
@@ -122,7 +122,7 @@ export default function ContactPage() {
                     </p>
                     <Button asChild variant="outline" size="sm" className="mt-4 gap-2">
                       <a
-                        href="https://github.com/Nyxora-Sync/mern-learn/security"
+                        href="https://github.com/Nyxora-Sync/nyxora-sync/security"
                         target="_blank"
                         rel="noopener noreferrer"
                       >

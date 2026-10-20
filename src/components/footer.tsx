@@ -36,7 +36,7 @@ const footerLinks: FooterColumn = {
   ],
   community: [
     { name: 'Lesson Discussions', href: '/community' },
-    { name: 'GitHub Issues', href: 'https://github.com/Nyxora-Sync/mern-learn/issues', external: true, icon: GithubIcon },
+    { name: 'GitHub Issues', href: 'https://github.com/Nyxora-Sync/nyxora-sync/issues', external: true, icon: GithubIcon },
     { name: 'Project Showcase', href: '/community/showcase' },
     { name: 'Contribute', href: '/contribute' },
     { name: 'Code of Conduct', href: '/code-of-conduct' },
@@ -47,19 +47,19 @@ const footerLinks: FooterColumn = {
     { name: 'Privacy Policy', href: '/privacy' },
     { name: 'Terms of Service', href: '/terms' },
     { name: 'Accessibility', href: '/accessibility' },
-    { name: 'Open Source', href: 'https://github.com/Nyxora-Sync/mern-learn', external: true, icon: GithubIcon },
+    { name: 'Open Source', href: 'https://github.com/Nyxora-Sync/nyxora-sync', external: true, icon: GithubIcon },
   ],
   connect: [
     ...(NEWSLETTER_ENABLED
       ? [{ name: 'Newsletter', href: '/newsletter', icon: Mail }]
       : []),
-    { name: 'GitHub', href: 'https://github.com/Nyxora-Sync/mern-learn', external: true, icon: GithubIcon },
+    { name: 'GitHub', href: 'https://github.com/Nyxora-Sync/nyxora-sync', external: true, icon: GithubIcon },
     { name: 'Contact', href: '/contact', icon: Mail },
   ],
 }
 
 const socialLinks: FooterLink[] = [
-  { name: 'GitHub', href: 'https://github.com/Nyxora-Sync/mern-learn', icon: GithubIcon },
+  { name: 'GitHub', href: 'https://github.com/Nyxora-Sync/nyxora-sync', icon: GithubIcon },
   { name: 'Contact', href: '/contact', icon: Mail },
 ]
 
@@ -174,7 +174,7 @@ export function Footer() {
               CC BY-SA 4.0
             </a>{' '}
             • Code under{' '}
-            <a href="https://github.com/Nyxora-Sync/mern-learn/blob/main/LICENSE" target="_blank" rel="noopener noreferrer" className="underline hover:text-foreground">
+            <a href="https://github.com/Nyxora-Sync/nyxora-sync/blob/main/LICENSE" target="_blank" rel="noopener noreferrer" className="underline hover:text-foreground">
               MIT License
             </a>
           </p>
