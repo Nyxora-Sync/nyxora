@@ -11,12 +11,13 @@ import { absoluteUrl, pageMetadata } from '@/lib/seo'
 import { Badge } from '@/components/ui/badge'
 import { TrackProgressClient } from '@/components/track-progress-client'
 import { Reveal } from '@/components/motion/reveal'
-import { BookOpen, Code2, Server, Database, Atom, Layers, FileCode, FlaskConical, ShieldCheck, Container, Network, Gauge, Rocket, ArrowRight, Clock, Zap, type LucideIcon } from 'lucide-react'
+import { BookOpen, Code2, Server, Database, Atom, Layers, FileCode, FlaskConical, ShieldCheck, Container, Network, Gauge, Rocket, Cloud, Boxes, Smartphone, Sparkles, ArrowRight, Clock, Zap, type LucideIcon } from 'lucide-react'
 import { cn, getAccent } from '@/lib/utils'
 
 const iconMap: Record<string, LucideIcon> = {
   BookOpen, Code2, Server, Database, Atom, Layers,
   FileCode, FlaskConical, ShieldCheck, Container, Network, Gauge, Rocket,
+  Cloud, Boxes, Smartphone, Sparkles,
 }
 
 export function generateStaticParams() {
@@ -53,7 +54,9 @@ export default async function TrackPage({ params }: { params: Promise<{ track: s
   const totalMinutes = getTotalMinutes(track.key)
   const totalHours = Math.round(totalMinutes / 60)
   const totalLessons = track.modules.reduce((sum, m) => sum + m.lessons.length, 0)
-  const isBeginner = track.key === 'beginner'
+  const educationalLevel =
+    track.key === 'beginner' ? 'Beginner' : track.key === 'specializations' ? 'Advanced' : 'Beginner to advanced'
+  const TrackIcon = iconMap[track.icon] || BookOpen
 
   const trackPath = `/learn/${track.key}`
   const courseSchema = {
@@ -69,7 +72,7 @@ export default async function TrackPage({ params }: { params: Promise<{ track: s
     },
     isAccessibleForFree: true,
     inLanguage: 'en',
-    educationalLevel: isBeginner ? 'Beginner' : 'Beginner to advanced',
+    educationalLevel,
     teaches: track.modules.map((module) => module.name),
     offers: {
       '@type': 'Offer',
@@ -113,7 +116,7 @@ export default async function TrackPage({ params }: { params: Promise<{ track: s
                 <div
                   className={cn('inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium mb-4', getAccent(track.color).pill)}
                 >
-                  {isBeginner ? <BookOpen className="h-3.5 w-3.5" /> : <Code2 className="h-3.5 w-3.5" />}
+                  <TrackIcon className="h-3.5 w-3.5" aria-hidden="true" />
                   {track.name}
                 </div>
                 <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">{track.name}</h1>

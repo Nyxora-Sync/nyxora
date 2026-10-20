@@ -42,8 +42,8 @@ track.
 - `/sitemap.xml` is generated from `src/app/sitemap.ts`.
 - `/robots.txt` is generated from `src/app/robots.ts`.
 - Both are static routes and are regenerated on deploy.
-- The sitemap contains canonical public URLs: static pages, both tracks, and
-  every unique module and lesson. `/newsletter` is included only when the
+- The sitemap contains canonical public URLs: static pages, all three tracks,
+  and every unique module and lesson. `/newsletter` is included only when the
   newsletter feature flag is enabled.
 
 ## Structured data

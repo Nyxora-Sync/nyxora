@@ -1,0 +1,279 @@
+A production MERN app on AWS does not need every service in the catalog. It needs a private network, a place to run the API, a managed database, object storage for uploads, and a way to serve static assets close to users. Everything else can wait.
+
+This lesson builds that small footprint deliberately: two availability zones, public and private subnets, ECS Fargate behind an Application Load Balancer, RDS PostgreSQL, S3 plus CloudFront, and IAM roles that avoid long-lived keys.
+
+<Callout type="info" title="The goal is a boring baseline">
+  You are not designing for a million users. You are designing a deployment you can explain, secure, monitor, and afford. Start with one region, two AZs, and the fewest moving parts that survive a zone failure.
+</Callout>
+
+## The target topology
+
+```text
+Internet
+   │
+   ├── CloudFront ──→ S3 (static assets, uploads)
+   │
+   └── Application Load Balancer (public subnets, 2 AZs)
+           │
+           └── ECS Fargate service (private subnets, 2 AZs)
+                   ├── RDS PostgreSQL (private subnets, Multi-AZ in production)
+                   ├── ElastiCache Redis (private subnets, optional)
+                   └── S3 through a VPC endpoint or presigned URLs
+```
+
+Two AZs are the minimum for meaningful availability. A single-AZ deployment is a development environment with a production domain.
+
+## VPC: separate public from private
+
+A VPC is an isolated network. Inside it, subnets divide IP ranges by availability zone and by exposure:
+
+```text
+VPC 10.20.0.0/16
+├── public-a   10.20.0.0/24     ALB, NAT gateway
+├── public-b   10.20.1.0/24     ALB, NAT gateway
+├── private-a  10.20.10.0/24    ECS tasks, RDS
+└── private-b  10.20.11.0/24    ECS tasks, RDS
+```
+
+Public subnets route `0.0.0.0/0` to an Internet Gateway. Private subnets have no inbound route from the internet; they reach out through a NAT gateway for package downloads and third-party APIs. The load balancer is the only public entry point for the API.
+
+Security groups are stateful firewalls attached to resources:
+
+```text
+alb-sg          inbound 443 from 0.0.0.0/0; outbound to api-sg:4000
+api-sg          inbound 4000 from alb-sg; outbound to db-sg:5432 and 443
+db-sg           inbound 5432 from api-sg only
+redis-sg        inbound 6379 from api-sg only
+```
+
+Do not open the database to your laptop “just for a minute.” Use a bastion or SSM Session Manager, and remove the rule afterward.
+
+## ECS Fargate: run the API without managing servers
+
+Fargate runs containers without you provisioning EC2 instances. An ECS **task definition** describes the container; a **service** keeps the desired number running and registers them with the load balancer.
+
+```json
+{
+  "family": "movies-api",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::123456789012:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::123456789012:role/moviesApiTaskRole",
+  "containerDefinitions": [
+    {
+      "name": "api",
+      "image": "123456789012.dkr.ecr.us-east-1.amazonaws.com/movies-api:sha-4f2c1a9",
+      "essential": true,
+      "portMappings": [{ "containerPort": 4000, "protocol": "tcp" }],
+      "environment": [
+        { "name": "NODE_ENV", "value": "production" },
+        { "name": "PORT", "value": "4000" }
+      ],
+      "secrets": [
+        {
+          "name": "DATABASE_URL",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:123456789012:secret:movies/database-url"
+        }
+      ],
+      "healthCheck": {
+        "command": ["CMD-SHELL", "node -e \"fetch('http://localhost:4000/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 30
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/movies-api",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "api"
+        }
+      }
+    }
+  ]
+}
+```
+
+The task definition contains references to secrets, not secret values. ECS injects them at task start.
+
+<KeyPoint>
+The **execution role** lets ECS pull the image and read secrets. The **task role** is what your application code assumes when it calls AWS APIs. Keep them separate and grant each only the permissions it needs. Never put an access key in the image or in a plain environment variable.
+</KeyPoint>
+
+A service definition adds desired count, subnets, and load-balancer wiring:
+
+```json
+{
+  "serviceName": "movies-api",
+  "cluster": "production",
+  "taskDefinition": "movies-api:7",
+  "desiredCount": 3,
+  "launchType": "FARGATE",
+  "networkConfiguration": {
+    "awsvpcConfiguration": {
+      "subnets": ["subnet-private-a", "subnet-private-b"],
+      "securityGroups": ["sg-api"],
+      "assignPublicIp": "DISABLED"
+    }
+  },
+  "loadBalancers": [
+    {
+      "targetGroupArn": "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/movies-api/abc123",
+      "containerName": "api",
+      "containerPort": 4000
+    }
+  ],
+  "healthCheckGracePeriodSeconds": 30,
+  "deploymentCircuitBreaker": {
+    "enable": true,
+    "rollback": true
+  }
+}
+```
+
+`assignPublicIp: DISABLED` is intentional. Enable it only if you have a specific reason and understand the exposure. The load balancer reaches the tasks through the private subnets.
+
+The circuit breaker is your safety net: if a new task definition cannot become healthy, ECS rolls back instead of leaving the service half-deployed. Pair it with health checks on `/ready`, not `/health`.
+
+## RDS: managed PostgreSQL
+
+RDS handles backups, patching, and Multi-AZ failover. For production:
+
+- Use PostgreSQL, not an unmanaged database on an EC2 instance.
+- Enable Multi-AZ if you need a standby and automatic failover.
+- Put it in private subnets with a security group that accepts connections only from `api-sg`.
+- Enable automated backups and test a restore.
+- Encrypt storage and force TLS connections.
+- Never use the master credentials from the application.
+
+Create a least-privilege application user:
+
+```sql
+CREATE ROLE movies_app LOGIN PASSWORD 'use-a-secret-manager-value';
+GRANT CONNECT ON DATABASE movies TO movies_app;
+GRANT USAGE ON SCHEMA public TO movies_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO movies_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO movies_app;
+```
+
+Migrations need more privileges than runtime queries. Run them as a separate deployment step with a migration role, not from every API task on boot.
+
+### Connection pooling is not optional
+
+Each ECS task opens a Prisma connection pool. Three tasks times a default pool size can exceed a small database's connection limit. Set a conservative pool size in the connection string and account for the database's maximum:
+
+```text
+postgresql://movies_app:...@movies.cluster-xxxx.us-east-1.rds.amazonaws.com:5432/movies
+  ?sslmode=require
+  &connection_limit=10
+  &pool_timeout=20
+```
+
+For larger deployments, put RDS Proxy or PgBouncer in front of PostgreSQL. Prisma Accelerate is another managed option. The rule is the same: **bounded pool per instance, total connections below the database limit, and a timeout so requests fail fast instead of hanging**.
+
+<Callout type="warning" title="Migrations and connection storms">
+  Do not run `prisma migrate deploy` from every task on startup. Ten tasks starting together will race migrations and exhaust connections. Run migrations once in CI or a dedicated ECS task before the service rollout, then start the new tasks.
+</Callout>
+
+## S3 and CloudFront: keep files out of the container
+
+Local disk in a Fargate task disappears when the task stops. Uploads must go to S3 (or another object store), not to the container filesystem.
+
+The best pattern for browser uploads is a **presigned PUT URL**:
+
+```ts
+// app/api/uploads/presign/route.ts
+import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3'
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
+import { randomUUID } from 'node:crypto'
+import { requireUser } from '@/lib/auth/session'
+
+const s3 = new S3Client({ region: process.env.AWS_REGION })
+
+export async function POST(request: Request) {
+  const user = await requireUser()
+  const { contentType } = await request.json()
+
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(contentType)) {
+    return Response.json({ error: 'Unsupported type' }, { status: 400 })
+  }
+
+  const key = `uploads/${user.id}/${randomUUID()}`
+
+  const command = new PutObjectCommand({
+    Bucket: process.env.UPLOAD_BUCKET,
+    Key: key,
+    ContentType: contentType,
+  })
+
+  const url = await getSignedUrl(s3, command, { expiresIn: 300 })
+  return Response.json({ url, key })
+}
+```
+
+The browser uploads directly to S3. The API never proxies a 20 MB file through a Fargate task. Validate the content type, cap the object size with a bucket policy, and store only the resulting key in PostgreSQL.
+
+CloudFront serves public assets from edge locations and can front S3 for private content through signed URLs or cookies. Separate the public asset bucket from the private upload bucket; a mistake in one should not expose the other.
+
+```text
+assets.example.com   → CloudFront → S3 public assets (long cache, immutable hashes)
+uploads.example.com  → CloudFront → S3 private uploads (signed access)
+api.example.com      → ALB → ECS
+```
+
+Set immutable, long-lived cache headers for hashed assets. Do not cache HTML at the edge for a year, and do not cache authenticated API responses publicly.
+
+## IAM: roles, not keys
+
+Create a task role with only the actions the app needs:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["s3:PutObject", "s3:GetObject"],
+      "Resource": "arn:aws:s3:::movies-uploads/uploads/*"
+    }
+  ]
+}
+```
+
+No `s3:*` on `*`. No root account access keys. No credentials in `.env` committed to Git. Use IAM roles for ECS tasks, GitHub OIDC for CI, and Secrets Manager or SSM Parameter Store for values that must persist.
+
+## What this costs and what to watch
+
+The bill is driven by the NAT gateway, Fargate task hours, RDS instance hours and storage, data transfer, and CloudFront requests. A small deployment can still be surprisingly expensive if you leave a NAT gateway and a Multi-AZ database running in a sandbox.
+
+Set AWS Budgets alerts before you deploy. Tag every resource with `project`, `environment`, and `owner`. Review unused load balancers, unattached Elastic IPs, old ECR images, and idle RDS instances monthly.
+
+## Try it
+
+<TryIt title="Sketch the smallest survivable footprint" hint="Draw two AZs with public and private subnets. Place the ALB in public, ECS and RDS in private, and S3 outside the VPC. Write one sentence for each arrow explaining its security group rule and whether it crosses the public internet.">
+```text
+Internet → ALB:443 → ECS:4000 → RDS:5432
+Browser → presigned S3 URL
+CloudFront → S3 assets
+```
+</TryIt>
+
+<Exercise title="Review an unsafe AWS design" difficulty="medium">
+A team proposes:
+
+- RDS in a public subnet with `0.0.0.0/0` on port 5432
+- An ECS task role with `AdministratorAccess`
+- The database password in a plain `DATABASE_URL` environment variable in the task definition
+- Uploads written to `/app/uploads` inside the container
+- One ECS task, one AZ, no load balancer
+
+List the failure or security consequence of each choice, then replace it with a safer option and state the trade-off you accept.
+</Exercise>
+
+<KeyPoint>
+A small AWS production footprint is a private network, a stateless container service, a managed database, object storage, and least-privilege IAM. Keep secrets out of images and task definitions, bound your connection pools, and move uploads out of the container before you scale past one task.
+</KeyPoint>

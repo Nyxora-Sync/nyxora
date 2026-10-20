@@ -1,0 +1,240 @@
+Redis is usually introduced as “a cache.” That undersells it. It is an in-memory data-structure server with atomic operations, expiration, and Lua scripting — which makes it useful for caching, rate limiting, locks, counters, queues, and ephemeral coordination.
+
+It is also easy to use incorrectly. A cache with no invalidation plan, a lock without a fencing token, or a rate limiter with a race condition can be worse than no Redis at all. This lesson covers the patterns that hold up under concurrency.
+
+## Start with the data model
+
+A Redis key is a namespace, not a row id. Design keys so you can find, invalidate, and observe them:
+
+```text
+movies:public:all:24
+movies:public:genre:sci-fi:24
+movie:01J8Z6K3:detail
+watchlist:user:42
+rate:login:ip:203.0.113.10
+lock:job:thumbnail:movie:01J8Z6K3
+```
+
+Rules that prevent pain:
+
+- Use a consistent prefix and separator.
+- Include every input that changes the result.
+- Keep keys short but readable; memory matters at millions of keys.
+- Always set a TTL for cache entries unless the key is a deliberate durable structure.
+- Prefer small values. A 5 MB JSON blob is a latency and eviction problem.
+
+Set a memory policy explicitly:
+
+```conf
+maxmemory 2gb
+maxmemory-policy allkeys-lru
+```
+
+`allkeys-lru` evicts any key when memory is full. `volatile-lru` evicts only keys with a TTL, which is safer if you also store locks or queues in the same instance — but it can fail writes when no evictable keys remain. Do not mix durable queue data and disposable cache data in one Redis instance if you can avoid it.
+
+<Callout type="warning" title="Eviction is not invalidation">
+  A cache miss caused by eviction is normal. A lock disappearing because the instance evicted it is a correctness bug. Separate cache and coordination workloads, or use a policy and deployment that protect the latter.
+</Callout>
+
+## Cache-aside, with a stampede plan
+
+The basic pattern is simple:
+
+```ts
+import { redis } from '@/lib/redis'
+
+export async function getPublicMovies(limit = 24) {
+  const key = `movies:public:all:${limit}`
+
+  const cached = await redis.get(key)
+  if (cached) return JSON.parse(cached)
+
+  const movies = await db.movie.findMany({
+    where: { published: true },
+    orderBy: { createdAt: 'desc' },
+    take: limit,
+  })
+
+  await redis.set(key, JSON.stringify(movies), { EX: 60 })
+  return movies
+}
+```
+
+The failure mode is a **stampede**: a popular key expires, a thousand requests miss at once, and all of them run the same expensive query. Protect the recomputation with a short lock and jittered TTLs:
+
+```ts
+import { randomUUID } from 'node:crypto'
+
+export async function getWithLock<T>(key: string, load: () => Promise<T>, ttlSeconds: number) {
+  const cached = await redis.get(key)
+  if (cached) return JSON.parse(cached) as T
+
+  const lockKey = `lock:${key}`
+  const token = randomUUID()
+  const acquired = await redis.set(lockKey, token, { NX: true, PX: 5_000 })
+
+  if (!acquired) {
+    // Another request is computing. Serve a short stale value if available,
+    // otherwise wait briefly and retry rather than hammering the database.
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    const retry = await redis.get(key)
+    if (retry) return JSON.parse(retry) as T
+    return load()
+  }
+
+  try {
+    const value = await load()
+    const jitter = Math.floor(Math.random() * 10)
+    await redis.set(key, JSON.stringify(value), { EX: ttlSeconds + jitter })
+    return value
+  } finally {
+    const release = `
+      if redis.call('GET', KEYS[1]) == ARGV[1] then
+        return redis.call('DEL', KEYS[1])
+      else
+        return 0
+      end
+    `
+    await redis.eval(release, { keys: [lockKey], arguments: [token] })
+  }
+}
+```
+
+The release script is atomic: it only deletes the lock if the value is still this request's token. A plain `DEL` can delete a lock that expired and was reacquired by another worker.
+
+<KeyPoint>
+A cache lock is an optimization, not a guarantee. Keep a timeout, always release in `finally`, and make the loader safe to run twice. The lock reduces duplicate work; idempotency keeps the system correct when it fails.
+</KeyPoint>
+
+### Stale-while-revalidate
+
+For public lists, serving a slightly stale value while one request refreshes is often better than making every user wait:
+
+```text
+SET movie:list <value> EX 60
+SET movie:list:stale <value> EX 300
+```
+
+On a miss, one worker recomputes and updates both keys; readers get the stale key while the refresh runs. This is the same idea as HTTP `stale-while-revalidate`, implemented at the data layer.
+
+## Distributed locks and fencing
+
+A lock built with `SET key token NX PX ttl` is a mutual-exclusion hint. It is not a lease on reality. The process can pause — garbage collection, a slow disk, a network partition — longer than the TTL, and another process can acquire the lock while the first still believes it owns it.
+
+Use a **fencing token** for operations where stale ownership is dangerous:
+
+```text
+1. Worker acquires lock and receives monotonic token 17.
+2. Worker sends token 17 with the storage write.
+3. Storage rejects any write whose token is lower than the last seen token.
+```
+
+The lock service must issue increasing tokens, and the protected resource must enforce them. Without enforcement, the lock cannot prevent two workers from writing.
+
+<Callout type="danger" title="Do not use a lock for money">
+  A single Redis instance can lose data during failover. A lock that disappears can allow duplicate charges or double provisioning. For financial or irreversible operations, use database constraints, idempotency keys, and a system with stronger guarantees — not a best-effort Redis lock.
+</Callout>
+
+For background jobs, prefer the queue's own visibility timeout and uniqueness features over inventing a lock. BullMQ, for example, can ensure a job is processed by one worker and retried on failure.
+
+## Rate limiting without races
+
+A naive limiter has a check-then-increment race:
+
+```ts
+const count = await redis.get(key)
+if (Number(count) >= limit) return false
+await redis.incr(key) // two requests can both pass the check
+```
+
+Make the decision atomic with Lua. A fixed-window limiter:
+
+```ts
+const fixedWindow = `
+  local current = redis.call('INCR', KEYS[1])
+  if current == 1 then
+    redis.call('PEXPIRE', KEYS[1], ARGV[1])
+  end
+  return current
+`
+
+export async function hit(key: string, windowMs: number) {
+  return Number(
+    await redis.eval(fixedWindow, { keys: [key], arguments: [windowMs] })
+  )
+}
+```
+
+Fixed windows allow a burst at the boundary: 100 requests at 12:00:59 and 100 at 12:01:00 both pass a 100/minute limit. A sliding window using a sorted set is more accurate:
+
+```lua
+-- KEYS[1] = rate:login:ip:203.0.113.10
+-- ARGV[1] = now in milliseconds
+-- ARGV[2] = window in milliseconds
+-- ARGV[3] = limit
+redis.call('ZREMRANGEBYSCORE', KEYS[1], 0, ARGV[1] - ARGV[2])
+local count = redis.call('ZCARD', KEYS[1])
+if count >= tonumber(ARGV[3]) then
+  return 0
+end
+redis.call('ZADD', KEYS[1], ARGV[1], ARGV[1] .. ':' .. math.random())
+redis.call('PEXPIRE', KEYS[1], ARGV[2])
+return 1
+```
+
+For login and password-reset endpoints, rate-limit by both IP and account identifier. IP-only limits punish shared networks; account-only limits let an attacker rotate accounts. Return `429` with `Retry-After`, and log the decision without logging the credential.
+
+## Hot keys and big keys
+
+A single key receiving most of the traffic can saturate one Redis shard. A single 100 MB key can block the event loop during deletion or serialization.
+
+Symptoms and fixes:
+
+- **Hot key:** add a short local cache, split the key into shards (`counter:0..9`, sum on read), or reduce the value size.
+- **Big key:** paginate the structure; never store an unbounded list in one value.
+- **Scan-heavy access:** use sets, sorted sets, or hashes instead of scanning JSON arrays in application code.
+- **Expensive commands:** avoid `KEYS *` in production; use `SCAN` with a cursor.
+
+Use `MEMORY USAGE key`, `SLOWLOG GET`, and `INFO` to investigate rather than guessing.
+
+## Failure behavior
+
+Redis is a dependency. Decide what happens when it is unavailable:
+
+- **Cache:** log, skip the cache, and query the database with a concurrency limit.
+- **Rate limit:** fail closed for sensitive endpoints, fail open for low-risk reads, and make the choice explicit.
+- **Lock:** do not proceed with a dangerous operation if ownership cannot be established.
+- **Queue:** stop accepting new jobs or buffer them durably; do not silently drop work.
+
+Set short connect and command timeouts. A Redis client that hangs for 30 seconds turns a cache outage into an API outage.
+
+```ts
+const redis = createClient({
+  url: process.env.REDIS_URL,
+  socket: {
+    connectTimeout: 1_000,
+    reconnectStrategy: (retries) => Math.min(retries * 50, 1_000),
+  },
+})
+```
+
+Persist queue data with AOF and a sensible fsync policy, and use a managed Redis with replication if the queue matters. A cache can be flushed; a job queue cannot.
+
+<Exercise title="Replace a racy limiter" difficulty="medium">
+Take an Express login route with this logic:
+
+```ts
+const attempts = await redis.get(`login:${ip}`)
+if (Number(attempts) >= 5) return res.status(429).end()
+await redis.incr(`login:${ip}`)
+```
+
+1. Explain the race and the missing TTL.
+2. Replace it with an atomic sliding-window limiter keyed by IP and normalized email.
+3. Define what happens when Redis is down.
+4. Add a test that sends six concurrent requests and expects exactly five to reach the password check.
+</Exercise>
+
+<KeyPoint>
+Redis is a coordination tool, not a magic cache. Model keys and lifetimes, protect expensive recomputation, make limiters atomic, treat locks as hints that need fencing, and decide in advance how the app behaves when Redis is gone.
+</KeyPoint>

@@ -24,6 +24,7 @@ const footerLinks: FooterColumn = {
   learn: [
     { name: 'Beginner Track', href: '/learn/beginner' },
     { name: 'Developer Track', href: '/learn/developer' },
+    { name: 'Specializations', href: '/learn/specializations' },
     { name: 'All Lessons', href: '/learn' },
     { name: 'Resources', href: '/resources' },
     { name: 'Roadmap', href: '/roadmap' },

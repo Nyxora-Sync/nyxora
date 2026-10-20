@@ -1,0 +1,246 @@
+Clicking through a cloud console is a fine way to learn. It is a terrible way to run production. The console has no review step, no history you can diff, and no reliable way to recreate the same environment after a region or account change.
+
+This lesson turns the AWS footprint from the previous lesson into code, then adds the operational layer around it: secret handling, service-level objectives, alerts that deserve attention, and an incident process that does not depend on someone remembering what to do at 3 a.m.
+
+## Infrastructure as code
+
+Terraform describes resources declaratively. You commit the configuration, review a plan, and apply it. The cloud provider reconciles the difference.
+
+```text
+terraform/
+├── modules/
+│   ├── network/          # VPC, subnets, routes, security groups
+│   ├── api/              # ECR, ECS, ALB, IAM
+│   └── database/         # RDS, parameter group, secrets
+├── environments/
+│   ├── staging/
+│   │   ├── main.tf
+│   │   └── terraform.tfvars
+│   └── production/
+│       ├── main.tf
+│       └── terraform.tfvars
+└── versions.tf
+```
+
+A root module for production composes the pieces:
+
+```hcl
+terraform {
+  required_version = ">= 1.10"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 6.0"
+    }
+  }
+
+  backend "s3" {
+    bucket       = "movies-terraform-state"
+    key          = "production/terraform.tfstate"
+    region       = "us-east-1"
+    encrypt      = true
+    use_lockfile = true
+  }
+}
+
+provider "aws" {
+  region = var.region
+
+  default_tags {
+    tags = {
+      project     = "movies"
+      environment = "production"
+      managed_by  = "terraform"
+    }
+  }
+}
+
+module "network" {
+  source = "../../modules/network"
+  name   = "movies"
+  region = var.region
+}
+
+module "database" {
+  source             = "../../modules/database"
+  vpc_id             = module.network.vpc_id
+  private_subnet_ids = module.network.private_subnet_ids
+  app_security_group = module.network.api_security_group_id
+  instance_class     = "db.t4g.medium"
+}
+
+module "api" {
+  source             = "../../modules/api"
+  vpc_id             = module.network.vpc_id
+  public_subnet_ids  = module.network.public_subnet_ids
+  private_subnet_ids = module.network.private_subnet_ids
+  database_url       = module.database.connection_secret_arn
+  image              = var.api_image
+}
+```
+
+Remote state in S3 gives the team one source of truth. `use_lockfile = true` (Terraform 1.10+) prevents two applies from racing. State contains sensitive values, so the bucket must be private, encrypted, versioned, and access-controlled. Never commit state to Git.
+
+<KeyPoint>
+The plan is the review artifact. `terraform plan -out=tfplan` followed by `terraform apply tfplan` applies exactly what was reviewed. If someone changes infrastructure between plan and apply, the apply fails or refreshes instead of silently doing something else.
+</KeyPoint>
+
+A CI workflow should run formatting, validation, and a plan on every pull request:
+
+```bash
+terraform fmt -check -recursive
+terraform init
+terraform validate
+terraform plan -out=tfplan
+```
+
+Apply only from the default branch after approval, using an OIDC role rather than static AWS keys:
+
+```yaml
+# .github/workflows/terraform.yml (excerpt)
+permissions:
+  id-token: write
+  contents: read
+
+steps:
+  - uses: actions/checkout@v4
+  - uses: aws-actions/configure-aws-credentials@v4
+    with:
+      role-to-assume: arn:aws:iam::123456789012:role/github-terraform
+      aws-region: us-east-1
+  - run: terraform init
+  - run: terraform plan -out=tfplan
+  - run: terraform apply -auto-approve tfplan
+    if: github.ref == 'refs/heads/main'
+```
+
+The IAM role trusts GitHub's OIDC provider for a specific repository and branch. There is no long-lived secret to leak or rotate.
+
+## Drift is a bug
+
+If someone edits a security group in the console, the next plan will try to revert it. That is the point. Treat console changes as incidents or experiments that get codified afterward, not as a second source of truth.
+
+```bash
+terraform plan -detailed-exitcode
+# 0 = no changes, 1 = error, 2 = changes present
+```
+
+Run a scheduled plan against production and alert when it reports drift. A plan that keeps showing changes after an apply usually means a field is computed or normalized differently, not that Terraform is broken.
+
+## Secrets: create once, reference everywhere
+
+A secret should live in a secret manager, not in Terraform state, a Git variable, or a container image. The safest pattern is to create the secret container with Terraform and set its value out of band:
+
+```hcl
+resource "aws_secretsmanager_secret" "database_url" {
+  name                    = "movies/production/database-url"
+  recovery_window_in_days = 7
+}
+```
+
+The application reads the secret through its ECS task role. A human or a controlled rotation job updates the value. If Terraform manages both the secret and its value, that value is stored in state and may leak through state access or plan output.
+
+For RDS, let AWS manage the master password with `manage_master_user_password = true` and reference the generated secret. For third-party API keys, use AWS Secrets Manager or SSM Parameter Store with a KMS key and a documented rotation owner.
+
+<Callout type="warning" title="Rotation is more than changing a value">
+  Rotating a secret requires every consumer to pick up the new value. For a database, that may mean a new application user, a coordinated deploy, or a pool that reconnects. Test rotation in staging, set overlap windows where possible, and monitor authentication failures afterward.
+</Callout>
+
+## SLOs and error budgets
+
+A service-level objective is a target for a user-visible measurement. An availability SLO of 99.9% over a 30-day window allows about 43 minutes of unavailability. At 99.95%, the budget is about 21 minutes. Those are arithmetic, not promises; choose a target you can afford to operate.
+
+```text
+SLI: percentage of successful API requests (2xx or 3xx) over 5-minute windows
+SLO: 99.9% over 30 days
+Error budget: 0.1% of requests
+Burn-rate alert: fast burn at 14.4x over 1 hour, slow burn at 6x over 6 hours
+```
+
+The burn-rate alert fires when a small window is consuming the monthly budget too quickly. That gives you a signal before the month is over, instead of a dashboard that turns red after the damage is done.
+
+Good alerts describe user pain:
+
+```text
+✅ p95 latency on POST /api/movies > 1.5s for 10 minutes
+✅ error rate on /api/* > 2% for 5 minutes
+✅ queue oldest job age > 10 minutes
+✅ /ready fails on more than half of targets
+❌ CPU is above 80%
+❌ one 500 response occurred
+```
+
+Every alert needs a runbook: what it means, what to check first, how to mitigate, and who owns it. If the runbook says “ignore unless it stays high,” the alert is not ready.
+
+## Incident response
+
+An incident starts when users are affected, not when you finish investigating. Assign roles early:
+
+```text
+Incident commander  coordinates, makes decisions, owns the timeline
+Operations lead     investigates and applies mitigations
+Communications lead updates users and stakeholders
+Scribe              records timestamps, hypotheses, and actions
+```
+
+The commander does not debug. That separation keeps someone focused on impact, communication, and the decision to roll back.
+
+A practical sequence:
+
+1. **Declare and scope.** What is broken, for whom, since when? Link the dashboard and the deploy.
+2. **Mitigate first.** Roll back, fail over, disable the feature, or raise capacity. Find the root cause after users can work again.
+3. **Communicate on a cadence.** A short update every 15–30 minutes beats a perfect explanation at the end.
+4. **Record the timeline.** Times, hypotheses, commands, and outcomes. You will not remember them tomorrow.
+5. **Close when the user-facing symptom is gone.** Continue investigating separately if needed.
+
+Afterward, write a blameless postmortem:
+
+```text
+Summary
+Impact (users, duration, error rate)
+Timeline
+What went well
+What was surprising
+Root causes (technical and organizational)
+Action items with owners and dates
+```
+
+“Human error” is not a root cause. The useful question is which guardrail was missing: a review that did not check the query, a migration that ran before the backup, a probe that reported healthy while the app was broken, or an alert that never fired.
+
+<Callout type="tip" title="Practice the boring failure">
+  Run a game day for a dependency outage: stop the database, revoke an API key, or deploy a bad image in staging. Watch what the dashboard shows and how long it takes the team to detect and recover. The first time should not be in production.
+</Callout>
+
+## Cost and drift reviews
+
+Cloud cost is an operational signal, not a monthly surprise:
+
+- Set budgets and alerts per environment before the first deploy.
+- Review the top five cost drivers monthly.
+- Remove idle load balancers, unattached Elastic IPs, old ECR images, and unused NAT gateways.
+- Right-size RDS and Fargate after observing real utilization.
+- Tag every resource with project, environment, and owner so cost allocation is possible.
+
+Combine the cost review with the drift plan: both ask “does production still match what we intended?”
+
+## Try it
+
+<TryIt title="Write the runbook for one alert" hint="Pick a real symptom, such as p95 latency above 1.5 seconds or queue age above ten minutes. Write the dashboard link, the first three checks, the mitigation options in order, the rollback command, and the person who owns the follow-up.">
+```text
+Alert: API p95 latency > 1.5s for 10 minutes
+Check: deploy history → database connections → slow query log
+Mitigate: roll back image / raise task count / disable expensive feature
+Owner: API on-call
+```
+</TryIt>
+
+<Exercise title="Turn console changes into code" difficulty="medium">
+Choose one resource you created manually in AWS. Write a Terraform module for it with variables for environment-specific values, import the existing resource or recreate it in staging, and run a plan that shows no unintended changes.
+
+Then write a short incident runbook for a failed deploy: detection signal, first check, rollback command, communication template, and the postmortem action you would expect.
+</Exercise>
+
+<KeyPoint>
+Infrastructure as code gives you review, history, and reproducibility. Secrets belong in a manager, not in state. SLOs turn reliability into a budget, and incidents become manageable when roles, communication, and runbooks exist before the pager goes off.
+</KeyPoint>

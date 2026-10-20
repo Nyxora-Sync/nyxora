@@ -1,0 +1,282 @@
+A queue lets a request return before the slow work is done. That is the easy part. The hard part is what happens when a worker crashes after charging a card but before marking the job complete, when a retry sends the same welcome email twice, or when a producer publishes an event for a database row that was never committed.
+
+Reliable messaging is mostly about accepting two facts: **delivery is usually at-least-once**, and **consumers must be idempotent**.
+
+## Delivery semantics
+
+```text
+At-most-once    fire and forget; a crash loses the message
+At-least-once   retry until acknowledged; duplicates are possible
+Exactly-once    a useful illusion inside one system, rarely true across systems
+```
+
+Most production queues — SQS, RabbitMQ with acknowledgements, BullMQ — give you at-least-once delivery. “Exactly once” usually means the broker and the consumer coordinate a deduplication strategy; it does not mean a network failure can never produce a duplicate side effect.
+
+Design for duplicate delivery from the start. It is cheaper than discovering it in production.
+
+<KeyPoint>
+The unit of reliability is not “the message was sent.” It is “the side effect happened once, and the system can prove it.” That requires an idempotency key and a durable record at the consumer.
+</KeyPoint>
+
+## A BullMQ worker with real failure handling
+
+BullMQ stores jobs in Redis. A producer adds a job; a worker processes it; retries and failures are tracked.
+
+```ts
+// lib/queues/email.ts
+import { Queue } from 'bullmq'
+
+const connection = {
+  host: process.env.REDIS_HOST,
+  port: Number(process.env.REDIS_PORT ?? 6379),
+}
+
+export const emailQueue = new Queue('email', {
+  connection,
+  defaultJobOptions: {
+    attempts: 5,
+    backoff: { type: 'exponential', delay: 2_000 },
+    removeOnComplete: { age: 24 * 3600, count: 1_000 },
+    removeOnFail: { age: 7 * 24 * 3600 },
+  },
+})
+
+export async function enqueueWelcome(userId: string, email: string) {
+  await emailQueue.add(
+    'welcome',
+    { userId, email },
+    {
+      jobId: `welcome-${userId}`, // deduplicates repeated enqueues
+    }
+  )
+}
+```
+
+```ts
+// worker/email-worker.ts
+import { Worker } from 'bullmq'
+import { sendWelcomeEmail } from '@/lib/email'
+import { db } from '@/lib/db'
+
+const connection = {
+  host: process.env.REDIS_HOST,
+  port: Number(process.env.REDIS_PORT ?? 6379),
+}
+
+const worker = new Worker(
+  'email',
+  async (job) => {
+    if (job.name !== 'welcome') {
+      throw new Error(`Unknown job: ${job.name}`)
+    }
+
+    const { userId } = job.data
+    const idempotencyKey = `welcome-${userId}`
+
+    // Fast path: this side effect is already recorded.
+    const alreadySent = await db.emailLog.findUnique({
+      where: { idempotencyKey },
+    })
+    if (alreadySent) return
+
+    // The provider deduplicates retries with the same key.
+    await sendWelcomeEmail(job.data.email, idempotencyKey)
+
+    await db.emailLog.upsert({
+      where: { idempotencyKey },
+      update: {},
+      create: { idempotencyKey, userId, sentAt: new Date() },
+    })
+  },
+  {
+    connection,
+    concurrency: 5,
+    limiter: { max: 20, duration: 1_000 }, // respect the email provider
+  }
+)
+
+worker.on('failed', (job, error) => {
+  console.error({
+    event: 'email_job_failed',
+    jobId: job?.id,
+    attemptsMade: job?.attemptsMade,
+    error: error.message,
+  })
+})
+```
+
+Two workers can still pass the `findUnique` check before either writes the log. The provider's idempotency key resolves that race: both calls represent the same send, and the provider returns the same result instead of sending twice. The unique log row records that the side effect happened:
+
+```prisma
+model EmailLog {
+  id             String   @id @default(cuid())
+  idempotencyKey String   @unique
+  userId         String
+  sentAt         DateTime
+}
+```
+
+If the worker crashes after the provider accepts the send but before the upsert, the retry calls the provider with the same key. The provider deduplicates, and the upsert records the result. That is why the provider key — not the local log alone — is the real idempotency boundary.
+
+If the provider has no idempotency feature, choose your poison explicitly:
+
+- **Log before send:** prevents duplicates, but a send failure can suppress a legitimate email.
+- **Send before log:** allows a retry, but a crash between the two can duplicate the email.
+- **Provider idempotency key:** the strongest option; the provider deduplicates and your log records the result.
+
+For a payment, the provider's idempotency key is mandatory.
+
+## Transactions and the outbox
+
+The hardest bug in queue-backed systems is publishing an event for a database change that never committed — or committing a change and losing the event.
+
+```text
+BEGIN
+  INSERT order
+  publish order.created   ← network call inside the transaction
+COMMIT
+```
+
+If the publish succeeds and the commit fails, the event is a lie. If the commit succeeds and the publish fails, the event is lost. Do not put a network call inside a database transaction.
+
+Use the **transactional outbox**:
+
+```ts
+await db.$transaction(async (tx) => {
+  const order = await tx.order.create({ data: input })
+
+  await tx.outbox.create({
+    data: {
+      type: 'order.created',
+      aggregateId: order.id,
+      payload: { orderId: order.id, accountId: order.accountId },
+    },
+  })
+})
+```
+
+A relay publishes unsent rows. The business write and the intent to publish commit atomically. The relay can publish duplicates; consumers must deduplicate by event id.
+
+```ts
+// worker/outbox-relay.ts
+const batch = await db.outbox.findMany({
+  where: { publishedAt: null },
+  orderBy: { createdAt: 'asc' },
+  take: 50,
+})
+
+for (const event of batch) {
+  await broker.publish(event.type, {
+    id: event.id,
+    type: event.type,
+    aggregateId: event.aggregateId,
+    payload: event.payload,
+  })
+
+  await db.outbox.update({
+    where: { id: event.id },
+    data: { publishedAt: new Date() },
+  })
+}
+```
+
+If the process crashes after `publish` and before the update, the event is published again on the next pass. That is acceptable because consumers store `event.id` in a processed-events table or enforce an equivalent unique constraint.
+
+<Callout type="tip" title="Outbox rows are not a queue">
+  Keep the relay batch small, index `publishedAt`, and archive or delete old rows. An outbox table that grows forever becomes a slow, expensive queue with no visibility.
+</Callout>
+
+## Backpressure and queue health
+
+A queue does not create capacity. It hides a capacity problem until the backlog becomes a business problem: password-reset emails arrive an hour late, image thumbnails are missing, webhooks time out.
+
+Watch:
+
+- **Queue depth** — waiting jobs.
+- **Oldest job age** — the user-facing latency of the backlog.
+- **Processing rate** — jobs completed per second.
+- **Failure rate** — retries and terminal failures.
+- **Worker saturation** — CPU, memory, event-loop lag, and external API limits.
+
+Scale workers from queue depth and age, not just CPU. A worker waiting on a slow third-party API can have low CPU and a huge backlog.
+
+```ts
+const counts = await emailQueue.getJobCounts(
+  'wait', 'active', 'completed', 'failed', 'delayed'
+)
+```
+
+If the provider allows 20 requests per second, do not run 50 concurrent workers. Rate-limit the worker itself, and let the queue absorb the burst.
+
+## Dead letters and poison messages
+
+A job that always fails should not retry forever. After the attempt limit, move it to a failed set or dead-letter queue with enough context to diagnose it:
+
+```ts
+worker.on('failed', async (job, error) => {
+  if (!job || job.attemptsMade < (job.opts.attempts ?? 1)) return
+
+  await db.failedJob.create({
+    data: {
+      queue: 'email',
+      jobId: job.id ?? 'unknown',
+      name: job.name,
+      payload: job.data,
+      error: error.message,
+      failedAt: new Date(),
+    },
+  })
+})
+```
+
+A dead-letter queue needs an owner, a dashboard, and a replay procedure. “It is in the failed set” is not an operations plan.
+
+Common poison causes:
+
+- A payload shape the consumer no longer understands.
+- A missing referenced row.
+- A permanent provider rejection (invalid address, blocked account).
+- A bug that will fail identically on every retry.
+
+Classify errors: retry transient failures (`ETIMEDOUT`, `429`, `503`); fail fast on permanent ones (`400`, validation, unknown job name). Retrying a permanent failure wastes capacity and delays the alert.
+
+## Ordering
+
+Queues generally do not guarantee global order once you have multiple workers. If order matters for one entity, use a per-entity ordering key and a single worker or a serialized queue for that key.
+
+```ts
+await queue.add('recompute-summary', { accountId }, {
+  jobId: `summary-${accountId}-${version}`,
+})
+```
+
+For many systems, order is less important than idempotency and a monotonic version. Apply updates only if the incoming version is newer:
+
+```ts
+await db.account.updateMany({
+  where: { id: accountId, version: { lt: event.version } },
+  data: { ...event.changes, version: event.version },
+})
+```
+
+<Exercise title="Make a welcome-email pipeline reliable" difficulty="medium">
+A signup route currently sends a welcome email inline:
+
+```ts
+await db.user.create({ data })
+await sendWelcomeEmail(email)
+return res.status(201).json({ ok: true })
+```
+
+Redesign it:
+
+1. Move the send to a BullMQ worker with retries and exponential backoff.
+2. Add an idempotency key and a durable record that survives a worker crash.
+3. Explain what happens if the email provider accepts the send but the worker dies before recording it.
+4. Add queue-depth and oldest-job-age metrics.
+5. Define which errors should retry and which should go straight to a dead-letter record.
+</Exercise>
+
+<KeyPoint>
+Queues buy responsiveness by moving work off the request path; they do not remove the need for correctness. Commit the intent with an outbox, deliver at least once, deduplicate at the consumer, cap retries, and watch the backlog. A queue with no age metric is an outage waiting to be discovered by a customer.
+</KeyPoint>

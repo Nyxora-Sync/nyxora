@@ -1,0 +1,324 @@
+A mobile app is judged in the first few seconds: does it open, does it remember me, does it work on a train, and does it feel native? Those are different problems from a web deployment, and they all have to be solved before the store review.
+
+This lesson covers the production layer: OAuth with PKCE, refresh-token rotation, offline-first writes, performance work that matters on a low-end Android phone, and a release process with EAS.
+
+## Mobile OAuth: never ship a client secret
+
+A native app is a public client. Anyone can extract strings from the binary. There is no safe place for a client secret, so the authorization-code flow must use **PKCE** (Proof Key for Code Exchange).
+
+```text
+1. App creates a random code_verifier and its SHA-256 code_challenge.
+2. App opens the provider's authorization page with the challenge.
+3. User signs in. Provider redirects back with a short-lived code.
+4. App sends the code and verifier to the token endpoint.
+5. Provider verifies the challenge and returns tokens.
+```
+
+The verifier never leaves the device until the exchange. An intercepted authorization code is useless without it.
+
+With Expo, `expo-auth-session` handles discovery, the redirect, and PKCE:
+
+```tsx
+import * as AuthSession from 'expo-auth-session'
+import * as WebBrowser from 'expo-web-browser'
+import { useEffect } from 'react'
+
+WebBrowser.maybeCompleteAuthSession()
+
+export function useGoogleSignIn() {
+  const discovery = AuthSession.useAutoDiscovery('https://accounts.google.com')
+
+  const [request, response, promptAsync] = AuthSession.useAuthRequest(
+    {
+      clientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID!,
+      scopes: ['openid', 'profile', 'email'],
+      redirectUri: AuthSession.makeRedirectUri({ scheme: 'movies' }),
+      responseType: AuthSession.ResponseType.Code,
+      usePKCE: true,
+    },
+    discovery
+  )
+
+  useEffect(() => {
+    if (response?.type !== 'success') return
+
+    const { code } = response.params
+    const codeVerifier = request?.codeVerifier
+
+    if (!code || !codeVerifier) return
+
+    // Send both to your backend. The backend holds the provider secret,
+    // verifies the PKCE challenge, and issues your app's own tokens.
+    fetch(`${process.env.EXPO_PUBLIC_API_URL}/api/auth/google`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code, codeVerifier }),
+    })
+  }, [response, request?.codeVerifier])
+
+  return { promptAsync, ready: request !== null }
+}
+```
+
+The backend exchange is the safest pattern for a MERN app: the provider client secret stays on the server, the backend can enforce account rules, and the mobile app receives only your own access and refresh tokens. Do not put the provider secret in the app.
+
+<Callout type="danger" title="Custom schemes can be claimed">
+  A custom URL scheme such as `movies://` is not proof of app identity. Prefer universal links or App Links for production redirects, and validate the redirect URI on the backend. A malicious app that registers the same scheme should not be able to receive a valid code.
+</Callout>
+
+## Refresh-token rotation
+
+Long-lived access tokens are dangerous and short-lived access tokens are annoying. The standard compromise is a short access token plus a rotating refresh token:
+
+```text
+Access token:  15 minutes, sent with every API request
+Refresh token: 30 days, stored in SecureStore, rotated on every use
+```
+
+The backend stores a hash of the current refresh token, not the raw value. On refresh, it issues a new pair and invalidates the old refresh token. If an old token is reused, the whole token family is revoked and the user is signed out.
+
+```ts
+// lib/auth/refresh.ts
+import { getAccessToken, saveTokens } from './token-store'
+
+let refreshPromise: Promise<string | null> | null = null
+
+export async function refreshAccessToken(): Promise<string | null> {
+  // Single-flight: ten parallel 401s must not create ten refreshes.
+  if (refreshPromise) return refreshPromise
+
+  refreshPromise = (async () => {
+    const refreshToken = await getRefreshToken()
+    if (!refreshToken) return null
+
+    const response = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/api/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken }),
+    })
+
+    if (!response.ok) {
+      await clearTokens()
+      return null
+    }
+
+    const tokens = await response.json()
+    await saveTokens(tokens.accessToken, tokens.refreshToken)
+    return tokens.accessToken
+  })().finally(() => {
+    refreshPromise = null
+  })
+
+  return refreshPromise
+}
+```
+
+Then the API client retries a `401` once:
+
+```ts
+export async function apiFetch(path: string, init: RequestInit = {}) {
+  let token = await getAccessToken()
+  let response = await fetch(`${API_BASE}${path}`, withAuth(init, token))
+
+  if (response.status === 401) {
+    token = await refreshAccessToken()
+    if (!token) throw new Error('SESSION_EXPIRED')
+    response = await fetch(`${API_BASE}${path}`, withAuth(init, token))
+  }
+
+  return response
+}
+```
+
+The single-flight guard prevents a refresh stampede when several queries fail at once. The retry must be limited to once; a loop of 401s is a bug, not a recovery path.
+
+<KeyPoint>
+A refresh token is a credential. Store it in SecureStore, rotate it on every use, hash it on the server, and revoke the family on reuse. Logout must delete both tokens locally and revoke the refresh token on the server.
+</KeyPoint>
+
+## Offline-first without lying to the user
+
+There are three levels of offline support:
+
+1. **Read cache.** Show the last successful response; disable writes.
+2. **Queued writes.** Accept a write locally, queue it, and sync when the network returns.
+3. **Full sync with conflict resolution.** Multiple devices can edit the same record.
+
+Level 1 is often enough for a content app. Level 3 is a product decision with real complexity. Choose deliberately.
+
+For queued writes, use SQLite (Expo SQLite) or a durable storage layer, not memory:
+
+```ts
+// lib/offline/db.ts
+import * as SQLite from 'expo-sqlite'
+
+export const db = SQLite.openDatabaseSync('movies.db')
+
+db.execSync(`
+  CREATE TABLE IF NOT EXISTS pending_mutations (
+    id TEXT PRIMARY KEY,
+    method TEXT NOT NULL,
+    path TEXT NOT NULL,
+    body TEXT,
+    idempotency_key TEXT NOT NULL UNIQUE,
+    created_at INTEGER NOT NULL
+  );
+`)
+```
+
+```ts
+// lib/offline/queue.ts
+import { db } from './db'
+import { randomUUID } from 'expo-crypto'
+
+export function enqueueMutation(method: string, path: string, body: unknown) {
+  const id = randomUUID()
+  db.runSync(
+    'INSERT INTO pending_mutations (id, method, path, body, idempotency_key, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+    [id, method, path, JSON.stringify(body), id, Date.now()]
+  )
+}
+```
+
+The `idempotency_key` is sent to the server with the mutation. If the app crashes after the server commits but before the queue row is deleted, the retry is rejected as a duplicate instead of creating a second order.
+
+Flush the queue when connectivity returns, in order, with a cap and exponential backoff:
+
+```ts
+export async function flushQueue() {
+  const rows = db.getAllSync<{ id: string; method: string; path: string; body: string; idempotency_key: string }>(
+    'SELECT * FROM pending_mutations ORDER BY created_at ASC'
+  )
+
+  for (const row of rows) {
+    const response = await apiFetch(row.path, {
+      method: row.method,
+      headers: { 'Idempotency-Key': row.idempotency_key },
+      body: row.body,
+    })
+
+    if (!response.ok && response.status !== 409) throw new Error('Sync paused')
+    db.runSync('DELETE FROM pending_mutations WHERE id = ?', [row.id])
+  }
+}
+```
+
+### Conflicts are a product decision
+
+If two devices edit the same record, someone has to decide what wins:
+
+- **Last write wins:** simple, but silently loses data.
+- **Server version check:** reject stale updates with `409` and show a merge UI.
+- **Field-level merge:** preserve non-overlapping changes; complex.
+- **Append-only events:** ideal for notes, chat, and activity feeds.
+
+Do not claim “offline support” without stating the conflict policy. A queued write that silently overwrites a newer edit is worse than a clear “this changed on another device” message.
+
+## Performance on a real phone
+
+Mobile performance budgets are stricter than desktop. Measure on a low-end Android device or a throttled emulator, not only a flagship iPhone.
+
+- **Startup:** defer non-critical providers and heavy libraries. Measure time to first meaningful screen.
+- **Lists:** use `FlatList` or `FlashList`, stable keys, memoized rows, and paginated data. Avoid rendering a 2,000-row list at once.
+- **Images:** request the size you display, use a CDN that supports resizing, and cache with a library such as `expo-image`.
+- **JavaScript:** keep the main thread free. Heavy date parsing, crypto, or JSON transforms belong off the interaction path.
+- **Animations:** use the native driver where possible and respect reduced motion.
+- **Network:** batch requests, cache with TanStack Query, and show stale data instead of a blank screen.
+
+```tsx
+import { Image } from 'expo-image'
+
+<Image
+  source={{ uri: posterUrl }}
+  style={{ width: 120, height: 180, borderRadius: 8 }}
+  contentFit="cover"
+  transition={150}
+  cachePolicy="memory-disk"
+  accessibilityLabel={`${title} poster`}
+/>
+```
+
+React DevTools and the native profiler show render cost; the network panel shows payload size. A screen that feels slow because it renders 60 expensive rows is a different fix from one that waits on a 2 MB API response.
+
+## Build and release with EAS
+
+```bash
+npm install -g eas-cli
+eas login
+eas build:configure
+```
+
+A minimal `eas.json`:
+
+```json
+{
+  "cli": {
+    "version": ">= 12.0.0"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal"
+    },
+    "preview": {
+      "distribution": "internal"
+    },
+    "production": {
+      "autoIncrement": true
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}
+```
+
+```bash
+eas build --platform ios --profile production
+eas build --platform android --profile production
+eas submit --platform ios --profile production
+eas submit --platform android --profile production
+```
+
+EAS manages signing credentials and produces installable binaries. Keep the app version and build number in `app.json`, increment them for every store submission, and test the exact production build — not just the development client.
+
+### OTA updates have a boundary
+
+Expo Updates can ship JavaScript and assets without a new store build, but only when the native runtime is compatible:
+
+```bash
+eas update --branch production --message "Fix movie list empty state"
+```
+
+Set a `runtimeVersion` policy and use it consistently. If you add a native module, change permissions, or upgrade the SDK, you need a new binary. Pushing a JS bundle that expects a native module the installed app does not have will crash on startup.
+
+<Callout type="warning" title="Store review is part of the product">
+  Apple and Google review more than crashes. Provide a demo account if login is required, explain every permission, include account deletion if users can create accounts, and complete the privacy disclosures accurately. A rejected build is a release blocker, not an afterthought.
+</Callout>
+
+## Pre-release checklist
+
+- [ ] Auth uses PKCE and the provider secret stays on the backend.
+- [ ] Access tokens are short-lived; refresh tokens rotate and are stored in SecureStore.
+- [ ] Logout clears local tokens and revokes the server session.
+- [ ] Offline writes have idempotency keys and a documented conflict policy.
+- [ ] Lists are virtualized and images request the displayed size.
+- [ ] The app works on a low-end Android device and at the largest font size.
+- [ ] Crash reporting and release tags are configured.
+- [ ] Production builds are signed by EAS and tested on real devices.
+- [ ] Store metadata, screenshots, privacy labels, and a demo account are ready.
+- [ ] An OTA update cannot ship code that requires a missing native module.
+
+<Exercise title="Design the offline write path" difficulty="medium">
+A user taps “Save to watchlist” while offline.
+
+1. Write the local optimistic state update.
+2. Queue the mutation with an idempotency key in SQLite.
+3. Explain what the server does if it receives the same key twice.
+4. Describe what the UI shows when the sync succeeds, when it fails permanently, and when the item was already removed on another device.
+5. Decide whether last-write-wins is acceptable here. If not, name the version field and the conflict UI.
+</Exercise>
+
+<KeyPoint>
+Production mobile is auth, storage, sync, performance, and release engineering. Use PKCE and rotating refresh tokens, make offline writes idempotent, measure on real hardware, and treat the store build as a versioned artifact. The backend remains the source of truth; the app earns trust by behaving well when the network does not.
+</KeyPoint>

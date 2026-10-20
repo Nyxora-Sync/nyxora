@@ -1,0 +1,257 @@
+Server Components make data fetching look simple: call an async function and render the result. The hard part is deciding **what may be cached, for how long, and what has to happen when data changes**. Get that wrong and you either serve stale dashboards or hammer the database on every request.
+
+This lesson builds a data layer you can reason about: direct database access from Server Components, explicit cache lifetimes, tags that connect reads to writes, and Server Actions that validate and authorize before touching the database.
+
+## Fetch the data where it is rendered
+
+In a client-side SPA you often create an internal API just to call it from the browser. In the App Router, the component is already on the server. Query the database directly:
+
+```tsx
+// app/movies/page.tsx
+import { db } from '@/lib/db'
+
+export default async function MoviesPage() {
+  const movies = await db.movie.findMany({
+    orderBy: { createdAt: 'desc' },
+    take: 24,
+  })
+
+  return <MovieGrid movies={movies} />
+}
+```
+
+This removes a network hop, avoids duplicating serialization logic, and keeps credentials on the server. Route Handlers still exist for webhooks, public APIs, file downloads, and clients outside this app. They are not the default way to feed your own pages.
+
+<Callout type="tip" title="Share the query, not an internal HTTP call">
+  If a route handler and a page need the same data, extract a function such as `getPublicMovies()` and call it from both. A server calling its own HTTP endpoint adds latency and another failure mode for no benefit.
+</Callout>
+
+### Independent queries in parallel
+
+```tsx
+// app/movies/[slug]/page.tsx
+export default async function MoviePage({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params
+
+  const [movie, related, comments] = await Promise.all([
+    getMovie(slug),
+    getRelatedMovies(slug),
+    getRecentComments(slug),
+  ])
+
+  return (
+    <article>
+      <MovieHeader movie={movie} />
+      <RelatedMovies movies={related} />
+      <Comments comments={comments} />
+    </article>
+  )
+}
+```
+
+`Promise.all` starts all three reads together. The page still waits for the slowest one, which is why slow independent sections can also be split into their own Suspense boundaries.
+
+## Caching is a decision, not a default
+
+With Cache Components enabled, `fetch` requests are **not cached by default**. Neither are database queries. You opt in with the `"use cache"` directive and give the result a lifetime:
+
+```tsx
+// app/lib/movies.ts
+import { cacheLife, cacheTag } from 'next/cache'
+import { db } from '@/lib/db'
+
+export async function getPublicMovies() {
+  'use cache'
+  cacheLife('minutes')
+  cacheTag('movies')
+
+  return db.movie.findMany({
+    where: { published: true },
+    orderBy: { createdAt: 'desc' },
+    take: 24,
+  })
+}
+```
+
+`cacheLife('minutes')` says how fresh the result must be. `cacheTag('movies')` gives you a handle to invalidate it later. The function's arguments become part of the cache key, so `getMovie('dune')` and `getMovie('alien')` are separate entries.
+
+The built-in profiles are a useful starting vocabulary:
+
+| Profile | Typical use |
+|---|---|
+| `seconds` | Very fresh public data, such as a live activity feed |
+| `minutes` | Catalog pages, public stats, recent lists |
+| `hours` | Content that changes a few times a day |
+| `days` | Marketing pages and rarely edited documentation |
+| `max` | Content invalidated explicitly by a webhook or action |
+
+Pick the **shortest lifetime the product can tolerate**. A one-hour cache on a public movie list is often excellent. A one-hour cache on a user's own watchlist is a bug waiting to happen.
+
+### Cache public reads, not viewer-specific data
+
+A cached function must not depend on ambient request state unless you deliberately choose a private cache. Keep the viewer out of the cached function and pass explicit values in:
+
+```tsx
+export async function getWatchlist(userId: string) {
+  'use cache'
+  cacheLife('minutes')
+  cacheTag(`watchlist-${userId}`)
+
+  return db.watchlistItem.findMany({ where: { userId } })
+}
+```
+
+This is shareable only among requests for the same `userId`, and the user id is part of the key. Even then, think about whether a shared cache is appropriate for private data. On serverless infrastructure, `"use cache"` entries may be request-local unless you configure durable caching. A private browser response or an uncached read is often the safer default for dashboards and account pages.
+
+<Callout type="warning" title="Cookies are runtime data">
+  Reading `cookies()` or `headers()` inside a cached function requires a private cache variant and extra care. Prefer reading the session outside, authorizing, and passing plain values into a cached function — or leave the user-specific read uncached.
+</Callout>
+
+## Server Actions: the mutation path
+
+A Server Action is an async server function invoked from a form or client event. It is a public POST endpoint, so treat every call as hostile:
+
+1. Authenticate the user.
+2. Authorize the action against the specific resource.
+3. Validate and normalize the input.
+4. Perform the mutation.
+5. Invalidate the right cache tags.
+6. Redirect or return a safe result.
+
+```ts
+// app/movies/actions.ts
+'use server'
+
+import { z } from 'zod'
+import { redirect } from 'next/navigation'
+import { updateTag } from 'next/cache'
+import { auth } from '@/lib/auth'
+import { db } from '@/lib/db'
+
+const createMovieSchema = z.object({
+  title: z.string().trim().min(1).max(120),
+  year: z.coerce.number().int().min(1888).max(2100),
+  description: z.string().trim().max(2000).optional(),
+})
+
+export async function createMovie(_previousState: unknown, formData: FormData) {
+  const session = await auth()
+  if (!session?.user) {
+    return { error: 'Sign in to add a movie.' }
+  }
+
+  const parsed = createMovieSchema.safeParse({
+    title: formData.get('title'),
+    year: formData.get('year'),
+    description: formData.get('description') || undefined,
+  })
+
+  if (!parsed.success) {
+    return { error: 'Check the title and year.' }
+  }
+
+  const movie = await db.movie.create({
+    data: {
+      ...parsed.data,
+      ownerId: session.user.id,
+    },
+  })
+
+  updateTag('movies')
+  redirect(`/movies/${movie.slug}`)
+}
+```
+
+`updateTag('movies')` immediately expires the tagged entries so the user sees their own write on the next request. Use it in a Server Action when read-your-own-writes matters.
+
+For background refreshes where a short delay is acceptable, use `revalidateTag('movies', 'max')` with stale-while-revalidate semantics. It also works in Route Handlers, which makes it the right choice for webhooks. `revalidatePath` is the blunt fallback when you cannot identify a tag.
+
+### Forms with pending and error states
+
+React's `useActionState` connects a Server Action to local form state:
+
+```tsx
+'use client'
+
+import { useActionState } from 'react'
+import { createMovie } from './actions'
+
+export function NewMovieForm() {
+  const [state, formAction, pending] = useActionState(createMovie, { error: null })
+
+  return (
+    <form action={formAction}>
+      <label htmlFor="title">Title</label>
+      <input id="title" name="title" required />
+
+      <label htmlFor="year">Year</label>
+      <input id="year" name="year" inputMode="numeric" required />
+
+      {state.error && <p role="alert">{state.error}</p>}
+
+      <button type="submit" disabled={pending}>
+        {pending ? 'Saving…' : 'Add movie'}
+      </button>
+    </form>
+  )
+}
+```
+
+Progressive enhancement still works: a form with a Server Action submits even before hydration. That is a real accessibility and resilience advantage over a client-only `onSubmit` handler.
+
+## Keep actions idempotent and narrow
+
+An action can be retried by the user, the network, or a queue. Design for it:
+
+- Use a unique constraint or idempotency key for creates that must happen once.
+- Never trust a client-supplied `ownerId`, price, or role.
+- Scope update and delete queries by the authenticated user:
+
+```ts
+await db.movie.updateMany({
+  where: { id: movieId, ownerId: session.user.id },
+  data: { title: parsed.data.title },
+})
+```
+
+`updateMany` returns a count. If it is zero, the movie either does not exist or does not belong to this user. Return the same “not found” response for both; do not reveal which one is true.
+
+## Route Handlers versus Server Actions
+
+| Need | Use |
+|---|---|
+| Form mutation from your own UI | Server Action |
+| Webhook from Stripe or GitHub | Route Handler |
+| Public JSON API for mobile or third parties | Route Handler |
+| File upload or streaming download | Route Handler |
+| Cache invalidation from an external system | Route Handler + `revalidateTag` |
+| Simple button mutation with no custom client state | Server Action |
+
+Both need the same authorization. A Route Handler is not automatically private because it lives inside your app.
+
+## Try it
+
+<TryIt title="Add a cached public list and an authorized mutation" hint="Make getPublicMovies cached with a minutes lifetime and a movies tag. Add a Server Action that rejects a missing session, validates with Zod, inserts with the session user id, calls updateTag, and redirects. Then verify the list shows the new row on the next request.">
+```text
+read:   getPublicMovies() → 'use cache' → cacheTag('movies')
+write:  auth() → zod → db.create → updateTag('movies') → redirect
+```
+</TryIt>
+
+<Exercise title="Find the cache bug" difficulty="medium">
+A team caches this function for ten minutes:
+
+```ts
+async function getDashboard() {
+  'use cache'
+  const session = await auth()
+  return db.order.findMany({ where: { userId: session.user.id } })
+}
+```
+
+Explain why this is unsafe, then rewrite it as two functions: one that reads and verifies the session outside the cache, and one that receives a trusted user id and either caches with a user-specific tag or stays uncached. State the invalidation strategy you chose for a newly created order.
+</Exercise>
+
+<KeyPoint>
+Cache only what you can describe precisely: which inputs, how long, and which tag invalidates it. Every mutation still needs authentication, authorization, validation, and a deliberate cache update. The framework gives you the tools; the policy is your job.
+</KeyPoint>

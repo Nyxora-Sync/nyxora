@@ -7,6 +7,7 @@ import { GithubIcon } from '@/components/icons/brand'
 import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
 import { HeroVisual } from '@/components/home/hero-visual'
+import { SpecializationsBanner } from '@/components/specializations-banner'
 import { Reveal } from '@/components/motion/reveal'
 import { cn, getAccent } from '@/lib/utils'
 import { tracks as curriculumTracks } from '@/lib/curriculum'
@@ -26,8 +27,8 @@ const features = [
   },
   {
     icon: BookOpen,
-    title: 'Dual Learning Tracks',
-    description: 'Beginner track (HTML/CSS/JS foundations) or Developer track (straight to MERN). Switch anytime.',
+    title: 'Core Tracks + Specializations',
+    description: 'Start with beginner foundations or go straight to MERN. Then choose a specialization and ship something more ambitious.',
     color: 'violet',
   },
   {
@@ -73,6 +74,8 @@ const tracks = curriculumTracks.map((track) => {
     ),
   }
 })
+
+const coreTracks = tracks.filter((track) => track.key !== 'specializations')
 
 const lessonIds = new Set<string>()
 const resourceUrls = new Set<string>()
@@ -182,11 +185,11 @@ export default function HomePage() {
             <div className="text-center max-w-3xl mx-auto mb-16">
               <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">Choose Your Learning Path</h2>
               <p className="mt-4 text-lg text-muted-foreground">
-                Two tracks, same destination. Pick based on your experience level.
+                Two core tracks, same destination. Pick based on your experience level, then specialize when you are ready.
               </p>
             </div>
             <div className="grid gap-8 md:grid-cols-2">
-              {tracks.map((track) => (
+              {coreTracks.map((track) => (
                 <Link key={track.key} href={`/learn/${track.key}`} className="group">
                   <Card className="relative overflow-hidden transition-all motion-safe:hover:-translate-y-1 hover:shadow-xl h-full border-border/50">
                     <CardHeader>
@@ -232,6 +235,7 @@ export default function HomePage() {
               ))}
             </div>
           </Reveal>
+          <SpecializationsBanner className="mt-8" />
         </section>
 
         {/* Features */}

@@ -12,6 +12,7 @@ import {
   Rocket, Smartphone, Brain,
 } from 'lucide-react'
 import { cn, getAccent } from '@/lib/utils'
+import { getTrack } from '@/lib/curriculum'
 import { pageMetadata } from '@/lib/seo'
 
 const beginnerRoadmap = [
@@ -95,12 +96,14 @@ const developerRoadmap = beginnerRoadmap.slice(1).map((phase, i) => ({
   weeks: ['Weeks 1-3', 'Weeks 4-5', 'Weeks 6-8', 'Weeks 9-10'][i],
 }))
 
-const specializations = [
-  { name: 'Advanced React / Next.js', icon: Atom, description: 'Server components, SSR/SSG, App Router' },
-  { name: 'DevOps & Cloud', icon: Cloud, description: 'Docker, Kubernetes, AWS, monitoring' },
-  { name: 'Scalable Systems', icon: Boxes, description: 'Microservices, Redis, message queues' },
-  { name: 'React Native', icon: Smartphone, description: 'Mobile apps with MERN backend' },
-]
+const specializationTrack = getTrack('specializations')
+
+const specializationIcons: Record<string, typeof Atom> = {
+  Atom,
+  Cloud,
+  Boxes,
+  Smartphone,
+}
 
 function RoadmapPhase({ phase, index, color }: { phase: typeof beginnerRoadmap[0]; index: number; color: string }) {
   const Icon = phase.icon
@@ -144,9 +147,9 @@ function RoadmapPhase({ phase, index, color }: { phase: typeof beginnerRoadmap[0
 
 export const metadata = pageMetadata({
   title: 'Full MERN Roadmap',
-  description: 'Complete visual roadmap for learning the MERN stack, from beginner foundations to production mastery, with estimated timelines.',
+  description: 'Complete visual roadmap for learning the MERN stack, from beginner foundations to production mastery and four specializations, with estimated timelines.',
   path: '/roadmap',
-  keywords: ['MERN roadmap', 'full stack roadmap', 'learn MERN', 'web developer roadmap'],
+  keywords: ['MERN roadmap', 'full stack roadmap', 'learn MERN', 'web developer roadmap', 'Next.js roadmap', 'React Native roadmap'],
 })
 
 export default function RoadmapPage() {
@@ -232,25 +235,54 @@ export default function RoadmapPage() {
             <div className="text-center mb-12">
               <h2 className="text-3xl font-bold tracking-tight">After MERN: Specialize</h2>
               <p className="mt-3 text-muted-foreground max-w-2xl mx-auto">
-                Completed the core tracks? Pick a specialization to stand out.
+                Finished the core MERN curriculum? Pick a complete specialization module and keep going.
               </p>
             </div>
-            <div className="grid gap-6 sm:grid-cols-2">
-              {specializations.map((spec) => (
-                <Card key={spec.name} className="hover:shadow-md transition-shadow">
-                  <CardContent className="pt-6 flex items-start gap-4">
-                    <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-xl bg-violet-500/15 text-violet-500">
-                      <spec.icon className="h-6 w-6" aria-hidden="true" />
-                    </div>
-                    <div>
-                      <h3 className="font-semibold">{spec.name}</h3>
-                      <p className="text-sm text-muted-foreground mt-1">{spec.description}</p>
-                      <Badge variant="secondary" className="mt-2 text-xs">Coming soon</Badge>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
+            {specializationTrack && (
+              <>
+                <div className="grid gap-6 sm:grid-cols-2">
+                  {specializationTrack.modules.map((spec) => {
+                    const Icon = specializationIcons[spec.icon] ?? Atom
+                    return (
+                      <Link
+                        key={spec.id}
+                        href={`/learn/${specializationTrack.key}/${spec.key}`}
+                        className="group block"
+                      >
+                        <Card className="h-full hover:shadow-md transition-shadow">
+                          <CardContent className="pt-6 flex items-start gap-4">
+                            <div className={cn('flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-xl', getAccent(spec.color).icon)}>
+                              <Icon className="h-6 w-6" aria-hidden="true" />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <h3 className="font-semibold group-hover:text-primary transition-colors">{spec.name}</h3>
+                                <Badge variant="outline" className="text-xs">
+                                  {spec.lessons.length} lessons
+                                </Badge>
+                              </div>
+                              <p className="text-sm text-muted-foreground mt-1">{spec.description}</p>
+                              <p className="mt-3 flex items-center gap-1.5 text-sm font-medium text-primary">
+                                Start specialization
+                                <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
+                              </p>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      </Link>
+                    )
+                  })}
+                </div>
+                <div className="mt-8 text-center">
+                  <Button asChild variant="outline" className="gap-2">
+                    <Link href={`/learn/${specializationTrack.key}`}>
+                      Explore all specializations
+                      <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                    </Link>
+                  </Button>
+                </div>
+              </>
+            )}
           </div>
         </section>
       </main>

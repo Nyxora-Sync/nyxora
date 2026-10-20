@@ -59,7 +59,7 @@ const offers = [
     icon: Compass,
     title: 'A path, not a pile',
     description:
-      'Two guided tracks: beginner foundations and the developer core, followed by mastery modules in testing, security, DevOps, architecture, and performance.',
+      'Two core tracks — beginner foundations and the developer MERN core — followed by mastery modules and four specializations in Next.js, cloud DevOps, scalable systems, and React Native.',
     color: 'blue',
   },
   {

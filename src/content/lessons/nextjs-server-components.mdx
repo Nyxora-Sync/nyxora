@@ -1,0 +1,306 @@
+A React single-page app ships a nearly empty HTML file and asks the browser to build the page. The App Router starts from the other direction: most of the UI is rendered on the server, and only the parts that need browser interactivity are sent as JavaScript.
+
+That inversion is the whole mental model. Once you can look at a component and answer **“does this need to run in the browser?”**, the rest of Next.js — layouts, data fetching, caching, and bundle size — becomes much easier.
+
+## Two kinds of components
+
+| | Server Component | Client Component |
+|---|---|---|
+| Where it runs | Server only | Server (initial render) and browser |
+| Can be `async` | Yes | No |
+| Can read a database | Yes | No |
+| Can use `useState`, `useEffect` | No | Yes |
+| Can attach `onClick` | No | Yes |
+| Ships JavaScript to the browser | No | Yes |
+| Can read cookies or headers | Yes, through server APIs | Only through the server |
+
+In the App Router, **every component is a Server Component by default**. You opt into the client with a `"use client"` directive at the top of a file.
+
+```tsx
+// app/movies/page.tsx — a Server Component by default
+import { db } from '@/lib/db'
+
+export default async function MoviesPage() {
+  const movies = await db.movie.findMany({
+    orderBy: { createdAt: 'desc' },
+    take: 20,
+  })
+
+  return (
+    <main>
+      <h1>Latest movies</h1>
+      <ul>
+        {movies.map((movie) => (
+          <li key={movie.id}>{movie.title}</li>
+        ))}
+      </ul>
+    </main>
+  )
+}
+```
+
+There is no `useEffect`, no loading spinner, and no API call from the browser. The query runs before the HTML is sent. The database credentials never enter the client bundle.
+
+<KeyPoint>
+Server Components are not a performance trick you add later. They are the default rendering model. Your job is to keep the client boundary as small as possible, not to convert the whole page.
+</KeyPoint>
+
+## Route segments, layouts, and pages
+
+The `app/` directory maps folders to URL segments:
+
+```text
+app/
+├── layout.tsx              # root layout: html, body, providers
+├── page.tsx                # /
+├── movies/
+│   ├── layout.tsx          # wraps /movies and its children
+│   ├── page.tsx            # /movies
+│   └── [slug]/
+│       ├── page.tsx        # /movies/:slug
+│       └── loading.tsx     # streamed fallback for this segment
+└── dashboard/
+    └── page.tsx            # /dashboard
+```
+
+A layout receives `children` and preserves state across navigation within its segment. A page is the leaf that renders the route's content.
+
+```tsx
+// app/movies/layout.tsx
+import Link from 'next/link'
+
+export default function MoviesLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <section>
+      <nav aria-label="Movies">
+        <Link href="/movies">All movies</Link>
+        <Link href="/movies/watchlist">Watchlist</Link>
+      </nav>
+      {children}
+    </section>
+  )
+}
+```
+
+Nested layouts do not re-render from scratch on every navigation. That is why a persistent sidebar, player, or navigation bar belongs in a layout rather than a page.
+
+### Dynamic routes
+
+Dynamic segments arrive as a Promise in modern Next.js. Await them before use:
+
+```tsx
+// app/movies/[slug]/page.tsx
+import { notFound } from 'next/navigation'
+import { db } from '@/lib/db'
+
+export default async function MoviePage({
+  params,
+}: {
+  params: Promise<{ slug: string }>
+}) {
+  const { slug } = await params
+  const movie = await db.movie.findUnique({ where: { slug } })
+
+  if (!movie) notFound()
+
+  return <h1>{movie.title}</h1>
+}
+```
+
+`notFound()` renders the nearest `not-found.tsx` boundary. Do not return a fake “not found” page with a `200` status — search engines and clients should see the real status.
+
+## The client boundary
+
+Interactive UI needs Client Components. The mistake is putting `"use client"` at the top of the page because one button needs state.
+
+```tsx
+// app/movies/movie-search.tsx
+'use client'
+
+import { useMemo, useState } from 'react'
+
+export function MovieSearch({ movies }: { movies: { id: string; title: string }[] }) {
+  const [query, setQuery] = useState('')
+  const results = useMemo(
+    () => movies.filter((movie) => movie.title.toLowerCase().includes(query.toLowerCase())),
+    [movies, query]
+  )
+
+  return (
+    <div>
+      <label htmlFor="movie-search">Search movies</label>
+      <input
+        id="movie-search"
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+      />
+      <ul>
+        {results.map((movie) => (
+          <li key={movie.id}>{movie.title}</li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+```
+
+Then keep the page on the server and pass only the data the island needs:
+
+```tsx
+// app/movies/page.tsx
+import { db } from '@/lib/db'
+import { MovieSearch } from './movie-search'
+
+export default async function MoviesPage() {
+  const movies = await db.movie.findMany({
+    select: { id: true, title: true },
+    orderBy: { title: 'asc' },
+  })
+
+  return (
+    <main>
+      <h1>Movies</h1>
+      <MovieSearch movies={movies} />
+    </main>
+  )
+}
+```
+
+The page, the heading, and the data access stay on the server. Only the search island ships JavaScript.
+
+<Callout type="warning" title="The boundary is viral">
+  Once a file has `"use client"`, every module it imports becomes part of the client graph unless that import is itself a server entry point. One top-level `"use client"` can quietly pull a design system, a date library, and half your components into the browser bundle.
+</Callout>
+
+### What can cross the boundary?
+
+Props passed from a Server Component to a Client Component must be **serializable**: strings, numbers, booleans, arrays, plain objects, dates, and a few built-ins. Functions, class instances, and database clients do not cross.
+
+Server Actions are the deliberate exception: they are functions you can pass to a Client Component because the framework replaces them with a reference to a server endpoint.
+
+```tsx
+// app/movies/actions.ts
+'use server'
+
+import { revalidatePath } from 'next/cache'
+
+export async function deleteMovie(id: string) {
+  // authorize first — this is a public endpoint
+  // await db.movie.delete({ where: { id } })
+  revalidatePath('/movies')
+}
+```
+
+```tsx
+// app/movies/delete-button.tsx
+'use client'
+
+import { deleteMovie } from './actions'
+
+export function DeleteButton({ id }: { id: string }) {
+  return (
+    <button onClick={() => deleteMovie(id)}>
+      Delete
+    </button>
+  )
+}
+```
+
+Never pass a raw database object to the client just because the type checker allows it. Select the columns the UI needs, and strip anything private before it crosses.
+
+<Callout type="danger" title="The client is not a trust boundary">
+  A value hidden from the UI is still visible in the network response. Passwords, internal notes, other users' emails, and admin flags must be excluded in the query, not hidden with CSS.
+</Callout>
+
+## Streaming: show the shell first
+
+A server-rendered page does not have to wait for every query before sending anything. Wrap slow sections in `<Suspense>` and give them a useful fallback:
+
+```tsx
+import { Suspense } from 'react'
+import { MovieList } from './movie-list'
+import { Recommendations } from './recommendations'
+
+export default function MoviesPage() {
+  return (
+    <main>
+      <h1>Movies</h1>
+
+      <Suspense fallback={<p>Loading movies…</p>}>
+        <MovieList />
+      </Suspense>
+
+      <Suspense fallback={<p>Finding recommendations…</p>}>
+        <Recommendations />
+      </Suspense>
+    </main>
+  )
+}
+```
+
+The shell, heading, and fallbacks can arrive immediately. The slower pieces stream in as their data resolves. `loading.tsx` does the same thing for a whole route segment:
+
+```tsx
+// app/movies/loading.tsx
+export default function Loading() {
+  return <p>Loading movies…</p>
+}
+```
+
+Use a skeleton when it preserves the layout and a short message when the content is genuinely unknown. A full-page spinner that replaces everything is usually worse than keeping the shell visible.
+
+### Start independent work together
+
+Sequential awaits turn two 300 ms queries into 600 ms:
+
+```tsx
+// slower: the second query waits for the first
+const user = await getUser()
+const movies = await getMovies()
+
+// faster: both start together
+const [user, movies] = await Promise.all([getUser(), getMovies()])
+```
+
+Only sequence work when the second call depends on the first. Independent reads should run in parallel.
+
+## Where Server Components stop
+
+Server Components cannot use browser-only APIs, event handlers, or React state. That is not a limitation to work around; it is a signal that the interactive part should be a small Client Component.
+
+A useful decomposition for a movie page:
+
+```text
+MoviePage                 Server: fetch movie, render metadata and SEO tags
+├── MoviePoster            Server: plain image
+├── MovieDetails           Server: text and links
+├── WatchlistButton        Client: optimistic state and server action
+└── CommentThread          Server shell + Client composer
+```
+
+The page's structure and content stay out of the bundle. Only the controls that require state cross the boundary.
+
+## Try it
+
+<TryIt title="Turn a client-side movie page into a server-first page" hint="Start with a page that fetches in useEffect and renders a spinner. Move the query into an async Server Component, keep search or a watchlist button as the only Client Component, and compare the JavaScript network panel.">
+```text
+Before: page.tsx ('use client') → useEffect → fetch('/api/movies')
+After:  page.tsx (server) → db query → <MovieSearch movies={...} />
+```
+</TryIt>
+
+<Exercise title="Design a minimal client boundary" difficulty="medium">
+Take a page with a movie list, a search box, a “load more” button, and a favorite toggle.
+
+1. Decide which parts must be Client Components.
+2. Keep the list and page heading on the server.
+3. Pass only the fields each island needs.
+4. Add a Suspense fallback for the list and explain what stays visible while it loads.
+5. List one thing that must never be sent to the client.
+
+There is no single correct file layout, but every interactive component should have a reason to be interactive.
+</Exercise>
+
+<KeyPoint>
+The App Router is server-first: render data and structure on the server, stream slow sections, and isolate interactivity in the smallest Client Components. That one habit improves bundle size, security, and perceived speed at the same time.
+</KeyPoint>

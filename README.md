@@ -29,7 +29,7 @@ MERN Learn is built for people who want to learn by reading, practicing, and bui
 
 Everything you need is on the live site:
 
-- **53 written lessons** across two guided tracks
+- **65 written lessons** across two core tracks and four specializations
 - **Free, curated resources** in every lesson, with optional “go deeper” links
 - **Interactive playgrounds** for HTML, CSS, JavaScript, React, Node, and Express
 - **Progress tracking** with XP, levels, streaks, badges, notes, and bookmarks
@@ -51,6 +51,12 @@ No paywalls. No ads. No account required to start.
 - Continue into TypeScript, testing, security, DevOps, architecture, performance, and a master capstone
 
 Both tracks share the same four MERN core modules, so you can switch paths without losing progress.
+
+**Specializations** — after the core:
+1. Advanced React & Next.js — Server Components, streaming, Cache Components, Server Actions, and production deployment
+2. DevOps & Cloud — Kubernetes, a small AWS footprint, Terraform, secrets, and incident response
+3. Scalable Systems — service boundaries, distributed data, Redis, reliable queues, and idempotency
+4. React Native — Expo, native navigation, secure authentication, offline sync, and store release
 
 ## How progress works
 

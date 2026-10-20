@@ -2,9 +2,10 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
-import { BookOpen, Code2, ArrowRight, CheckCircle, Clock, Users, Trophy, Code2 as Code2Icon } from 'lucide-react'
+import { BookOpen, Code2, ArrowRight, CheckCircle, Clock, Users, Trophy, Code2 as Code2Icon, Sparkles } from 'lucide-react'
 import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
+import { SpecializationsBanner } from '@/components/specializations-banner'
 import { Reveal } from '@/components/motion/reveal'
 import { cn, getAccent } from '@/lib/utils'
 import { tracks as curriculumTracks } from '@/lib/curriculum'
@@ -13,6 +14,7 @@ import { pageMetadata } from '@/lib/seo'
 const trackIcons: Record<string, typeof BookOpen> = {
   beginner: BookOpen,
   developer: Code2,
+  specializations: Sparkles,
 }
 
 const tracks = curriculumTracks.map((track) => {
@@ -36,6 +38,8 @@ const tracks = curriculumTracks.map((track) => {
   }
 })
 
+const coreTracks = tracks.filter((track) => track.key !== 'specializations')
+
 const uniqueLessonCount = new Set(
   curriculumTracks.flatMap((track) =>
     track.modules.flatMap((mod) => mod.lessons.map((lesson) => lesson.id))
@@ -44,9 +48,9 @@ const uniqueLessonCount = new Set(
 
 export const metadata = pageMetadata({
   title: 'Learn the MERN Stack',
-  description: `Choose a beginner foundations track or go straight to the MERN core. ${uniqueLessonCount} free written lessons, playgrounds, and a path to production mastery.`,
+  description: `Choose a beginner foundations track or go straight to the MERN core. ${uniqueLessonCount} free written lessons, four specializations, playgrounds, and a path to production mastery.`,
   path: '/learn',
-  keywords: ['learn MERN', 'MERN roadmap', 'beginner web development', 'MongoDB Express React Node'],
+  keywords: ['learn MERN', 'MERN roadmap', 'beginner web development', 'MongoDB Express React Node', 'Next.js', 'React Native'],
 })
 
 export default function LearnPage() {
@@ -64,7 +68,7 @@ export default function LearnPage() {
               </span>
             </h1>
             <p className="mt-4 max-w-2xl mx-auto text-lg text-muted-foreground">
-              Two tracks, same destination. Pick based on your experience level. Switch anytime.
+              Start with a core track based on your experience level, then specialize when you are ready. Switch anytime.
             </p>
           </div>
         </section>
@@ -73,7 +77,7 @@ export default function LearnPage() {
         <section className="py-16 sm:py-20">
           <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <div className="grid gap-8 lg:grid-cols-2">
-              {tracks.map((track) => (
+              {coreTracks.map((track) => (
                 <Link key={track.key} href={`/learn/${track.key}`} className="group">
                   <Card className="relative overflow-hidden transition-all motion-safe:hover:-translate-y-1 hover:shadow-xl h-full border-border/50">
                     <div className={cn('absolute top-0 left-0 right-0 h-1 bg-gradient-to-r', getAccent(track.color).gradient)} />
@@ -126,6 +130,7 @@ export default function LearnPage() {
               ))}
             </div>
           </Reveal>
+          <SpecializationsBanner className="mt-8" />
         </section>
 
         {/* Why MERN Learn */}
@@ -170,7 +175,7 @@ export default function LearnPage() {
                     Ready to become a MERN master?
                   </h2>
                   <p className="mt-4 text-lg text-muted-foreground">
-                    Both tracks are free, written, and self-paced. Start where you are.
+                    Every path is free, written, and self-paced. Start where you are.
                   </p>
                   <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
                     <Button size="lg" asChild className="gap-2 w-full sm:w-auto">

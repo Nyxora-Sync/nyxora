@@ -1,0 +1,228 @@
+The architecture lesson made the case for a modular monolith with clear domain boundaries. This lesson handles the next decision: when one of those modules should become a separate service, and what changes when it does.
+
+Most teams split too early. The second most common failure is splitting too late and doing it all at once. The useful skill is a reversible path: keep the monolith healthy, extract one seam at a time, and make every distributed interaction explicit.
+
+## Start with a boundary, not a service
+
+A bounded context is a part of the business with its own language and rules. “Movies,” “billing,” and “notifications” are contexts. `controllers/`, `services/`, and `models/` are layers, not contexts.
+
+Inside a modular monolith, each context owns its data and exposes a small public surface:
+
+```text
+src/modules/
+├── movies/
+│   ├── movie.model.ts
+│   ├── movie.service.ts      # public API for other modules
+│   ├── movie.schemas.ts      # request/contract shapes
+│   └── movie.routes.ts
+├── billing/
+│   ├── subscription.model.ts
+│   ├── billing.service.ts
+│   └── billing.routes.ts
+└── notifications/
+    └── notification.service.ts
+```
+
+Rules that keep the seams real:
+
+- A module reads and writes only its own models.
+- Cross-module calls go through the other module's service, never its model.
+- Shared types live in a contract package or are duplicated deliberately; they do not import a module's internals.
+- Database transactions stay inside one module. Cross-module workflows use events or an orchestrator.
+
+<KeyPoint>
+The boundary is defined by data ownership and business rules, not by how you deploy. If two modules cannot be extracted cleanly inside one process, putting a network between them makes the coupling harder to see, not easier to fix.
+</KeyPoint>
+
+## When extraction is justified
+
+Extract a service when at least one measurable pressure exists:
+
+1. **Independent scaling.** Image processing needs eight workers; the API needs two. A separate worker process usually solves this without a new service.
+2. **Independent deployment.** Payments changes daily under a different team with a stricter compliance process. Separate deployables let each team ship without coordinating every release.
+3. **Fault or resource isolation.** A recommendation engine can exhaust memory and take down checkout. A service boundary limits the blast radius.
+4. **Different data or availability requirements.** The audit log needs retention and access controls that the rest of the app does not.
+
+“Microservices are modern” is not on the list. Neither is “the codebase is getting big.” A large codebase with enforced module boundaries is often easier to operate than five services with shared tables.
+
+## Contracts and versioning
+
+A service call is a public API. Define it explicitly:
+
+```ts
+// contracts/billing.ts
+export type CreateSubscriptionRequest = {
+  accountId: string
+  planId: string
+  idempotencyKey: string
+}
+
+export type Subscription = {
+  id: string
+  accountId: string
+  planId: string
+  status: 'trialing' | 'active' | 'past_due' | 'canceled'
+  currentPeriodEnd: string
+}
+
+export type CreateSubscriptionResponse =
+  | { ok: true; subscription: Subscription }
+  | { ok: false; code: 'PLAN_NOT_FOUND' | 'ALREADY_SUBSCRIBED'; message: string }
+```
+
+Versioning rules that prevent avoidable outages:
+
+- Add fields; do not rename or remove them without a deprecation window.
+- Treat enums as open sets unless the client can handle an unknown value.
+- Return a machine-readable `code` alongside a human message.
+- Timestamps are ISO 8601 strings with a timezone.
+- Document idempotency: which operations can be retried safely.
+
+If two services share a database table, they are not separate services. They are one service with a network hop and two deployment schedules. Split the schema before splitting the process.
+
+## The distributed data problem
+
+In a monolith, a transaction can update an order and its payment row atomically. Across services, each database has its own transaction. You cannot wrap both in one ACID transaction without distributed-transaction machinery that is usually heavier than the problem.
+
+Options, from simplest to most complex:
+
+| Approach | Use when | Cost |
+|---|---|---|
+| Keep data together | The contexts are not truly independent | No distribution |
+| API composition | One service can ask another for data at read time | Latency, partial failure |
+| Saga | A business workflow spans services and needs compensation | Complex state machine |
+| Event-carried state transfer | Consumers need a local copy of changes | Staleness, duplication |
+| Two-phase commit | Rare, strong consistency across services | Operational complexity |
+
+For most MERN products, **keep the transaction in one service** and use events for side effects. Only use a saga when a real multi-step workflow cannot be owned by one service.
+
+## Sagas: compensation instead of rollback
+
+A saga is a sequence of local transactions. If a later step fails, earlier steps are compensated with another local transaction.
+
+```text
+Create order
+  → Reserve inventory
+    → Charge payment
+      → Confirm order
+
+If charge fails:
+  release inventory reservation
+  mark order payment_failed
+```
+
+```ts
+type SagaState =
+  | { step: 'started'; orderId: string }
+  | { step: 'inventory_reserved'; orderId: string; reservationId: string }
+  | { step: 'payment_charged'; orderId: string; paymentId: string }
+  | { step: 'failed'; orderId: string; reason: string }
+```
+
+A saga needs:
+
+- A durable record of its current step.
+- Idempotent steps, because retries are inevitable.
+- A compensation for every completed step that cannot remain.
+- A timeout and a manual resolution path for stuck states.
+- An owner and a dashboard; a silent stuck saga is a lost order.
+
+<Callout type="warning" title="Compensation is not a rollback">
+  If a customer was charged and then the order is canceled, the compensation is a refund or a credit — a new business action with its own delay and failure modes. “Undo” across services is almost never instant.
+</Callout>
+
+## The transactional outbox
+
+Publishing an event and writing to the database are two operations. If the process crashes between them, either the event is lost or it is published for a write that never happened.
+
+The outbox pattern writes both in one local transaction:
+
+```ts
+await db.$transaction(async (tx) => {
+  const order = await tx.order.create({ data: orderInput })
+
+  await tx.outbox.create({
+    data: {
+      type: 'order.created',
+      aggregateId: order.id,
+      payload: { orderId: order.id, accountId: order.accountId },
+    },
+  })
+})
+```
+
+A relay process reads unpublished outbox rows and publishes them to the broker, then marks them sent. If publishing fails, it retries. The database transaction is the source of truth.
+
+```ts
+// worker/outbox-relay.ts (sketch)
+const rows = await db.outbox.findMany({
+  where: { publishedAt: null },
+  orderBy: { createdAt: 'asc' },
+  take: 100,
+})
+
+for (const row of rows) {
+  await broker.publish(row.type, row.payload)
+  await db.outbox.update({
+    where: { id: row.id },
+    data: { publishedAt: new Date() },
+  })
+}
+```
+
+The relay can publish a duplicate if it crashes after the broker ack and before the database update. That is acceptable only if consumers are idempotent. At-least-once delivery is the default reality; design for it.
+
+## Reading across services
+
+When the UI needs data from multiple services, choose deliberately:
+
+**API composition** calls each service from a backend-for-frontend and assembles the response. Simple, but adds latency and partial-failure handling.
+
+**Local read models** subscribe to events and store a denormalized view. Fast reads, but you own the synchronization and staleness.
+
+```ts
+// account-summary consumer
+async function onOrderCreated(event: OrderCreated) {
+  await db.accountSummary.update({
+    where: { accountId: event.accountId },
+    data: { orderCount: { increment: 1 } },
+  })
+}
+```
+
+If the summary must be exact immediately, a read model is the wrong tool. If it is a dashboard that can be seconds behind, it is excellent.
+
+## Migrating a module out
+
+Use a strangler path:
+
+1. **Enforce the seam** inside the monolith. All access goes through the module service.
+2. **Move the schema** into its own database or schema and remove cross-module joins.
+3. **Create the service** with the same contract and run it beside the monolith.
+4. **Route a small percentage of traffic** to the service; compare responses and error rates.
+5. **Move writes**, then reads, with a feature flag.
+6. **Delete the old module** and its tables after a rollback window.
+
+```text
+Before: monolith → billing module → billing tables
+During: monolith → billing client → (flag) → billing service → billing database
+After:  monolith → billing service; old module deleted
+```
+
+Keep the migration reversible for longer than feels comfortable. A feature flag that can send traffic back to the old path is worth more than a perfect cutover plan.
+
+<Exercise title="Extract one boundary on paper" difficulty="medium">
+Choose a MERN app you have built. Pick one module that could plausibly become a service.
+
+1. List the tables it owns and every other module that reads them.
+2. Identify a cross-module workflow and decide whether it can become a saga or should stay in one transaction.
+3. Write the public request and response types, including idempotency and error codes.
+4. Describe the outbox event it would publish and the consumer that needs it.
+5. Write a staged migration plan with a rollback point.
+
+If step 1 reveals three modules reading the same tables directly, the boundary is not ready yet. Fix the ownership inside the monolith first.
+</Exercise>
+
+<KeyPoint>
+Services are an organizational and operational decision, not a maturity badge. Define bounded contexts, keep data ownership real, version contracts, and use sagas and outboxes only for workflows that genuinely cross a boundary. Extract one seam at a time, with a rollback path.
+</KeyPoint>

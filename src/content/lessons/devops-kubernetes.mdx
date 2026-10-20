@@ -1,0 +1,275 @@
+A Docker container gives one process a predictable environment. It does not decide where that container runs, restart it when a node dies, spread traffic across five copies, or roll out a new image without dropping requests. That is the job of an orchestrator.
+
+Kubernetes is the default choice when you need that orchestration. It is also a large system with a steep operational cost. This lesson focuses on the subset a MERN team actually needs: a stateless API Deployment, a Service, an Ingress, configuration, probes, resource limits, and safe rollouts.
+
+<Callout type="warning" title="Do not start here">
+  If you have one API and one worker, a managed container platform or a single VM with a process manager is cheaper and simpler. Reach for Kubernetes when you need scheduling across a cluster, independent scaling, or a platform your organization already operates.
+</Callout>
+
+## The mental model
+
+```text
+Control plane
+├── API server        receives kubectl and controller requests
+├── etcd              stores cluster state
+├── scheduler         chooses a node for each Pod
+└── controllers       reconcile desired state with actual state
+
+Worker nodes
+└── kubelet + container runtime
+    ├── Pod A  ── your API container
+    ├── Pod B  ── another API replica
+    └── Pod C  ── a worker container
+```
+
+You declare **desired state** in YAML. Kubernetes continuously reconciles reality toward it. If a Pod crashes, the Deployment controller creates another one. If you change the image tag, it performs a rolling update.
+
+The smallest deployable unit is a **Pod**, but you rarely create Pods directly. Use a **Deployment** for stateless services because it manages ReplicaSets, scaling, and rollouts. Use a **StatefulSet** only when stable identity and storage are genuinely required — a database is usually a managed service, not something you run in your first cluster.
+
+## A production-shaped API manifest
+
+```yaml
+# k8s/api.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: movies-api
+  labels:
+    app: movies-api
+spec:
+  replicas: 3
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: movies-api
+  template:
+    metadata:
+      labels:
+        app: movies-api
+    spec:
+      containers:
+        - name: api
+          image: registry.example.com/movies-api:1.4.0
+          ports:
+            - containerPort: 4000
+          envFrom:
+            - configMapRef:
+                name: movies-api-config
+            - secretRef:
+                name: movies-api-secrets
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: '1'
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 4000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 4000
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            failureThreshold: 3
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+```
+
+The pieces that matter most:
+
+- **`replicas: 3`** gives you redundancy, but only if the app is stateless.
+- **`maxUnavailable: 0`** prevents the rollout from taking healthy capacity offline.
+- **`resources.requests`** tells the scheduler what the Pod needs; **limits** cap what it can consume. A memory limit that is too low causes OOM kills, not graceful degradation.
+- **`securityContext`** removes easy privilege escalation. A Node process does not need to run as root inside the container.
+
+<KeyPoint>
+Kubernetes is a reconciliation system, not a deployment script. You describe the end state, and controllers work continuously to reach it. That is why a broken readiness probe is more serious than a failed `kubectl apply`: the object exists, but traffic never arrives.
+</KeyPoint>
+
+## Configuration without rebuilding images
+
+Never bake environment-specific values into an image. The same image should run in staging and production with different configuration.
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: movies-api-config
+data:
+  NODE_ENV: production
+  PORT: '4000'
+  LOG_LEVEL: info
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: movies-api-secrets
+type: Opaque
+stringData:
+  DATABASE_URL: postgres://app:password@db:5432/movies
+  SESSION_SECRET: replace-me
+```
+
+`stringData` is convenient for examples, but do not commit real secrets to Git. In production, create Secrets through your cloud secret manager, an external-secrets controller, or a sealed-secrets workflow. Kubernetes Secrets are base64-encoded, not encrypted by default, and anyone with read access to the namespace can read them.
+
+## Probes: three different questions
+
+```text
+startupProbe    "Has the process finished starting?"
+readinessProbe  "Can this instance serve traffic right now?"
+livenessProbe   "Is this process still alive, or should it be restarted?"
+```
+
+A common failure is pointing all three at the same expensive endpoint:
+
+- **Startup** should allow a slow boot: database migrations, model loading, cache warm-up.
+- **Readiness** should fail when the instance cannot serve correctly — for example, the database connection is down. A failed readiness check removes the Pod from the Service endpoints without killing it.
+- **Liveness** should fail only when restarting is likely to help. If the database is unreachable, restarting your API will not fix it. If the event loop is permanently blocked, it might.
+
+```ts
+// src/routes/ops.ts
+import { Router } from 'express'
+import mongoose from 'mongoose'
+
+export const ops = Router()
+
+ops.get('/health', (_req, res) => {
+  res.json({ status: 'ok', uptime: process.uptime() })
+})
+
+ops.get('/ready', async (_req, res) => {
+  const dbReady = mongoose.connection.readyState === 1
+  res.status(dbReady ? 200 : 503).json({
+    status: dbReady ? 'ready' : 'degraded',
+    checks: { mongo: dbReady },
+  })
+})
+```
+
+<Callout type="warning" title="Liveness probes can cause restart loops">
+  If `/health` checks the database and the database is down, every Pod fails liveness and restarts in a loop. That destroys logs and makes the incident worse. Keep liveness local to the process; put dependency checks in readiness.
+</Callout>
+
+## Service and Ingress
+
+A **Service** gives a stable virtual IP and DNS name to a changing set of Pods:
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: movies-api
+spec:
+  selector:
+    app: movies-api
+  ports:
+    - port: 80
+      targetPort: 4000
+  type: ClusterIP
+```
+
+`ClusterIP` is internal to the cluster. An **Ingress** exposes HTTP routes to the outside world through an ingress controller:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: movies-ingress
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [api.example.com]
+      secretName: movies-tls
+  rules:
+    - host: api.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: movies-api
+                port:
+                  number: 80
+```
+
+The ingress controller handles TLS termination and routing. Your Node process should trust the proxy headers it configures, and your rate limiter should key on the real client IP rather than the ingress Pod's address.
+
+## Scaling and rollouts
+
+A Horizontal Pod Autoscaler adjusts replicas from observed metrics:
+
+```yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: movies-api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: movies-api
+  minReplicas: 3
+  maxReplicas: 12
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 65
+```
+
+CPU is a coarse signal. If your bottleneck is a queue or an external API, scale on a custom metric such as requests per second or queue depth. More importantly, every new replica must be able to serve immediately: sessions in a shared store, uploads in object storage, and rate-limit counters in Redis.
+
+A rolling update replaces Pods gradually. Watch it and roll back quickly if readiness or error rates worsen:
+
+```bash
+kubectl rollout status deployment/movies-api
+kubectl rollout history deployment/movies-api
+kubectl rollout undo deployment/movies-api --to-revision=3
+```
+
+Use immutable image tags such as a commit SHA, not `latest`. A Deployment that says `latest` cannot tell you which code is actually running, and rollbacks become guesswork.
+
+## Debugging in order
+
+```bash
+kubectl get pods
+kubectl describe pod movies-api-7d9f8c6b5-x2k4p
+kubectl logs deploy/movies-api --tail=100
+kubectl logs deploy/movies-api --previous
+kubectl exec -it deploy/movies-api -- sh
+kubectl get events --sort-by=.lastTimestamp
+```
+
+`describe` shows scheduling failures, image pull errors, and probe failures. `logs --previous` shows why the last container died. `get events` often explains a Pending Pod that never started. Check those before changing YAML at random.
+
+<Exercise title="Make a Node API cluster-ready" difficulty="medium">
+Take an Express API container you have already built.
+
+1. Add separate `/health` and `/ready` endpoints.
+2. Write a Deployment with three replicas, resource requests and limits, and a rolling update that never drops below the desired capacity.
+3. Put non-secret configuration in a ConfigMap and secrets in a Secret created outside Git.
+4. Add a ClusterIP Service and an Ingress with TLS.
+5. Simulate a failed readiness check and explain why the Pod stays alive but receives no traffic.
+6. List every piece of local state that would break when a second replica starts.
+</Exercise>
+
+<KeyPoint>
+Kubernetes rewards boring, stateless services. Keep configuration outside the image, make probes answer different questions, set resource boundaries, roll out immutable images, and watch the rollout. If the app still depends on local disk or in-memory sessions, no amount of YAML will make it scale.
+</KeyPoint>

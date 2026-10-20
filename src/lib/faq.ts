@@ -43,7 +43,7 @@ export const faqSections: FaqSection[] = [
         slug: 'which-track',
         question: 'Which track should I start with?',
         answer:
-          'Choose the beginner track if HTML, CSS, and JavaScript are new to you. Choose the developer track if you are already comfortable with JavaScript and want to move through Node, Express, MongoDB, React, and the advanced material faster. The shared MERN modules are the same in both tracks.',
+          'Choose the beginner track if HTML, CSS, and JavaScript are new to you. Choose the developer track if you are already comfortable with JavaScript and want to move through Node, Express, MongoDB, React, and the advanced material faster. The shared MERN modules are the same in both tracks. After either core, the specializations track goes deeper into Next.js, cloud DevOps, scalable systems, or React Native.',
         related: { label: 'Compare the tracks', href: '/learn' },
       },
       {

@@ -1,10 +1,11 @@
 # Lesson content progress
 
-The curriculum has **30 core lessons** plus **23 mastery lessons** in the developer
-track — **53 unique lessons** total. The developer track reuses the same core lesson
-IDs as the beginner track, so each lesson is authored once.
+The curriculum has **30 core lessons**, **23 mastery lessons** in the developer
+track, and **12 specialization lessons** — **65 unique lessons** total. The developer
+track reuses the same core lesson IDs as the beginner track, so each lesson is
+authored once.
 
-**Authored: 53 / 53** — every unique lesson across both tracks is written. ✅
+**Authored: 65 / 65** — every unique lesson across all three tracks is written. ✅
 
 ## Web Foundations
 
@@ -97,6 +98,32 @@ IDs as the beginner track, so each lesson is authored once.
 - [x] `capstone-saas-app` — Master Project: Multi-Tenant SaaS
 - [x] `capstone-portfolio-career` — Portfolio, Open Source & Career
 
+## Specializations Track
+
+### Advanced React & Next.js
+
+- [x] `nextjs-server-components` — App Router, Server Components & Streaming
+- [x] `nextjs-data-caching` — Data Fetching, Caching & Server Actions
+- [x] `nextjs-production` — Production Next.js: Auth, Security & Deployment
+
+### DevOps & Cloud
+
+- [x] `devops-kubernetes` — Kubernetes for MERN Teams
+- [x] `devops-aws` — AWS for MERN: VPC, ECS, RDS & S3
+- [x] `devops-cloud-operations` — Infrastructure as Code, Secrets & Incident Response
+
+### Scalable Systems
+
+- [x] `scale-service-boundaries` — Service Boundaries & Distributed Data
+- [x] `scale-redis` — Redis at Scale: Caching, Locks & Rate Limits
+- [x] `scale-reliable-messaging` — Reliable Messaging: Queues, Outbox & Idempotency
+
+### React Native
+
+- [x] `react-native-foundations` — React Native & Expo Foundations
+- [x] `react-native-navigation-data` — Navigation, Data & Native APIs
+- [x] `react-native-production` — Production: Auth, Offline & App Store Release
+
 ## Batch plan
 
 1. Foundations core — HTML, CSS, JavaScript, DOM (4)
@@ -112,3 +139,4 @@ IDs as the beginner track, so each lesson is authored once.
 11. Mastery — Architecture & system design (3)
 12. Mastery — Performance engineering (3)
 13. Mastery — Capstone: SaaS + career (2)
+14. Specializations — Next.js, DevOps & Cloud, Scalable Systems, React Native (12)

@@ -1,0 +1,273 @@
+React Native is not a browser with a smaller screen. It renders native views: `View` becomes a platform view, `Text` becomes a native text widget, and there is no DOM, no CSS cascade, and no `div`. The React model is the same; the host environment is not.
+
+That distinction explains most of the friction when moving from a MERN React app to mobile. This lesson builds the mental model and the development loop before adding navigation and data.
+
+## The runtime in one picture
+
+```text
+Your JavaScript (React components, state, hooks)
+        │
+        │  React Native renderer
+        ▼
+Native views on iOS / Android
+        │
+        └── gestures, layout, accessibility, platform APIs
+```
+
+React runs your component tree and sends updates to native views. You do not get HTML. You get a set of components with native behavior and a styling system that looks like CSS but is a subset.
+
+| Web | React Native |
+|---|---|
+| `div`, `section` | `View` |
+| `p`, `span`, `h1` | `Text` |
+| `button` | `Pressable` or `TouchableOpacity` |
+| `img` | `Image` |
+| `input` | `TextInput` |
+| `ul` + `li` | `FlatList` |
+| CSS files and the cascade | `StyleSheet` objects on each component |
+| `rem`, `px`, `%` | density-independent numbers, percentages, Flexbox |
+| browser devtools | React Native DevTools and native logs |
+
+There is no global stylesheet inheritance. A `Text` inside a `View` does not inherit the parent's color; every `Text` needs its own style or a shared component.
+
+## Create an Expo project
+
+Expo removes most of the native toolchain setup and gives you file-based routing, builds, and updates. For a new project:
+
+```bash
+npx create-expo-app@latest movies-mobile
+cd movies-mobile
+npx expo start
+```
+
+Scan the QR code with Expo Go for a quick preview, or create a development build for native modules and realistic performance:
+
+```bash
+npx expo run:ios
+npx expo run:android
+```
+
+<Callout type="info" title="Expo Go has limits">
+  Expo Go is excellent for learning UI and JavaScript. It cannot include arbitrary native modules or fully represent release performance. Once you add secure storage, camera, push notifications, or a custom SDK, switch to a development build.
+</Callout>
+
+A typical Expo Router project:
+
+```text
+app/
+├── _layout.tsx          # root providers, theme, auth gate
+├── index.tsx            # /
+├── (tabs)/
+│   ├── _layout.tsx      # tab navigator
+│   ├── index.tsx        # /(tabs)
+│   └── search.tsx       # /(tabs)/search
+├── movies/
+│   ├── [id].tsx         # /movies/:id
+│   └── _layout.tsx      # stack for this segment
+└── +not-found.tsx
+```
+
+Routes are files. A route group such as `(tabs)` organizes screens without adding a URL segment.
+
+## Layout is Flexbox, with different defaults
+
+React Native uses Flexbox for nearly everything. The important differences from web:
+
+- `flexDirection` defaults to `column`, not `row`.
+- `flex: 1` means “take the available space,” not “grow from content.”
+- There is no `display: inline` or `float`.
+- Margins do not collapse.
+- Numbers are density-independent pixels; `16` is roughly 16 points, not 16 physical pixels.
+- `gap` is supported on `View` and works well for spacing.
+
+```tsx
+import { StyleSheet, Text, View } from 'react-native'
+
+export function MovieRow({ title, year }: { title: string; year: number }) {
+  return (
+    <View style={styles.row}>
+      <View style={styles.poster} />
+      <View style={styles.copy}>
+        <Text style={styles.title} numberOfLines={2}>
+          {title}
+        </Text>
+        <Text style={styles.meta}>{year}</Text>
+      </View>
+    </View>
+  )
+}
+
+const styles = StyleSheet.create({
+  row: {
+    flexDirection: 'row',
+    gap: 12,
+    padding: 16,
+    alignItems: 'center',
+  },
+  poster: {
+    width: 56,
+    height: 84,
+    borderRadius: 8,
+    backgroundColor: '#d4d4d8',
+  },
+  copy: {
+    flex: 1,
+  },
+  title: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  meta: {
+    marginTop: 4,
+    color: '#71717a',
+  },
+})
+```
+
+`flex: 1` on `copy` is what prevents a long title from pushing the metadata off-screen. Without it, the text takes its intrinsic width.
+
+### Safe areas and the keyboard
+
+Phones have notches, home indicators, and software keyboards. Use `react-native-safe-area-context` and `KeyboardAvoidingView`:
+
+```tsx
+import { KeyboardAvoidingView, Platform, TextInput, View } from 'react-native'
+import { SafeAreaView } from 'react-native-safe-area-context'
+
+export function SearchScreen() {
+  return (
+    <SafeAreaView style={{ flex: 1 }}>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <View style={{ padding: 16 }}>
+          <TextInput
+            placeholder="Search movies"
+            accessibilityLabel="Search movies"
+            style={{
+              borderWidth: 1,
+              borderColor: '#d4d4d8',
+              borderRadius: 10,
+              padding: 12,
+              fontSize: 16,
+            }}
+          />
+        </View>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
+  )
+}
+```
+
+Use a `fontSize` of at least 16 on iOS inputs to avoid automatic zoom. Test with the keyboard open, not just on a static screen.
+
+## Lists need a list component
+
+`ScrollView` renders all children at once. It is fine for a short settings page and wrong for 500 movie rows.
+
+```tsx
+import { FlatList, Text, View } from 'react-native'
+
+type Movie = { id: string; title: string; year: number }
+
+export function MovieList({ movies }: { movies: Movie[] }) {
+  return (
+    <FlatList
+      data={movies}
+      keyExtractor={(movie) => movie.id}
+      renderItem={({ item }) => <MovieRow title={item.title} year={item.year} />}
+      ItemSeparatorComponent={() => <View style={{ height: 1, backgroundColor: '#e4e4e7' }} />}
+      ListEmptyComponent={<Text>No movies yet.</Text>}
+      initialNumToRender={10}
+      windowSize={7}
+    />
+  )
+}
+```
+
+`FlatList` virtualizes rows. Keep `renderItem` stable, memoize row components when appropriate, and avoid creating new inline functions for every row if profiling shows a problem. For very large or heterogeneous lists, `FlashList` is a common alternative.
+
+## Platform differences
+
+Most code is shared, but some behavior is platform-specific:
+
+```tsx
+import { Platform } from 'react-native'
+
+const shadow = Platform.select({
+  ios: {
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  android: { elevation: 4 },
+  default: {},
+})
+```
+
+Use file extensions for larger differences: `date-picker.ios.tsx` and `date-picker.android.tsx`. Avoid a maze of `Platform.OS` branches in one component; it becomes untestable quickly.
+
+## Accessibility is not a web-only concern
+
+Mobile screen readers use different conventions. Provide labels and roles, and keep touch targets large:
+
+```tsx
+<Pressable
+  accessibilityRole="button"
+  accessibilityLabel={`Add ${title} to watchlist`}
+  accessibilityState={{ selected: isSaved }}
+  onPress={toggleSaved}
+  style={{ minHeight: 44, minWidth: 44, justifyContent: 'center' }}
+>
+  <Text>{isSaved ? 'Saved' : 'Save'}</Text>
+</Pressable>
+```
+
+- Use a minimum 44×44 point touch target.
+- Support dynamic type; avoid fixed-height text containers.
+- Respect reduced motion: `AccessibilityInfo.isReduceMotionEnabled()`.
+- Test with VoiceOver (iOS) and TalkBack (Android), not just a screen reader in a browser.
+- Do not use color alone to communicate state.
+
+## Debugging the loop
+
+```bash
+npx expo start
+# press j to open React Native DevTools
+# press r to reload
+# press m to toggle the developer menu
+```
+
+On a physical device, shake the device or use the developer menu. `console.log` works but is noisy; use breakpoints in React Native DevTools for component state. Native crashes appear in the device logs or the Expo CLI output.
+
+Common first-day errors:
+
+- **Text outside a `<Text>`** — every string must be inside a `Text` component.
+- **`flex: 1` missing on a screen container** — the layout collapses or does not fill.
+- **`ScrollView` inside a `View` without a bounded height** — the list does not scroll.
+- **Using a DOM-only prop** — `className`, `onClick`, and `href` do not exist.
+- **Assuming `console.log` shows objects nicely** — log strings or use the debugger.
+
+## Try it
+
+<TryIt title="Build a movie row and a list" hint="Create a typed Movie type, a MovieRow with a poster placeholder, and a FlatList with an empty state. Run it on a real device, rotate the device, increase the system font size, and fix anything that clips or overlaps.">
+```text
+MovieList → FlatList → MovieRow → View(row) + Text(title)
+```
+</TryIt>
+
+<Exercise title="Translate a web screen" difficulty="medium">
+Take a simple React web screen: a header, a search input, and a list of cards.
+
+1. Replace every DOM element with a React Native component.
+2. Convert the CSS to `StyleSheet` objects. Note which properties do not exist.
+3. Use `SafeAreaView`, a `FlatList`, and an accessible `Pressable`.
+4. Run it on iOS and Android, then at the largest system font size.
+5. Write down one behavior that is better on mobile and one that is more awkward than the web.
+</Exercise>
+
+<KeyPoint>
+React Native keeps React's component model but replaces the browser. Think in native components, Flexbox, safe areas, virtualized lists, and platform accessibility. Get the layout and development loop right before adding navigation, auth, or offline sync.
+</KeyPoint>

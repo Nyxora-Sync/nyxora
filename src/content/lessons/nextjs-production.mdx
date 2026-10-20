@@ -1,0 +1,323 @@
+A Next.js app can be fast in development and still fail in production: a session check that only runs in the browser, a route handler with no authorization, an error boundary that hides a broken deploy, or a page that ships 900 KB of JavaScript because one component imported a charting library.
+
+Production readiness is mostly a set of boundaries. This lesson puts them in place: who is allowed to see what, where errors go, how you observe a request, and what changes when you leave the managed platform.
+
+## Authentication is a server concern
+
+A session cookie proves that a browser sent a cookie. It does not prove that the user owns the row they are requesting. Every server entry point needs both:
+
+- **Authentication:** who is making the request?
+- **Authorization:** may this user perform this action on this resource?
+
+Keep session helpers on the server:
+
+```ts
+// lib/auth/session.ts
+import 'server-only'
+import { cookies } from 'next/headers'
+import { cache } from 'react'
+import { redirect } from 'next/navigation'
+import { verifySessionToken } from './tokens'
+import { db } from '@/lib/db'
+
+export const getCurrentUser = cache(async () => {
+  const token = (await cookies()).get('session')?.value
+  if (!token) return null
+
+  const session = await verifySessionToken(token)
+  if (!session) return null
+
+  return db.user.findUnique({
+    where: { id: session.userId },
+    select: { id: true, name: true, email: true, role: true },
+  })
+})
+
+export async function requireUser() {
+  const user = await getCurrentUser()
+  if (!user) redirect('/auth/signin')
+  return user
+}
+```
+
+React's `cache()` deduplicates the lookup within a single request. It does not persist across requests, so it cannot leak one user's session into another.
+
+<Callout type="warning" title="Proxy is not your authorization layer">
+  Next.js 16 calls the old middleware file **Proxy** (`proxy.ts`). It is useful for optimistic redirects and header changes, but it should not be the only place you check permissions. Server Components, Server Actions, and Route Handlers must each verify the session and resource ownership themselves.
+</Callout>
+
+A proxy check can still improve the experience:
+
+```ts
+// proxy.ts
+import { NextResponse, type NextRequest } from 'next/server'
+
+export function proxy(request: NextRequest) {
+  const hasSession = request.cookies.has('session')
+
+  if (!hasSession && request.nextUrl.pathname.startsWith('/dashboard')) {
+    const signIn = new URL('/auth/signin', request.url)
+    signIn.searchParams.set('next', request.nextUrl.pathname)
+    return NextResponse.redirect(signIn)
+  }
+
+  return NextResponse.next()
+}
+
+export const config = {
+  matcher: ['/dashboard/:path*'],
+}
+```
+
+This is a fast redirect, not a security boundary. A request can reach the page through another path, and cookies can be forged or expired. The data access layer still has to say no.
+
+### Authorize the query, not just the page
+
+```ts
+// app/invoices/[id]/page.tsx
+import { notFound } from 'next/navigation'
+import { requireUser } from '@/lib/auth/session'
+import { db } from '@/lib/db'
+
+export default async function InvoicePage({ params }: { params: Promise<{ id: string }> }) {
+  const user = await requireUser()
+  const { id } = await params
+
+  const invoice = await db.invoice.findFirst({
+    where: {
+      id,
+      organization: { members: { some: { userId: user.id } } },
+    },
+  })
+
+  if (!invoice) notFound()
+
+  return <Invoice invoice={invoice} />
+}
+```
+
+The `where` clause is the authorization. If the user is not a member of the organization, the invoice does not exist as far as this request is concerned. Do not fetch first and check in JavaScript afterward if the query can enforce it.
+
+<KeyPoint>
+Authentication tells you who is calling. Authorization is a property of every query and mutation. Put the ownership check in the database query whenever possible, and test the negative case: another user's id must return the same “not found” response.
+</KeyPoint>
+
+## Route Handlers need the same rules
+
+A Route Handler is a public HTTP endpoint. It does not inherit the page's session or permissions:
+
+```ts
+// app/api/invoices/[id]/route.ts
+import { NextResponse } from 'next/server'
+import { getCurrentUser } from '@/lib/auth/session'
+import { db } from '@/lib/db'
+
+export async function GET(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const user = await getCurrentUser()
+  if (!user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const { id } = await params
+  const invoice = await db.invoice.findFirst({
+    where: { id, organization: { members: { some: { userId: user.id } } } },
+  })
+
+  if (!invoice) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  }
+
+  return NextResponse.json({ invoice })
+}
+```
+
+Use explicit status codes. A `200` with `{ error: ... }` breaks clients, caches, and monitoring. Validate query parameters and request bodies with Zod, enforce a size limit, and never reflect an arbitrary URL or HTML string without escaping.
+
+## Errors, loading, and empty states
+
+The App Router gives each segment three useful boundaries:
+
+```text
+app/dashboard/
+├── loading.tsx     # streamed fallback while the segment loads
+├── error.tsx       # client error boundary for unexpected failures
+├── not-found.tsx   # rendered by notFound()
+└── page.tsx
+```
+
+```tsx
+// app/dashboard/error.tsx
+'use client'
+
+export default function DashboardError({
+  error,
+  reset,
+}: {
+  error: Error & { digest?: string }
+  reset: () => void
+}) {
+  return (
+    <div role="alert">
+      <h2>Dashboard unavailable</h2>
+      <p>Something went wrong while loading your data.</p>
+      <button onClick={reset}>Try again</button>
+    </div>
+  )
+}
+```
+
+Log the error with its digest on the server; show the digest to the user so support can correlate the report without exposing the stack trace. Do not render `error.message` directly in production — it can contain database details or internal paths.
+
+Distinguish **expected** outcomes from **exceptional** ones:
+
+- Invalid form input: return a field-level error from the Server Action.
+- Missing record: `notFound()`.
+- Unauthenticated: redirect or `401`.
+- Forbidden: `403`, but prefer `404` when revealing existence is a privacy risk.
+- Unexpected failure: throw, log, and let the error boundary handle it.
+
+Loading and empty states are part of the interface, not polish you add last. A skeleton that preserves the final layout is better than a centered spinner; an empty state with the next action is better than a blank table.
+
+## Observe the request
+
+You cannot debug production with `console.log` alone. At minimum, capture:
+
+- **Request id:** generated at the edge or in the server entry point, returned in a response header, included in logs.
+- **Structured events:** `invoice_created`, `payment_failed`, and `session_rejected` with safe fields.
+- **Error reports:** grouped exceptions with release and request id.
+- **Web vitals and route timings:** p75/p95, not just averages.
+
+```ts
+// lib/observability.ts
+export function logEvent(event: string, fields: Record<string, unknown> = {}) {
+  console.info(JSON.stringify({
+    level: 'info',
+    event,
+    timestamp: new Date().toISOString(),
+    ...fields,
+  }))
+}
+```
+
+Never log passwords, tokens, full cookies, or arbitrary request bodies. Redact at the logger, not by remembering to be careful at every call site.
+
+For client errors, an error-reporting SDK with source maps is worth the setup. Without source maps, a production stack trace points at `chunk-4f8a.js:1:48211` and tells you nothing.
+
+## Performance is a budget
+
+Three numbers deserve a budget on every route:
+
+1. **Largest Contentful Paint** — usually the hero image or heading.
+2. **Interaction to Next Paint** — how long the main thread is blocked after a tap.
+3. **JavaScript transferred** — the cost you pay before any interaction works.
+
+Practical Next.js levers:
+
+```tsx
+import Image from 'next/image'
+
+<Image
+  src="/hero.jpg"
+  alt=""
+  width={1600}
+  height={900}
+  priority
+  sizes="(min-width: 1024px) 50vw, 100vw"
+/>
+```
+
+- Use `next/image` with correct `sizes`; mark only the actual LCP image as `priority`.
+- Load fonts with `next/font` and avoid extra weights.
+- Dynamically import heavy, below-the-fold widgets.
+- Keep Server Components on the server so their dependencies stay out of the bundle.
+- Use `loading.tsx` and Suspense to stream instead of blocking the whole route.
+- Measure with a production build, not `next dev`.
+
+<Callout type="tip" title="Optimize the route users actually land on">
+  A fast marketing page does not compensate for a slow dashboard. Pick the three most important routes, record a baseline on a throttled connection, and set a budget before changing anything. Re-run the same measurement after each change.
+</Callout>
+
+## Security headers and cookies
+
+Set a small, explicit header policy in `next.config.ts`:
+
+```ts
+const nextConfig = {
+  async headers() {
+    return [
+      {
+        source: '/(.*)',
+        headers: [
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          { key: 'X-Frame-Options', value: 'DENY' },
+          {
+            key: 'Permissions-Policy',
+            value: 'camera=(), microphone=(), geolocation=()',
+          },
+        ],
+      },
+    ]
+  },
+}
+```
+
+Session cookies should be `HttpOnly`, `Secure` in production, `SameSite=Lax` or stricter, and scoped to the narrowest path that needs them. A Content Security Policy is valuable but must be built and tested deliberately; a broken CSP can take down your own scripts. Start in report-only mode if you are unsure.
+
+## Deploying: managed or self-hosted
+
+**Vercel** gives you a global CDN, preview deployments, image optimization, and automatic scaling. The main constraints are platform limits and the cost profile at high traffic. It is the shortest path for most Next.js apps.
+
+**Self-hosting** gives you control and can be cheaper at steady, predictable scale, but you own the reverse proxy, TLS, caching, health checks, and zero-downtime deploys:
+
+```ts
+// next.config.ts
+const nextConfig = {
+  output: 'standalone',
+}
+```
+
+A standalone build produces a minimal server bundle. Run it behind a reverse proxy, set `NODE_ENV=production`, provide all environment variables at runtime, and health-check a real endpoint rather than the process port alone.
+
+Whichever platform you choose, validate environment variables at startup:
+
+```ts
+// lib/env.ts
+import { z } from 'zod'
+
+const envSchema = z.object({
+  DATABASE_URL: z.string().url(),
+  AUTH_SECRET: z.string().min(32),
+  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+})
+
+export const env = envSchema.parse(process.env)
+```
+
+Fail fast on a missing secret. A deploy that starts successfully and then throws on the first login is harder to diagnose than one that refuses to boot.
+
+## Production checklist
+
+- [ ] Every Server Action, Route Handler, and private page authenticates and authorizes.
+- [ ] Session cookies are `HttpOnly`, `Secure`, and `SameSite`.
+- [ ] Inputs are validated at the server boundary.
+- [ ] Error boundaries log server-side and show a safe message.
+- [ ] Loading and empty states preserve layout and offer a next action.
+- [ ] Images have dimensions, `sizes`, and only the LCP image is prioritized.
+- [ ] Heavy client-only widgets are dynamically imported.
+- [ ] Security headers are set and tested.
+- [ ] Environment variables fail fast at startup.
+- [ ] A production build passes and a real route is measured on a throttled connection.
+
+<Exercise title="Audit a private route" difficulty="medium">
+Choose a page that shows user-specific data. Trace every path to it: direct URL, client navigation, a Server Action, and any Route Handler that touches the same data.
+
+For each path, write down where authentication happens, where authorization happens, and what a different signed-in user receives. Then add one test that requests another user's record and expects a `404`. Fix any path where the check exists only in the UI.
+</Exercise>
+
+<KeyPoint>
+Production Next.js is not a different framework. It is the same server-first model with explicit trust boundaries, observable failures, performance budgets, and a deployment you can reproduce. Put the checks in server code, keep the client small, and measure the routes that matter.
+</KeyPoint>
