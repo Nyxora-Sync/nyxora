@@ -20,7 +20,7 @@ Public pages call `pageMetadata()` with a title, description, and path. It adds:
 
 - a self-referencing canonical URL
 - Open Graph and Twitter card fields
-- the shared 1200×630 image at `/og-image.png`
+- the shared 1200×630 image at `/og-image.jpg`
 - optional `noindex` for private pages
 
 Private or thin pages (`/dashboard`, `/settings`, `/auth/*`, public profile and

@@ -1,204 +1,87 @@
-# MERN Learn
+<p align="center">
+  <img src="public/site-logo.png" alt="MERN Learn" width="560" />
+</p>
 
-A free, open-source learning platform that takes you from zero to MERN stack mastery — with a curated roadmap, hand-picked free resources, interactive code playgrounds, progress tracking, and community features.
+<h1 align="center">MERN Learn</h1>
 
-![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Content](https://img.shields.io/badge/content-CC%20BY--SA%204.0-green.svg)
+<p align="center">
+  A free, written MERN stack curriculum — from your first HTML tag to production-ready full-stack apps.
+</p>
 
-## ✨ Features
+<p align="center">
+  <a href="https://mern-learn-pi.vercel.app/learn"><strong>Start learning →</strong></a>
+  &nbsp;·&nbsp;
+  <a href="https://mern-learn-pi.vercel.app/roadmap">Roadmap</a>
+  &nbsp;·&nbsp;
+  <a href="https://mern-learn-pi.vercel.app/resources">Resources</a>
+  &nbsp;·&nbsp;
+  <a href="https://mern-learn-pi.vercel.app/community">Community</a>
+</p>
 
-- **Dual learning tracks** — Beginner (starts from HTML/CSS/JS) and Developer (straight to MERN)
-- **Curated free resources** — A searchable directory plus hand-picked videos, articles, and docs in every lesson. No paywalls, no affiliate links
-- **Interactive playground** — In-browser HTML/CSS/JS editor with live preview, plus one-click launches for Node, Express, React, and MongoDB environments via StackBlitz
-- **Progress tracking** — Lessons completed, XP, levels, streaks, badges, notes, and bookmarks. Stored locally with optional account sync
-- **Dashboard** — Track your journey across both tracks with stats, badges, and bookmarks
-- **Searchable resource directory** — Filter by topic, type, and difficulty
-- **Community** — Lesson discussions, project showcase, public learner profiles, and contribution guides
-- **Dark mode** — System-aware, with a manual toggle
+<p align="center">
+  <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" />
+  <img src="https://img.shields.io/badge/content-CC%20BY--SA%204.0-green.svg" alt="CC BY-SA 4.0" />
+</p>
 
-## 🛠 Tech Stack
+## Learn directly on the site
 
-| Layer | Technology |
-|-------|-----------|
-| Framework | Next.js 16 (App Router, Turbopack) |
-| Language | TypeScript |
-| Styling | Tailwind CSS v4 + shadcn/ui (Radix) |
-| Auth | NextAuth.js (Auth.js v5) — GitHub, Google, Email magic links |
-| ORM | Prisma 6 |
-| Database | PostgreSQL (any provider: Vercel, Supabase, Neon, local) |
-| Icons | Lucide + custom brand SVGs |
-| State | React hooks + localStorage |
+MERN Learn is built for people who want to learn by reading, practicing, and building — not by assembling a local development environment.
 
-## 🚀 Getting Started
+Everything you need is on the live site:
 
-### 1. Prerequisites
+- **53 written lessons** across two guided tracks
+- **Free, curated resources** in every lesson, with optional “go deeper” links
+- **Interactive playgrounds** for HTML, CSS, JavaScript, React, Node, and Express
+- **Progress tracking** with XP, levels, streaks, badges, notes, and bookmarks
+- **Lesson discussions**, a project showcase, and public learner profiles
 
-- Node.js 20+
-- PostgreSQL 14+ (or a free cloud Postgres: [Neon](https://neon.tech), [Supabase](https://supabase.com), [Vercel Postgres](https://vercel.com/storage/postgres))
+No paywalls. No ads. No account required to start.
 
-### 2. Install
+## Choose a track
 
-```bash
-git clone <your-repo-url> mern-learn
-cd mern-learn
-npm install
-```
+**Beginner Track** — start from zero:
+1. Web Foundations — how the web works, HTML, CSS, JavaScript, the DOM, async, Git, and a portfolio project
+2. Node.js & Express — runtime, routing, REST, auth, and testing
+3. MongoDB & Mongoose — documents, schemas, relations, and aggregation
+4. React — components, hooks, routing, state, forms, and performance
+5. Full Stack Mastery — integration, Socket.io, uploads, deployment, and a capstone
 
-### 3. Configure environment
+**Developer Track** — already know JavaScript?
+- Start with the shared MERN core: Node.js & Express, MongoDB, React, and Full Stack Mastery
+- Continue into TypeScript, testing, security, DevOps, architecture, performance, and a master capstone
 
-Copy the example file and fill in your values:
+Both tracks share the same four MERN core modules, so you can switch paths without losing progress.
 
-```bash
-cp .env.example .env.local
-```
+## How progress works
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `DATABASE_URL` | ✅ | PostgreSQL connection string |
-| `AUTH_SECRET` | ✅ | Random secret (`openssl rand -base64 32`) |
-| `NEXTAUTH_URL` | ✅ | `http://localhost:3000` in dev |
-| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | Optional | [Create an OAuth app](https://github.com/settings/developers) |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Optional | [Google Cloud Console](https://console.cloud.google.com/apis/credentials) |
-| `EMAIL_SERVER*` | Optional | SMTP for magic-link sign-in (e.g. Resend, Gmail, Mailtrap) |
+You can use the entire curriculum without signing in. Progress is saved in your browser automatically.
 
-> The app works without auth configured — progress tracking uses localStorage by default.
+If you want your progress on another device, sign in with GitHub. Your completed lessons, XP, streaks, notes, and bookmarks sync to your account. You can keep your profile private or make your progress public from Settings.
 
-### 4. Set up the database
+## Community
 
-```bash
-npx prisma migrate dev --name init
-npm run db:seed        # optional: seed badges
-```
+- Ask questions and share notes in lesson discussions
+- Browse real projects in the [showcase](https://mern-learn-pi.vercel.app/community/showcase)
+- Meet other learners through public profiles
+- Report bugs, suggest resources, or improve a lesson through the [contribution guide](https://mern-learn-pi.vercel.app/contribute)
 
-### 5. Run
+## Contributing
 
-```bash
-npm run dev
-```
+MERN Learn is open source and welcomes contributions:
 
-Open [http://localhost:3000](http://localhost:3000).
+- Fix a confusing explanation or a broken link
+- Suggest a free resource for a lesson
+- Report a bug or an accessibility issue
+- Share a project for the showcase
+- Help with translations or design improvements
 
-## 📜 Scripts
+Open a [GitHub issue](https://github.com/Nyxora-Sync/mern-learn/issues) or submit a pull request. Read the [contribution guide](https://mern-learn-pi.vercel.app/contribute) and [Code of Conduct](https://mern-learn-pi.vercel.app/code-of-conduct) first.
 
-| Script | Description |
-|--------|-------------|
-| `npm run dev` | Start dev server |
-| `npm run build` | Production build |
-| `npm run start` | Serve production build |
-| `npm run lint` | ESLint |
-| `npm run db:generate` | Regenerate Prisma client |
-| `npm run db:migrate` | Create/apply migrations |
-| `npm run db:push` | Push schema without migrations (prototyping) |
-| `npm run db:studio` | Open Prisma Studio |
-| `npm run db:seed` | Seed badges |
+## License
 
-## 📁 Project Structure
+- **Code:** MIT — see [`LICENSE`](LICENSE)
+- **Lesson content:** CC BY-SA 4.0 — see [`LICENSE-CONTENT`](LICENSE-CONTENT)
 
-```
-src/
-├── app/
-│   ├── learn/                    # Curriculum routes
-│   │   ├── page.tsx              # Track selection
-│   │   └── [track]/[module]/[lesson]/
-│   ├── dashboard/                # Progress dashboard
-│   ├── resources/                # Searchable resource directory
-│   ├── playground/               # Interactive code playground
-│   ├── roadmap/                  # Visual roadmap
-│   ├── community/                # Community hub
-│   ├── auth/                     # Sign in / error / verify
-│   └── api/auth/[...nextauth]/   # Auth.js route handlers
-├── components/
-│   ├── ui/                       # shadcn/ui primitives
-│   ├── icons/                    # Brand SVG icons
-│   └── *.tsx                     # Feature components
-├── hooks/
-│   └── use-progress.ts           # localStorage progress engine
-├── lib/
-│   ├── curriculum.ts             # Tracks → modules → lessons
-│   ├── resources-data.ts         # Curated resource directory
-│   ├── auth/                     # Auth.js config + email
-│   ├── db.ts                     # Prisma singleton
-│   └── utils.ts                  # cn(), accent colors, XP math
-└── types/                        # Types (next-auth augmentation)
-```
+## Acknowledgements
 
-## 🎓 Curriculum
-
-**Beginner Track (~16 weeks)**
-1. Web Foundations — how the web works, HTML, CSS, JS, DOM, async, ES6+, Git, portfolio project
-2. Node.js & Express — runtime, routing, REST, auth, testing
-3. MongoDB & Mongoose — documents, schemas, relations, aggregation
-4. React — components, hooks, routing, state, forms, performance
-5. Full Stack Mastery — architecture, integration, Socket.io, uploads, deployment, capstone
-
-**Developer Track (~16 weeks)** — the four MERN core modules above, plus TypeScript, testing, security, DevOps, architecture, performance, and a master capstone, for people who already know JS.
-
-Content lives in `src/lib/curriculum.ts`. Add lessons by appending to a module's `lessons` array.
-
-## 🤝 Contributing
-
-1. Fork the repo
-2. Create a feature branch (`git checkout -b feat/my-feature`)
-3. Commit with clear messages
-4. Open a pull request
-
-Ideas welcome: new lessons, better resources, translations, accessibility fixes, UI improvements, bug reports.
-
-### Adding a resource
-
-Edit `src/lib/resources-data.ts` and add an entry:
-
-```ts
-{
-  id: 'unique-id',
-  title: 'Resource title',
-  url: 'https://…',
-  description: 'One or two sentences.',
-  type: 'video' | 'article' | 'docs' | 'interactive' | 'course' | 'book' | 'project' | 'tool',
-  topic: 'html-css' | 'javascript' | 'node' | 'express' | 'mongodb' | 'react' | 'fullstack' | 'git' | 'testing' | 'deployment',
-  provider: 'Provider name',
-  level: 'beginner' | 'intermediate' | 'advanced',
-  duration: '2 hours',        // optional
-  isVerified: true,           // optional: official/high quality
-  tags: ['tag1', 'tag2'],
-}
-```
-
-## 🚢 Deployment
-
-### Vercel (recommended)
-
-1. Push to GitHub
-2. Import the repo at [vercel.com/new](https://vercel.com/new)
-3. Add environment variables (`DATABASE_URL`, `AUTH_SECRET`, OAuth keys, and optionally `NEXT_PUBLIC_SITE_URL` when using a custom domain)
-4. Deploy — `postinstall` runs `prisma generate` automatically
-
-Run migrations against your production DB:
-
-```bash
-DATABASE_URL="<prod-url>" npx prisma migrate deploy
-```
-
-### Other platforms
-
-Any Node host works (Render, Railway, Fly.io). Requirements: Node 20+, build command `npm run build`, start command `npm start`, and the env vars above.
-
-### SEO
-
-Canonical URLs, `sitemap.xml`, `robots.txt`, and JSON-LD use `NEXT_PUBLIC_SITE_URL` when set, then Vercel's production URL, then `http://localhost:3000`. Set `NEXT_PUBLIC_SITE_URL` to your public origin when you add a custom domain, then redeploy. See `docs/seo.md` for the canonical rules and generated routes.
-
-## 🔐 Security Notes
-
-- Never commit `.env.local` (it's gitignored)
-- Generate a fresh `AUTH_SECRET` for production
-- OAuth callback URLs: `https://your-domain/api/auth/callback/github` (and `/google`)
-- Progress data is local-first and syncs to the signed-in account when enabled
-
-## 📄 License
-
-- **Code:** MIT (see `LICENSE`)
-- **Content:** CC BY-SA 4.0 (see `LICENSE-CONTENT`)
-
-## 🙏 Acknowledgements
-
-Built with love for the free-learning community. Resources are curated from freeCodeCamp, MDN, The Odin Project, Full Stack Open, Net Ninja, Traversy Media, Web Dev Simplified, official docs, and many other generous educators.
+Resources are curated from freeCodeCamp, MDN, The Odin Project, Full Stack Open, Net Ninja, Traversy Media, Web Dev Simplified, official documentation, and many other generous educators.

@@ -4,12 +4,13 @@ import { Suspense, useState } from 'react'
 import { signIn } from 'next-auth/react'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
+import Image from 'next/image'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
-import { Mail, Loader2, Code2, BookOpen, ShieldCheck } from 'lucide-react'
+import { Mail, Loader2, BookOpen, ShieldCheck } from 'lucide-react'
 import { GithubIcon } from '@/components/icons/brand'
 import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
@@ -58,6 +59,8 @@ function SignInContent({ enabled }: { enabled: EnabledProviders }) {
     (p) => enabled[p.id as 'github' | 'google']
   )
   const hasAnyProvider = availableOAuth.length > 0 || enabled.email
+  const singleOAuthOnly = availableOAuth.length === 1 && !enabled.email
+  const singleProviderName = availableOAuth[0]?.name ?? 'GitHub'
 
   const handleOAuthSignIn = (provider: string) => {
     setIsLoading(provider)
@@ -77,11 +80,15 @@ function SignInContent({ enabled }: { enabled: EnabledProviders }) {
       <main className="flex-1 flex items-center justify-center px-4 py-12 sm:py-20">
         <div className="w-full max-w-md">
           <div className="text-center mb-8">
-            <Link href="/" className="inline-flex items-center gap-2 mb-6">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500 to-violet-600">
-                <Code2 className="h-6 w-6 text-white" aria-hidden="true" />
-              </div>
-              <span className="font-bold text-2xl">MERN Learn</span>
+            <Link href="/" className="mb-6 inline-block">
+              <Image
+                src="/site-logo.png"
+                alt="MERN Learn"
+                width={900}
+                height={450}
+                className="h-auto w-[260px] rounded-xl"
+                priority
+              />
             </Link>
             <h1 className="text-3xl font-bold">Welcome back</h1>
             <p className="mt-2 text-muted-foreground">Sign in to sync progress across devices and join the community</p>
@@ -89,9 +96,21 @@ function SignInContent({ enabled }: { enabled: EnabledProviders }) {
 
           <Card>
             <CardHeader className="text-center">
-              <CardTitle>{hasAnyProvider ? 'Choose a sign-in method' : 'Accounts coming soon'}</CardTitle>
+              <CardTitle>
+                {singleOAuthOnly
+                  ? `Continue with ${singleProviderName}`
+                  : hasAnyProvider
+                    ? 'Choose a sign-in method'
+                    : 'Accounts coming soon'}
+              </CardTitle>
               <CardDescription>
-                {hasAnyProvider ? 'All free. No passwords. Magic links or OAuth.' : 'No sign-in provider is configured on this deployment yet.'}
+                {singleOAuthOnly
+                  ? `Use your ${singleProviderName} account to sync progress across devices.`
+                  : hasAnyProvider
+                    ? enabled.email
+                      ? 'All free. No passwords. Magic links or OAuth.'
+                      : 'All free. No passwords. Use your GitHub account.'
+                    : 'No sign-in provider is configured on this deployment yet.'}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -124,12 +143,12 @@ function SignInContent({ enabled }: { enabled: EnabledProviders }) {
               )}
 
               {availableOAuth.length > 0 && (
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className={availableOAuth.length > 1 ? 'grid gap-3 sm:grid-cols-2' : 'mx-auto w-full max-w-xs'}>
                   {availableOAuth.map((provider) => (
                     <Button
                       key={provider.id}
                       variant="outline"
-                      className="gap-2"
+                      className={availableOAuth.length === 1 ? 'w-full gap-2' : 'gap-2'}
                       onClick={() => handleOAuthSignIn(provider.id)}
                       disabled={isLoading !== null}
                     >

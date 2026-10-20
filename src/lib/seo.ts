@@ -10,7 +10,7 @@ export const siteUrl = configuredUrl.replace(/\/+$/, '')
 export const siteName = 'MERN Learn'
 export const defaultDescription =
   'Learn the MERN stack (MongoDB, Express, React, Node.js) from beginner to mastery with free written lessons, playgrounds, progress tracking, and a community.'
-export const defaultOgImage = '/og-image.png'
+export const defaultOgImage = '/og-image.jpg'
 
 // Modules shared by the beginner and developer tracks render the same lessons.
 // The developer-track copies are canonical so search engines index one URL.

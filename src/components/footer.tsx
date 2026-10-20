@@ -1,5 +1,6 @@
 import Link from 'next/link'
-import { Mail, Heart, Code2 } from 'lucide-react'
+import Image from 'next/image'
+import { Mail } from 'lucide-react'
 import { GithubIcon } from '@/components/icons/brand'
 import { NewsletterForm } from '@/components/newsletter-form'
 
@@ -57,11 +58,14 @@ export function Footer() {
       <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8 lg:py-16">
         <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-6">
           <div className="md:col-span-2 lg:col-span-2">
-            <Link href="/" className="flex items-center gap-2" aria-label="MERN Learn Home">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500 to-violet-600">
-                <Code2 className="h-5 w-5 text-white" aria-hidden="true" />
-              </div>
-              <span className="font-bold text-xl font-sans">MERN Learn</span>
+            <Link href="/" className="inline-block" aria-label="MERN Learn Home">
+              <Image
+                src="/site-logo.png"
+                alt=""
+                width={900}
+                height={450}
+                className="h-auto w-56 rounded-xl sm:w-60"
+              />
             </Link>
             <p className="mt-4 max-w-xs text-sm text-muted-foreground">
               Learn the MERN stack (MongoDB, Express, React, Node.js) from beginner to mastery.
@@ -147,15 +151,7 @@ export function Footer() {
           </div>
         </div>
 
-        <div className="mt-12 flex flex-col items-center justify-between gap-4 border-t border-border/50 pt-8 sm:flex-row">
-          <p className="text-sm text-muted-foreground">
-            Built with{' '}
-            <span className="inline-flex items-center gap-1.5">
-              <Heart className="h-3.5 w-3.5 text-rose-500" aria-hidden="true" />
-              <Code2 className="h-3.5 w-3.5" aria-hidden="true" />
-            </span>{' '}
-            by the MERN Learn Community
-          </p>
+        <div className="mt-12 border-t border-border/50 pt-8 text-center">
           <p className="text-sm text-muted-foreground">
             Content licensed under{' '}
             <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer" className="underline hover:text-foreground">

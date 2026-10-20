@@ -37,7 +37,7 @@ export const metadata: Metadata = {
     description: defaultDescription,
     images: [
       {
-        url: '/og-image.png',
+        url: '/og-image.jpg',
         width: 1200,
         height: 630,
         alt: 'MERN Learn - Master the MERN Stack',
@@ -48,12 +48,11 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: 'MERN Learn — Master the MERN Stack for Free',
     description: defaultDescription,
-    images: ['/og-image.png'],
+    images: ['/og-image.jpg'],
   },
   icons: {
     icon: [
       { url: '/favicon.ico', sizes: 'any' },
-      { url: '/icon.svg', type: 'image/svg+xml' },
       { url: '/favicon-32x32.png', sizes: '32x32', type: 'image/png' },
     ],
     shortcut: '/favicon-16x16.png',

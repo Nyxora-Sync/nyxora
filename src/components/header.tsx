@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
+import Image from 'next/image'
 import { useSession, signOut } from 'next-auth/react'
 import { Menu, X, Sun, Moon, User, LogOut, BookOpen, Trophy, Users, Code2, Rocket } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -27,9 +28,14 @@ export function Header() {
       <nav className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8" aria-label="Main navigation">
         <div className="flex items-center gap-8">
           <Link href="/" className="flex items-center gap-2" aria-label="MERN Learn Home">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500 to-violet-600">
-              <Code2 className="h-5 w-5 text-white" aria-hidden="true" />
-            </div>
+            <Image
+              src="/site-mark.png"
+              alt=""
+              width={36}
+              height={36}
+              className="h-9 w-9 rounded-lg object-cover"
+              priority
+            />
             <span className="font-bold text-xl font-sans">MERN Learn</span>
           </Link>
 
