@@ -23,7 +23,7 @@ export async function POST(request: Request) {
     return jsonError(422, 'VALIDATION_ERROR', 'That confirmation link is invalid.')
   }
 
-  const verified = verifyNewsletterToken(parsed.data.token, 'confirm')
+  const verified = await verifyNewsletterToken(parsed.data.token, 'confirm')
   if (!verified) {
     return jsonError(
       400,

@@ -177,7 +177,7 @@ export async function DELETE(request: Request) {
   }
 
   if (parsed.data.token) {
-    const verified = verifyNewsletterToken(parsed.data.token, 'unsubscribe')
+    const verified = await verifyNewsletterToken(parsed.data.token, 'unsubscribe')
     if (!verified) {
       return jsonError(
         400,

@@ -1,4 +1,3 @@
-import { createHmac, timingSafeEqual } from 'node:crypto'
 import nodemailer from 'nodemailer'
 import type SMTPPool from 'nodemailer/lib/smtp-pool'
 import type SMTPTransport from 'nodemailer/lib/smtp-transport'
@@ -25,14 +24,36 @@ function tokenSecret(): string | null {
   )
 }
 
-function sign(value: string, secret: string): string {
-  return createHmac('sha256', secret).update(value).digest('base64url')
+// Web Crypto API compatible HMAC (edge runtime compatible)
+async function sign(value: string, secret: string): Promise<string> {
+  const encoder = new TextEncoder()
+  const key = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  )
+  const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(value))
+  return btoa(String.fromCharCode(...new Uint8Array(signature)))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '')
 }
 
-export function createNewsletterToken(
+function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false
+  let diff = 0
+  for (let i = 0; i < a.length; i++) {
+    diff |= a[i] ^ b[i]
+  }
+  return diff === 0
+}
+
+export async function createNewsletterToken(
   subscriberId: string,
   purpose: NewsletterTokenPurpose
-): string | null {
+): Promise<string | null> {
   const secret = tokenSecret()
   if (!secret) return null
 
@@ -44,23 +65,24 @@ export function createNewsletterToken(
     v: 1,
   }
   const encoded = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url')
-  return `${encoded}.${sign(encoded, secret)}`
+  const signature = await sign(encoded, secret)
+  return `${encoded}.${signature}`
 }
 
-export function verifyNewsletterToken(
+export async function verifyNewsletterToken(
   token: string,
   purpose: NewsletterTokenPurpose
-): { subscriberId: string } | null {
+): Promise<{ subscriberId: string } | null> {
   const secret = tokenSecret()
   if (!secret) return null
 
   const [encoded, signature, extra] = token.split('.')
   if (!encoded || !signature || extra) return null
 
-  const expected = sign(encoded, secret)
-  const provided = Buffer.from(signature)
+  const expected = await sign(encoded, secret)
   const expectedBuffer = Buffer.from(expected)
-  if (provided.length !== expectedBuffer.length || !timingSafeEqual(provided, expectedBuffer)) {
+  const providedBuffer = Buffer.from(signature)
+  if (providedBuffer.length !== expectedBuffer.length || !timingSafeEqual(providedBuffer, expectedBuffer)) {
     return null
   }
 
@@ -228,7 +250,7 @@ export async function sendNewsletterConfirmation({
   subscriberId: string
   origin: string
 }): Promise<void> {
-  const token = createNewsletterToken(subscriberId, 'confirm')
+  const token = await createNewsletterToken(subscriberId, 'confirm')
   if (!token) throw new Error('Newsletter token secret is not configured')
 
   const confirmUrl = actionUrl(origin, '/newsletter/confirm', token)
@@ -335,8 +357,8 @@ export async function sendNewsletterBroadcast({
     for (let index = 0; index < recipients.length; index += 5) {
       const batch = recipients.slice(index, index + 5)
       const results = await Promise.allSettled(
-        batch.map((recipient) => {
-          const token = createNewsletterToken(recipient.id, 'unsubscribe')
+        batch.map(async (recipient) => {
+          const token = await createNewsletterToken(recipient.id, 'unsubscribe')
           if (!token) throw new Error('Newsletter token secret is not configured')
           return sendOne(
             recipient.email,

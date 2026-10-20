@@ -5,8 +5,6 @@ const nextConfig: NextConfig = {
   /* Cloudflare Pages requires these settings */
   output: 'standalone',
   reactStrictMode: true,
-  cacheComponents: true,
-  partialPrefetching: true,
 
   images: {
     formats: ["image/avif", "image/webp"],

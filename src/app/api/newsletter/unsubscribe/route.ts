@@ -31,7 +31,7 @@ export async function POST(request: Request) {
     return jsonError(422, 'VALIDATION_ERROR', 'That unsubscribe link is invalid.')
   }
 
-  const verified = verifyNewsletterToken(parsed.data.token, 'unsubscribe')
+  const verified = await verifyNewsletterToken(parsed.data.token, 'unsubscribe')
   if (!verified) {
     return jsonError(
       400,
