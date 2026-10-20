@@ -1,3 +1,4 @@
+import { cacheLife } from 'next/cache'
 import { auth } from '@/lib/auth/auth'
 import { prisma } from '@/lib/db'
 import {
@@ -10,21 +11,9 @@ import {
   sinceMinutes,
 } from '@/lib/community'
 
-export async function GET(request: Request) {
-  if (!communityEnabled()) {
-    return jsonError(COMMUNITY_DISABLED.status, COMMUNITY_DISABLED.code, COMMUNITY_DISABLED.message)
-  }
-
-  const url = new URL(request.url)
-  const targetType = url.searchParams.get('targetType')
-  const targetId = url.searchParams.get('targetId')
-
-  if (
-    (targetType !== 'lesson' && targetType !== 'project') ||
-    !targetId
-  ) {
-    return jsonError(422, 'VALIDATION_ERROR', 'Provide a valid targetType and targetId.')
-  }
+async function getComments(targetType: string, targetId: string) {
+  'use cache'
+  cacheLife({ revalidate: 15, expire: 120 })
 
   const comments = await prisma.comment.findMany({
     where: {
@@ -44,28 +33,45 @@ export async function GET(request: Request) {
     },
   })
 
+  return comments.map((comment) => ({
+    id: comment.id,
+    body: comment.body,
+    createdAt: comment.createdAt.toISOString(),
+    author: comment.user,
+    replies: comment.replies.map((reply) => ({
+      id: reply.id,
+      body: reply.body,
+      createdAt: reply.createdAt.toISOString(),
+      author: reply.user,
+    })),
+  }))
+}
+
+export async function GET(request: Request) {
+  if (!communityEnabled()) {
+    return jsonError(COMMUNITY_DISABLED.status, COMMUNITY_DISABLED.code, COMMUNITY_DISABLED.message)
+  }
+
+  const url = new URL(request.url)
+  const targetType = url.searchParams.get('targetType')
+  const targetId = url.searchParams.get('targetId')
+
+  if (
+    (targetType !== 'lesson' && targetType !== 'project') ||
+    !targetId
+  ) {
+    return jsonError(422, 'VALIDATION_ERROR', 'Provide a valid targetType and targetId.')
+  }
+
+  const data = await getComments(targetType, targetId)
+
   return Response.json(
-    {
-      data: comments.map((comment) => ({
-        id: comment.id,
-        body: comment.body,
-        createdAt: comment.createdAt.toISOString(),
-        author: comment.user,
-        replies: comment.replies.map((reply) => ({
-          id: reply.id,
-          body: reply.body,
-          createdAt: reply.createdAt.toISOString(),
-          author: reply.user,
-        })),
-      })),
-    },
+    { data },
     {
       headers: {
-        // Discussions are public. Keep the browser copy fresh while allowing
-        // Vercel's edge cache to absorb refreshes and repeated page views.
+        // The serialized response is cached server-side for 15 seconds. Keep
+        // the browser copy fresh so new comments appear on the next view.
         'Cache-Control': 'public, max-age=0, must-revalidate',
-        'CDN-Cache-Control': 'public, s-maxage=20, stale-while-revalidate=120',
-        'Vercel-CDN-Cache-Control': 'public, s-maxage=20, stale-while-revalidate=120',
       },
     }
   )
