@@ -12,7 +12,6 @@ export const metadata: Metadata = {
 }
 
 // The profile id is only known at request time; render the shell on demand.
-export const instant = false
 
 export default async function ProfilePage({
   params,

@@ -17,7 +17,6 @@ export const metadata: Metadata = {
 }
 
 // Authentication and subscriber counts are request-specific.
-export const instant = false
 
 function readableDate(date: Date): string {
   return `${date.toISOString().replace('T', ' ').slice(0, 16)} UTC`

@@ -9,7 +9,6 @@ export const metadata: Metadata = {
 }
 
 // The token only exists at request time; render this page on demand.
-export const instant = false
 
 export default async function NewsletterUnsubscribePage({
   searchParams,

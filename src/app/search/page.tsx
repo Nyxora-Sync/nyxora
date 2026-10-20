@@ -22,8 +22,6 @@ import { groupSearchResults, searchSite, type SearchResult, type SearchResultTyp
 import { pageMetadata } from '@/lib/seo'
 import { cn } from '@/lib/utils'
 
-export const instant = false
-
 export const metadata: Metadata = pageMetadata({
   title: 'Search',
   description: 'Search lessons, modules, resources, pages, FAQ answers, and community projects on Nyxora Sync.',
