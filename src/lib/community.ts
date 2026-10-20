@@ -11,7 +11,10 @@ export function communityEnabled(): boolean {
 }
 
 export function jsonError(status: number, code: string, message: string) {
-  return Response.json({ error: { code, message } }, { status })
+  return Response.json(
+    { error: { code, message } },
+    { status, headers: { 'Cache-Control': 'no-store' } }
+  )
 }
 
 export const COMMUNITY_DISABLED = {

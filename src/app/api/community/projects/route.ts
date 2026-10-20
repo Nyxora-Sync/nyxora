@@ -67,11 +67,20 @@ export async function GET(request: Request) {
     : []
   const countByProject = new Map(commentCounts.map((row) => [row.targetId, row._count._all]))
 
-  return Response.json({
-    data: page.map((project) => serializeProject(project, countByProject.get(project.id) ?? 0)),
-    nextCursor,
-    sort,
-  })
+  return Response.json(
+    {
+      data: page.map((project) => serializeProject(project, countByProject.get(project.id) ?? 0)),
+      nextCursor,
+      sort,
+    },
+    {
+      headers: {
+        // Responses include the viewer's upvote state, so only the browser
+        // may cache them. Filters and cursors produce distinct URLs.
+        'Cache-Control': 'private, max-age=15, stale-while-revalidate=60',
+      },
+    }
+  )
 }
 
 export async function POST(request: Request) {

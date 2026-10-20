@@ -1,6 +1,7 @@
 /* eslint-disable @next/next/no-img-element */
 'use client'
 
+import { memo } from 'react'
 import Link from 'next/link'
 import { ExternalLink, MessageSquare, Rocket } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -16,7 +17,7 @@ const trackAccent: Record<string, string> = {
   developer: 'violet',
 }
 
-export function ProjectCard({ project }: { project: ProjectListItem }) {
+export const ProjectCard = memo(function ProjectCard({ project }: { project: ProjectListItem }) {
   return (
     <article className="group flex h-full flex-col overflow-hidden rounded-xl border border-border/50 bg-card transition-all motion-safe:hover:-translate-y-0.5 hover:border-border hover:shadow-lg">
       {project.imageUrl ? (
@@ -25,6 +26,7 @@ export function ProjectCard({ project }: { project: ProjectListItem }) {
             src={project.imageUrl}
             alt=""
             loading="lazy"
+            decoding="async"
             className="aspect-[16/9] w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
           />
         </Link>
@@ -102,4 +104,4 @@ export function ProjectCard({ project }: { project: ProjectListItem }) {
       </div>
     </article>
   )
-}
+})

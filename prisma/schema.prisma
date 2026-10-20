@@ -100,6 +100,8 @@ model UserProgress {
 
   @@unique([userId, lessonKey])
   @@index([userId])
+  @@index([completed])
+  @@index([userId, completed])
 }
 
 // Aggregate learning state that doesn't map to a single lesson
@@ -170,6 +172,10 @@ model Project {
   @@index([track])
   @@index([createdAt])
   @@index([upvotes])
+  @@index([userId, createdAt])
+  @@index([track, createdAt])
+  @@index([track, upvotes, createdAt])
+  @@index([upvotes, createdAt])
 }
 
 // One upvote per user per project. The denormalized Project.upvotes counter is
@@ -203,8 +209,8 @@ model Comment {
   parent  Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
   replies Comment[] @relation("CommentReplies")
 
-  @@index([targetType, targetId, createdAt])
-  @@index([parentId])
+  @@index([targetType, targetId, parentId, createdAt])
+  @@index([parentId, createdAt])
   @@index([userId])
 }
 

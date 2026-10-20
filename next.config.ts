@@ -5,6 +5,12 @@ const nextConfig: NextConfig = {
   /* config options here */
   cacheComponents: true,
   partialPrefetching: true,
+  images: {
+    // Let the image optimizer (and the edge cache in front of it) serve
+    // modern formats and keep optimized variants for a week.
+    formats: ["image/avif", "image/webp"],
+    minimumCacheTTL: 60 * 60 * 24 * 7,
+  },
   pageExtensions: ["js", "jsx", "ts", "tsx", "md", "mdx"],
   turbopack: {
     rules: {

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="public/site-logo.png" alt="MERN Learn" width="560" />
+  <img src="public/site-logo.jpg" alt="MERN Learn" width="480" />
 </p>
 
 <h1 align="center">MERN Learn</h1>

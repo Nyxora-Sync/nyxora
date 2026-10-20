@@ -20,27 +20,35 @@ export async function GET(request: Request, { params }: RouteContext) {
   const session = await auth()
   const userId = session?.user?.id ?? null
 
-  const project = await prisma.project.findUnique({
-    where: { id },
-    include: {
-      user: { select: publicUserSelect },
-      upvoteRows: { where: { userId: userId ?? '__none__' }, select: { id: true } },
-    },
-  })
+  const [project, commentCount] = await Promise.all([
+    prisma.project.findUnique({
+      where: { id },
+      include: {
+        user: { select: publicUserSelect },
+        upvoteRows: { where: { userId: userId ?? '__none__' }, select: { id: true } },
+      },
+    }),
+    prisma.comment.count({
+      where: { targetType: 'project', targetId: id },
+    }),
+  ])
 
   if (!project) return jsonError(404, 'NOT_FOUND', 'Project not found.')
 
-  const commentCount = await prisma.comment.count({
-    where: { targetType: 'project', targetId: id },
-  })
-
-  return Response.json({
-    data: {
-      ...serializeProject(project, commentCount),
-      updatedAt: project.updatedAt.toISOString(),
-      isOwner: userId === project.userId,
+  return Response.json(
+    {
+      data: {
+        ...serializeProject(project, commentCount),
+        updatedAt: project.updatedAt.toISOString(),
+        isOwner: userId === project.userId,
+      },
     },
-  })
+    {
+      headers: {
+        'Cache-Control': 'private, max-age=15, stale-while-revalidate=60',
+      },
+    }
+  )
 }
 
 export async function PATCH(request: Request, { params }: RouteContext) {
@@ -77,18 +85,19 @@ export async function PATCH(request: Request, { params }: RouteContext) {
   if (data.modules) data.modules = Array.from(new Set(data.modules))
   if (data.tags) data.tags = Array.from(new Set(data.tags.map((tag) => tag.toLowerCase())))
 
-  const project = await prisma.project.update({
-    where: { id },
-    data,
-    include: {
-      user: { select: publicUserSelect },
-      upvoteRows: { where: { userId }, select: { id: true } },
-    },
-  })
-
-  const commentCount = await prisma.comment.count({
-    where: { targetType: 'project', targetId: id },
-  })
+  const [project, commentCount] = await Promise.all([
+    prisma.project.update({
+      where: { id },
+      data,
+      include: {
+        user: { select: publicUserSelect },
+        upvoteRows: { where: { userId }, select: { id: true } },
+      },
+    }),
+    prisma.comment.count({
+      where: { targetType: 'project', targetId: id },
+    }),
+  ])
 
   return Response.json({
     data: {

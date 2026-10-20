@@ -2,6 +2,7 @@
 
 
 import { useEffect, useState } from 'react'
+import dynamic from 'next/dynamic'
 import Link from 'next/link'
 import { useSession } from 'next-auth/react'
 import { Loader2, Plus, Rocket, Search, Share2 } from 'lucide-react'
@@ -9,9 +10,16 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ProjectCard } from '@/components/community/project-card'
 import { Reveal } from '@/components/motion/reveal'
-import { ProjectFormDialog } from '@/components/community/project-form-dialog'
 import type { ProjectListItem } from '@/lib/community-types'
 import { cn } from '@/lib/utils'
+
+const ProjectFormDialog = dynamic(
+  () =>
+    import('@/components/community/project-form-dialog').then(
+      (mod) => mod.ProjectFormDialog
+    ),
+  { ssr: false }
+)
 
 type TrackFilter = 'all' | 'beginner' | 'developer'
 type SortFilter = 'newest' | 'popular'
@@ -213,15 +221,17 @@ export function ShowcaseClient() {
         </>
       )}
 
-      <ProjectFormDialog
-        open={shareOpen}
-        onOpenChange={setShareOpen}
-        onSaved={(project) => {
-          setProjects((current) => [project, ...current])
-          setTrack('all')
-          setQuery('')
-        }}
-      />
+      {shareOpen && (
+        <ProjectFormDialog
+          open
+          onOpenChange={setShareOpen}
+          onSaved={(project) => {
+            setProjects((current) => [project, ...current])
+            setTrack('all')
+            setQuery('')
+          }}
+        />
+      )}
     </div>
   )
 }

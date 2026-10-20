@@ -57,7 +57,7 @@ export function Header() {
         <div className="flex items-center gap-8">
           <Link href="/" className="flex shrink-0 items-center gap-2" aria-label="MERN Learn Home">
             <Image
-              src="/site-mark.png"
+              src="/site-mark.webp"
               alt=""
               width={36}
               height={36}

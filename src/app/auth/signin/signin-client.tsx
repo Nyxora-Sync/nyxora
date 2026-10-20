@@ -82,10 +82,11 @@ function SignInContent({ enabled }: { enabled: EnabledProviders }) {
           <div className="text-center mb-8">
             <Link href="/" className="mb-6 inline-block">
               <Image
-                src="/site-logo.png"
+                src="/site-logo.jpg"
                 alt="MERN Learn"
-                width={900}
-                height={450}
+                width={480}
+                height={240}
+                sizes="260px"
                 className="h-auto w-[260px] rounded-xl"
                 priority
               />

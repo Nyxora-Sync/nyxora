@@ -65,10 +65,11 @@ export function Footer() {
           <div className="md:col-span-2 lg:col-span-2">
             <Link href="/" className="inline-block" aria-label="MERN Learn Home">
               <Image
-                src="/site-logo.png"
+                src="/site-logo.jpg"
                 alt=""
-                width={900}
-                height={450}
+                width={480}
+                height={240}
+                sizes="(min-width: 640px) 240px, 224px"
                 className="h-auto w-56 rounded-xl sm:w-60"
               />
             </Link>

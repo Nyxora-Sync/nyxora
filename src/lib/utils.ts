@@ -32,7 +32,7 @@ export interface AccentClasses {
 export const accent: Record<AccentColor, AccentClasses> = {
   emerald: {
     icon: 'bg-emerald-100 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400',
-    text: 'text-emerald-600 dark:text-emerald-400',
+    text: 'text-emerald-700 dark:text-emerald-400',
     bgSoft: 'bg-emerald-500/10',
     borderSoft: 'border-emerald-500/40',
     pill: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400',

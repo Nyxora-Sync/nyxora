@@ -64,48 +64,56 @@ export async function GET(request: Request, { params }: RouteContext) {
     prisma.projectUpvote.count({ where: { userId: user.id } }),
   ])
 
-  return Response.json({
-    data: {
-      id: user.id,
-      name: user.name,
-      image: user.image,
-      bio: user.bio,
-      website: user.website,
-      githubUrl: user.githubUrl,
-      twitterUrl: user.twitterUrl,
-      createdAt: user.createdAt.toISOString(),
-      isSelf: viewerId === user.id,
-      progress: canSeeProgress
-        ? {
-            xp: stats?.xp ?? 0,
-            streakCurrent: stats?.streakCurrent ?? 0,
-            streakLongest: stats?.streakLongest ?? 0,
-            lessonsCompleted: completedCount,
-            badges: badges.map((entry) => ({
-              key: entry.badge.key,
-              name: entry.badge.name,
-              description: entry.badge.description,
-              icon: entry.badge.icon,
-              category: entry.badge.category,
-              earnedAt: entry.earnedAt.toISOString(),
-            })),
-          }
-        : null,
-      projects: projects.map((project) => ({
-        id: project.id,
-        title: project.title,
-        description: project.description,
-        track: project.track,
-        tags: project.tags,
-        upvotes: project.upvotes,
-        createdAt: project.createdAt.toISOString(),
-        upvoted: project.upvoteRows.length > 0,
-      })),
-      contributions: {
-        projects: projectCount,
-        comments: commentCount,
-        upvotes: upvoteCount,
+  return Response.json(
+    {
+      data: {
+        id: user.id,
+        name: user.name,
+        image: user.image,
+        bio: user.bio,
+        website: user.website,
+        githubUrl: user.githubUrl,
+        twitterUrl: user.twitterUrl,
+        createdAt: user.createdAt.toISOString(),
+        isSelf: viewerId === user.id,
+        progress: canSeeProgress
+          ? {
+              xp: stats?.xp ?? 0,
+              streakCurrent: stats?.streakCurrent ?? 0,
+              streakLongest: stats?.streakLongest ?? 0,
+              lessonsCompleted: completedCount,
+              badges: badges.map((entry) => ({
+                key: entry.badge.key,
+                name: entry.badge.name,
+                description: entry.badge.description,
+                icon: entry.badge.icon,
+                category: entry.badge.category,
+                earnedAt: entry.earnedAt.toISOString(),
+              })),
+            }
+          : null,
+        projects: projects.map((project) => ({
+          id: project.id,
+          title: project.title,
+          description: project.description,
+          track: project.track,
+          tags: project.tags,
+          upvotes: project.upvotes,
+          createdAt: project.createdAt.toISOString(),
+          upvoted: project.upvoteRows.length > 0,
+        })),
+        contributions: {
+          projects: projectCount,
+          comments: commentCount,
+          upvotes: upvoteCount,
+        },
       },
     },
-  })
+    {
+      headers: {
+        // Viewer-dependent (isSelf and upvote state), so keep it private.
+        'Cache-Control': 'private, max-age=10, stale-while-revalidate=60',
+      },
+    }
+  )
 }

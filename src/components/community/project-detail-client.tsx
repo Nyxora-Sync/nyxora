@@ -149,7 +149,13 @@ export function ProjectDetailClient({ id }: { id: string }) {
 
           {project.imageUrl && (
             <div className="mt-6 overflow-hidden rounded-xl border border-border/50 bg-muted">
-              <img src={project.imageUrl} alt="" className="max-h-[480px] w-full object-cover" />
+              <img
+                src={project.imageUrl}
+                alt=""
+                loading="eager"
+                decoding="async"
+                className="max-h-[480px] w-full object-cover"
+              />
             </div>
           )}
 

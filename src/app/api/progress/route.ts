@@ -118,8 +118,6 @@ export async function PUT(request: Request) {
   const entries = Object.entries(payload.lessons).filter(
     ([, progress]) => progress.completed || Boolean(progress.notes?.trim())
   )
-  const lessonKeys = entries.map(([key]) => key)
-
   // Never trust a client-provided XP total: recompute it from the curriculum.
   const xp = entries.reduce(
     (sum, [key, progress]) =>
@@ -144,30 +142,22 @@ export async function PUT(request: Request) {
   const streakLastActive = toDate(payload.streak.lastActiveDate)
 
   await prisma.$transaction(async (tx) => {
-    if (lessonKeys.length > 0) {
-      await tx.userProgress.deleteMany({
-        where: { userId, lessonKey: { notIn: lessonKeys } },
-      })
-    } else {
-      await tx.userProgress.deleteMany({ where: { userId } })
-    }
+    // PUT replaces the learner's saved progress. Replacing the rows in two
+    // statements avoids one upsert round-trip per lesson.
+    await tx.userProgress.deleteMany({ where: { userId } })
 
-    for (const [lessonKey, progress] of entries) {
-      const completedAt = progress.completed
-        ? toDate(progress.completedAt) ?? new Date()
-        : null
-
-      const data = {
-        completed: progress.completed,
-        notes: progress.notes?.trim() ? progress.notes : null,
-        xpEarned: progress.completed ? (xpByLesson.get(lessonKey) ?? 0) : 0,
-        completedAt,
-      }
-
-      await tx.userProgress.upsert({
-        where: { userId_lessonKey: { userId, lessonKey } },
-        create: { userId, lessonKey, ...data },
-        update: data,
+    if (entries.length > 0) {
+      await tx.userProgress.createMany({
+        data: entries.map(([lessonKey, progress]) => ({
+          userId,
+          lessonKey,
+          completed: progress.completed,
+          notes: progress.notes?.trim() ? progress.notes : null,
+          xpEarned: progress.completed ? (xpByLesson.get(lessonKey) ?? 0) : 0,
+          completedAt: progress.completed
+            ? toDate(progress.completedAt) ?? new Date()
+            : null,
+        })),
       })
     }
 

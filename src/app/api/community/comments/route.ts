@@ -44,20 +44,29 @@ export async function GET(request: Request) {
     },
   })
 
-  return Response.json({
-    data: comments.map((comment) => ({
-      id: comment.id,
-      body: comment.body,
-      createdAt: comment.createdAt.toISOString(),
-      author: comment.user,
-      replies: comment.replies.map((reply) => ({
-        id: reply.id,
-        body: reply.body,
-        createdAt: reply.createdAt.toISOString(),
-        author: reply.user,
+  return Response.json(
+    {
+      data: comments.map((comment) => ({
+        id: comment.id,
+        body: comment.body,
+        createdAt: comment.createdAt.toISOString(),
+        author: comment.user,
+        replies: comment.replies.map((reply) => ({
+          id: reply.id,
+          body: reply.body,
+          createdAt: reply.createdAt.toISOString(),
+          author: reply.user,
+        })),
       })),
-    })),
-  })
+    },
+    {
+      headers: {
+        // Discussions are public. A short shared cache absorbs refreshes and
+        // repeated page views without making new comments feel stale.
+        'Cache-Control': 'public, s-maxage=20, stale-while-revalidate=120',
+      },
+    }
+  )
 }
 
 export async function POST(request: Request) {
