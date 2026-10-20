@@ -61,9 +61,11 @@ export async function GET(request: Request) {
     },
     {
       headers: {
-        // Discussions are public. A short shared cache absorbs refreshes and
-        // repeated page views without making new comments feel stale.
-        'Cache-Control': 'public, s-maxage=20, stale-while-revalidate=120',
+        // Discussions are public. Keep the browser copy fresh while allowing
+        // Vercel's edge cache to absorb refreshes and repeated page views.
+        'Cache-Control': 'public, max-age=0, must-revalidate',
+        'CDN-Cache-Control': 'public, s-maxage=20, stale-while-revalidate=120',
+        'Vercel-CDN-Cache-Control': 'public, s-maxage=20, stale-while-revalidate=120',
       },
     }
   )
