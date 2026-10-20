@@ -11,6 +11,7 @@ import {
   ExternalLink,
   Loader2,
   MessageSquare,
+  Pencil,
   Trash2,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -20,6 +21,7 @@ import { Separator } from '@/components/ui/separator'
 import { UserChip } from '@/components/community/user-chip'
 import { UpvoteButton } from '@/components/community/upvote-button'
 import { CommentThread } from '@/components/community/comment-thread'
+import { ProjectFormDialog } from '@/components/community/project-form-dialog'
 import type { ProjectDetail } from '@/lib/community-types'
 import { shortDate, timeAgo } from '@/lib/time'
 import { getAccent } from '@/lib/utils'
@@ -36,6 +38,7 @@ export function ProjectDetailClient({ id }: { id: string }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [editOpen, setEditOpen] = useState(false)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -190,28 +193,47 @@ export function ProjectDetailClient({ id }: { id: string }) {
                 </a>
               </div>
 
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <Calendar className="h-3.5 w-3.5" aria-hidden="true" />
-                Published {timeAgo(project.createdAt)}
+              <div className="space-y-1 text-xs text-muted-foreground">
+                <div className="flex items-center gap-1.5">
+                  <Calendar className="h-3.5 w-3.5" aria-hidden="true" />
+                  Published {timeAgo(project.createdAt)}
+                </div>
+                {new Date(project.updatedAt).getTime() - new Date(project.createdAt).getTime() > 60_000 && (
+                  <div className="flex items-center gap-1.5">
+                    <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+                    Updated {timeAgo(project.updatedAt)}
+                  </div>
+                )}
               </div>
 
               {project.isOwner && (
                 <>
                   <Separator />
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleDelete}
-                    disabled={deleting}
-                    className="w-full gap-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                  >
-                    {deleting ? (
-                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                    ) : (
-                      <Trash2 className="h-4 w-4" aria-hidden="true" />
-                    )}
-                    Delete project
-                  </Button>
+                  <div className="space-y-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setEditOpen(true)}
+                      className="w-full gap-2"
+                    >
+                      <Pencil className="h-4 w-4" aria-hidden="true" />
+                      Edit project
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleDelete}
+                      disabled={deleting}
+                      className="w-full gap-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                    >
+                      {deleting ? (
+                        <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                      ) : (
+                        <Trash2 className="h-4 w-4" aria-hidden="true" />
+                      )}
+                      Delete project
+                    </Button>
+                  </div>
                 </>
               )}
             </CardContent>
@@ -231,6 +253,17 @@ export function ProjectDetailClient({ id }: { id: string }) {
           </Card>
         </aside>
       </div>
+
+      <ProjectFormDialog
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        project={project}
+        onSaved={(updated) => {
+          setProject(updated)
+          setEditOpen(false)
+          router.refresh()
+        }}
+      />
 
       <Separator />
 

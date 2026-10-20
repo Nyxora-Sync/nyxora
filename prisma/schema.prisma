@@ -269,10 +269,28 @@ model Resource {
 
 // Newsletter - one row per address. Unsubscribing deletes the row.
 model NewsletterSubscriber {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  source    String   @default("site") // footer, newsletter, site page
-  createdAt DateTime @default(now())
+  id                 String    @id @default(cuid())
+  email              String    @unique
+  source             String    @default("site") // footer, newsletter, site page
+  confirmedAt        DateTime?
+  confirmationSentAt DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @default(now()) @updatedAt
+
+  @@index([createdAt])
+  @@index([confirmedAt])
+}
+
+// Audit trail for newsletter broadcasts. Only metadata is stored here; the
+// rendered email body lives in the admin request and is not persisted.
+model NewsletterSend {
+  id             String   @id @default(cuid())
+  sentBy         String
+  subject        String
+  recipientCount Int
+  failedCount    Int      @default(0)
+  isTest         Boolean  @default(false)
+  createdAt      DateTime @default(now())
 
   @@index([createdAt])
 }

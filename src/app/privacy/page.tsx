@@ -74,9 +74,13 @@ export default function PrivacyPage() {
       <h2>Newsletter</h2>
       <p>
         If you subscribe, we store your email address, where it was collected (the footer or the
-        newsletter page), and the signup date. The list is used for occasional curriculum updates, not for advertising or resale. You
-        can unsubscribe on the <Link href="/newsletter">newsletter page</Link>, which deletes the
-        stored address. A single global rate limit protects the form from abuse.
+        newsletter page), the signup date, and when a confirmation email was sent. We send one
+        confirmation email; only confirmed addresses receive updates. Confirmation and unsubscribe
+        links are signed and expire, and unsubscribe links appear in every newsletter. Unsubscribing
+        on the <Link href="/newsletter">newsletter page</Link> or through an email link deletes the
+        stored address. For each broadcast we keep an audit record containing the sender, subject,
+        recipient count, failure count, and date — not the email body. A global rate limit protects
+        the signup form from abuse.
       </p>
 
       <h2>Contact messages</h2>
@@ -118,8 +122,8 @@ export default function PrivacyPage() {
           <strong>GitHub and Google</strong> handle OAuth sign-in when you choose those providers.
         </li>
         <li>
-          <strong>Our email provider</strong> delivers sign-in links and, when configured, contact
-          notifications.
+          <strong>Our email provider</strong> delivers sign-in links, newsletter confirmation and
+          broadcast emails, and, when configured, contact notifications.
         </li>
       </ul>
       <p>
@@ -138,7 +142,10 @@ export default function PrivacyPage() {
       <ul>
         <li>Account data remains until you request deletion.</li>
         <li>Comments and projects remain until you delete them or your account is deleted.</li>
-        <li>Newsletter addresses remain until you unsubscribe.</li>
+        <li>
+          Newsletter addresses remain until you unsubscribe, including unconfirmed addresses that
+          never completed the double opt-in step.
+        </li>
         <li>Contact messages remain until they are resolved or deleted.</li>
         <li>Hosting logs are retained according to the hosting provider&apos;s policy.</li>
       </ul>
@@ -151,7 +158,10 @@ export default function PrivacyPage() {
       <ul>
         <li>Edit your profile and hide your progress in <Link href="/settings">settings</Link>.</li>
         <li>Delete your comments and projects directly on the site.</li>
-        <li>Unsubscribe from the newsletter on the <Link href="/newsletter">newsletter page</Link>.</li>
+        <li>
+          Unsubscribe from the newsletter on the <Link href="/newsletter">newsletter page</Link> or
+          through the link in any newsletter email.
+        </li>
         <li>
           Request an account export or deletion through the <Link href="/contact">contact form</Link>.
           We may ask you to verify control of the account first.

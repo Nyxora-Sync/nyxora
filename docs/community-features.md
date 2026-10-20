@@ -42,7 +42,7 @@ database is Prisma.
 | `GET` | `/api/community/projects` | public | Cursor pagination; `track`, `q`, `sort=newest\|popular`, `limit` (max 48). Includes comment counts and viewer upvote state. |
 | `POST` | `/api/community/projects` | required | Zod validated; max 5 projects per user per 24h. |
 | `GET` | `/api/community/projects/[id]` | public | Detail + `isOwner` + viewer upvote state. |
-| `PATCH` | `/api/community/projects/[id]` | owner | Partial update. |
+| `PATCH` | `/api/community/projects/[id]` | owner | Partial update; returns the full updated project detail so the UI can refresh in place. |
 | `DELETE` | `/api/community/projects/[id]` | owner | Deletes project comments, then the project (upvotes cascade). |
 | `POST` | `/api/community/projects/[id]/upvote` | required | Toggle; returns `{ upvoted, upvotes }`. |
 | `GET` | `/api/community/comments` | public | `targetType` + `targetId`; newest 200 top-level comments with up to 50 replies each, nested. |
@@ -59,7 +59,8 @@ Every route starts with `communityEnabled()` and returns
 ## Rules and safety
 
 - Ownership: only a project owner can edit or delete it; only a comment author can delete it.
-  There is no admin/moderator role yet.
+  Owners can edit every project field, including the screenshot URL, without deleting and
+  republishing it. There is no admin/moderator role yet.
 - Privacy: email is never returned by public routes. `showProgress = false` hides XP, completed
   lessons, streaks, and badges from other learners.
 - URLs: project and profile links must be valid `http(s)` URLs. User text is rendered as text
@@ -71,7 +72,7 @@ Every route starts with `communityEnabled()` and returns
 
 - `src/components/community/showcase-client.tsx` — search, track filter, sort, pagination,
   empty/loading/error states.
-- `src/components/community/project-card.tsx`, `upvote-button.tsx`, `share-project-dialog.tsx`.
+- `src/components/community/project-card.tsx`, `upvote-button.tsx`, `project-form-dialog.tsx`. The dialog handles both publishing and editing; owners edit from the project detail page.
 - `src/components/community/comment-thread.tsx` — shared by lessons and project pages.
 - `src/components/community/profile-client.tsx`, `community-stats.tsx`.
 - `src/components/settings/settings-client.tsx`.
@@ -89,9 +90,9 @@ npm run build
 
 The API can be exercised without an OAuth round-trip by inserting a temporary `Session` row for
 a test user and sending its token as the `authjs.session-token` cookie. The end-to-end pass
-covered: profile update, project create/list/detail/upvote toggle/delete, lesson comment + reply,
-project comment, public profile, stats, validation failures, auth failures, ownership deletes,
-and the progress-privacy toggle.
+covered: profile update, project create/list/detail/owner edit/upvote toggle/delete, lesson
+comment + reply, project comment, public profile, stats, validation failures, auth failures,
+ownership deletes, and the progress-privacy toggle.
 
 ## Not built yet
 

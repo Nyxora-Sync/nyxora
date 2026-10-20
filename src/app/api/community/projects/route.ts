@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client'
 import { auth } from '@/lib/auth/auth'
 import { prisma } from '@/lib/db'
+import { serializeProject } from '@/lib/community-project'
 import {
   COMMUNITY_DISABLED,
   communityEnabled,
@@ -10,51 +11,6 @@ import {
   publicUserSelect,
   sinceMinutes,
 } from '@/lib/community'
-
-function serializeProject(
-  project: {
-    id: string
-    title: string
-    description: string
-    githubUrl: string | null
-    demoUrl: string | null
-    imageUrl: string | null
-    track: string
-    modules: string[]
-    tags: string[]
-    upvotes: number
-    createdAt: Date
-    user: {
-      id: string
-      name: string | null
-      image: string | null
-      bio: string | null
-      website: string | null
-      githubUrl: string | null
-      twitterUrl: string | null
-      createdAt: Date
-    }
-    upvoteRows: { id: string }[]
-  },
-  commentCount = 0
-) {
-  return {
-    id: project.id,
-    title: project.title,
-    description: project.description,
-    githubUrl: project.githubUrl,
-    demoUrl: project.demoUrl,
-    imageUrl: project.imageUrl,
-    track: project.track,
-    modules: project.modules,
-    tags: project.tags,
-    upvotes: project.upvotes,
-    commentCount,
-    createdAt: project.createdAt.toISOString(),
-    author: project.user,
-    upvoted: project.upvoteRows.length > 0,
-  }
-}
 
 export async function GET(request: Request) {
   if (!communityEnabled()) {
@@ -159,5 +115,8 @@ export async function POST(request: Request) {
     },
   })
 
-  return Response.json({ data: serializeProject(project) }, { status: 201 })
+  return Response.json(
+    { data: { ...serializeProject(project), updatedAt: project.updatedAt.toISOString(), isOwner: true } },
+    { status: 201 }
+  )
 }

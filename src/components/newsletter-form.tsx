@@ -26,6 +26,7 @@ export function NewsletterForm({
   const [website, setWebsite] = useState('')
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
   const [message, setMessage] = useState('')
+  const [successMessage, setSuccessMessage] = useState('')
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -47,6 +48,23 @@ export function NewsletterForm({
       if (!response.ok) {
         throw new Error(body?.error?.message ?? 'Something went wrong. Try again.')
       }
+
+      if (isSubscribe) {
+        if (body?.data?.alreadyConfirmed) {
+          setSuccessMessage("That address is already confirmed. You're on the list.")
+        } else if (body?.data?.alreadySent) {
+          setSuccessMessage('We already sent a confirmation email recently. Check your inbox.')
+        } else {
+          setSuccessMessage(
+            compact
+              ? 'Check your inbox and open the confirmation link to finish signing up.'
+              : "Check your inbox and click the confirmation link. You're not on the list until you confirm."
+          )
+        }
+      } else {
+        setSuccessMessage('That address has been removed from the list.')
+      }
+
       setStatus('success')
       setEmail('')
     } catch (error) {
@@ -65,11 +83,7 @@ export function NewsletterForm({
         role="status"
       >
         <CheckCircle2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-emerald-500" aria-hidden="true" />
-        <span>
-          {isSubscribe
-            ? "You're on the list. We'll only email about meaningful updates."
-            : 'That address has been removed from the list.'}
-        </span>
+        <span>{successMessage}</span>
       </p>
     )
   }
@@ -130,7 +144,8 @@ export function NewsletterForm({
 
       {!compact && isSubscribe && (
         <p className="text-xs text-muted-foreground">
-          By subscribing you agree to the{' '}
+          Double opt-in: we send one confirmation email, and only confirmed addresses receive
+          updates. By subscribing you agree to the{' '}
           <Link href="/privacy" className="underline underline-offset-2 hover:text-foreground">
             privacy policy
           </Link>

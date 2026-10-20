@@ -141,11 +141,12 @@ export function Footer() {
           <div>
             <h3 className="font-semibold">Stay Updated</h3>
             <p className="mt-2 text-sm text-muted-foreground">
-              Occasional updates when a new module or major resource ships. No spam.
+              One confirmation email, then occasional updates when a new module or major resource
+              ships. No spam.
             </p>
             <NewsletterForm compact />
             <p className="mt-3 text-xs text-muted-foreground">
-              Unsubscribe anytime.{' '}
+              Unsubscribe anytime; unsubscribing deletes the address.{' '}
               <a href="/privacy" className="underline hover:text-foreground">Privacy Policy</a>
             </p>
           </div>

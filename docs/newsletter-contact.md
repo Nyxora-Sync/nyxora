@@ -5,15 +5,117 @@ when `DATABASE_URL` is missing. The rest of the site keeps working.
 
 ## Newsletter
 
-- Route: `POST /api/newsletter` with `{ email, source, website }`.
-- `source` is `footer` or `newsletter`; it defaults to `site` for direct API calls.
-- `website` is a honeypot. A non-empty value returns success without storing anything.
-- Signups are upserted by email, so submitting the same address twice keeps one row.
-- Route: `DELETE /api/newsletter` with `{ email }`. It deletes the row and returns
-  success even when the address was not on the list, so the response cannot be used
-  to discover subscribers.
-- The global limit is 200 new signup requests per hour. It is a blunt abuse guard,
-  not an analytics metric.
+The newsletter uses double opt-in. A signup is **not** added to the sending list
+until the address opens the confirmation email and presses the confirm button.
+
+### Signup and confirmation flow
+
+1. The footer or `/newsletter` form posts to `POST /api/newsletter`.
+2. The route validates the email, applies the global rate limit, and upserts one
+   `NewsletterSubscriber` row per address.
+3. If the address is unconfirmed, the route sends one confirmation email. The
+   signed link is valid for 48 hours.
+4. `POST /api/newsletter/confirm` verifies the signed token and sets
+   `confirmedAt`. The page at `/newsletter/confirm?token=...` performs the call
+   from a button; the page itself does not mutate anything.
+5. Only rows with `confirmedAt` set are included in a broadcast.
+
+If the address is already confirmed, submitting the form again returns
+`alreadyConfirmed` and sends nothing. If a confirmation was sent in the last 60
+seconds, the route returns `alreadySent` instead of sending a duplicate.
+
+### Signed links
+
+Confirmation and unsubscribe tokens are HMAC-SHA256 signed, contain the
+subscriber id, purpose, and expiry, and are verified without a token table.
+`NEWSLETTER_SECRET` is optional; the code falls back to `AUTH_SECRET`.
+Rotating either secret invalidates links already in inboxes.
+
+- Confirmation links expire after 48 hours.
+- Unsubscribe links expire after 10 years, so old newsletters still work.
+- Unsubscribe links appear in every broadcast. Unsubscribing deletes the row
+  immediately instead of adding a suppression record.
+
+### API
+
+| Method | Path | Auth | Behavior |
+| --- | --- | --- | --- |
+| `POST` | `/api/newsletter` | public | `{ email, source, website }`; `source` is `footer`, `newsletter`, or `site`; `website` is a honeypot. Returns `confirmationRequired`, `alreadyConfirmed`, or `alreadySent`. |
+| `DELETE` | `/api/newsletter` | public | `{ email }` or `{ token }`; deletes the address and always succeeds for unknown email addresses. |
+| `POST` | `/api/newsletter/confirm` | public | `{ token }`; idempotently marks the subscription confirmed. |
+| `POST` | `/api/newsletter/unsubscribe` | public | `{ token }` or `?token=...`; used by the unsubscribe page and by mailbox-provider one-click unsubscribe. |
+| `POST` | `/api/admin/newsletter` | admin | Sends a test or broadcast. See below. |
+
+Broadcasts include:
+
+```text
+List-Unsubscribe: <https://your-site/api/newsletter/unsubscribe?token=...>
+List-Unsubscribe-Post: List-Unsubscribe=One-Click
+```
+
+Mailbox providers can therefore POST to the API with no JSON body. The token is
+read from the query string.
+
+### Admin broadcasts
+
+Open `/admin/newsletter` while signed in with an address listed in
+`ADMIN_EMAILS` (comma separated, case-insensitive). Leave `ADMIN_EMAILS` empty
+to disable the page. The page is `noindex` and is not linked from public
+navigation.
+
+The composer is plain text only, which avoids HTML injection and keeps the
+emails readable in every client. It supports:
+
+- **Send test to me** — prefixes the subject with `[TEST]` and uses a placeholder
+  unsubscribe link. Test sends are recorded in the audit table.
+- **Send to confirmed subscribers** — requires typing `SEND`. There is no undo,
+  scheduling, or automatic retry.
+
+Limits and safety:
+
+- 500 confirmed recipients per request. For a larger list, send in batches or
+  replace this with a queue before the list grows.
+- One real broadcast per minute, to catch accidental double clicks.
+- Partial failures return the sent/failed counts and are recorded; the admin
+  must inspect the mail server before retrying.
+- The message body is not stored. `NewsletterSend` records the sender, subject,
+  recipient count, failure count, test flag, and date.
+
+### Email configuration
+
+Newsletter signup and broadcasts require SMTP. The code accepts either:
+
+```bash
+EMAIL_SERVER_HOST=...
+EMAIL_SERVER_PORT=587
+EMAIL_SERVER_USER=...
+EMAIL_SERVER_PASSWORD=...
+EMAIL_FROM="MERN Learn <newsletter@your-domain>"
+```
+
+or the legacy URL form:
+
+```bash
+EMAIL_SERVER="smtp://user:pass@host:587"
+EMAIL_FROM="MERN Learn <newsletter@your-domain>"
+```
+
+`EMAIL_FROM` is required. Without usable SMTP, signup returns a friendly `503`
+instead of silently storing an address that can never be confirmed.
+
+### Database and operations
+
+The double opt-in migration added:
+
+- `NewsletterSubscriber.confirmedAt` — null until the email is confirmed.
+- `NewsletterSubscriber.confirmationSentAt` — used for the 60-second resend
+  throttle.
+- `NewsletterSubscriber.updatedAt` — row update timestamp.
+- `NewsletterSend` — metadata-only audit trail for test and real sends.
+
+Existing rows from before double opt-in are unconfirmed. They do not receive
+broadcasts. To let one of those addresses join, submit it again through the
+signup form so it gets a fresh confirmation email.
 
 Read or export the list with:
 
@@ -21,9 +123,20 @@ Read or export the list with:
 npm run db:studio
 ```
 
-Then open `NewsletterSubscriber`. The `source` and `createdAt` columns are useful for
-understanding where signups came from. Unsubscribing deletes the address rather than
-flagging it, so there is no suppression list to maintain.
+Open `NewsletterSubscriber`. `confirmedAt IS NULL` means the address never
+completed confirmation. `NewsletterSend` contains the send history. The global
+limit is 200 signup requests per hour; it is a blunt abuse guard, not an
+analytics metric.
+
+### Not built
+
+- No queue, scheduler, retry worker, or bounce/complaint handling.
+- No open, click, or conversion tracking.
+- No HTML composer or per-segment audiences.
+- No suppression list; unsubscribe deletes the row.
+
+For a much larger list, move sends to a background job and use a dedicated
+email provider with bounce webhooks.
 
 ## Contact
 
@@ -42,8 +155,8 @@ visible in any public UI.
 
 ## Privacy notes
 
-- Newsletter addresses are used only for curriculum updates and are deleted on
-  unsubscribe.
+- Newsletter addresses are used only for curriculum updates. They are deleted on
+  unsubscribe, and only confirmed addresses receive broadcasts.
 - Contact messages are private to the maintainers. Do not paste them into public
   issues without the sender's permission.
 - Both tables are covered by the site's privacy policy. If the retention or purpose

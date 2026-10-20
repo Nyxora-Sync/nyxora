@@ -13,7 +13,7 @@ import { pageMetadata } from '@/lib/seo'
 export const metadata: Metadata = pageMetadata({
   title: 'Newsletter',
   description:
-    'Occasional MERN Learn updates: new modules, major lesson rewrites, and community milestones. No spam, unsubscribe anytime.',
+    'Occasional MERN Learn updates: new modules, major lesson rewrites, and community milestones. Double opt-in, no spam, unsubscribe anytime.',
   path: '/newsletter',
 })
 
@@ -55,10 +55,10 @@ export default function NewsletterPage() {
                   <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-500">
                     <Mail className="h-5 w-5" aria-hidden="true" />
                   </div>
-                  <h2 className="mt-4 text-xl font-semibold">Join the list</h2>
+                  <h2 className="mt-4 text-xl font-semibold">Join the list (double opt-in)</h2>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    Enter an email address you actually check. We will only use it for MERN Learn
-                    updates.
+                    Enter an email address you actually check. We send one confirmation email; open
+                    the link inside to finish signing up. You are not on the list until you confirm.
                   </p>
                   <div className="mt-5 max-w-md">
                     <NewsletterForm />
@@ -79,7 +79,9 @@ export default function NewsletterPage() {
                   <div className="mt-6 flex items-start gap-2 rounded-lg border border-border/50 bg-muted/20 p-3 text-xs text-muted-foreground">
                     <ShieldCheck className="mt-0.5 h-4 w-4 flex-shrink-0" aria-hidden="true" />
                     <span>
-                      Your address is stored only for this list and is never sold. Read the{' '}
+                      Your address is stored only for this list and is never sold. Only confirmed
+                      addresses receive updates, and every email includes an unsubscribe link that
+                      deletes the address. Read the{' '}
                       <Link href="/privacy" className="underline underline-offset-2 hover:text-foreground">
                         privacy policy
                       </Link>

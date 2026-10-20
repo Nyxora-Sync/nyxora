@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ProjectCard } from '@/components/community/project-card'
 import { Reveal } from '@/components/motion/reveal'
-import { ShareProjectDialog } from '@/components/community/share-project-dialog'
+import { ProjectFormDialog } from '@/components/community/project-form-dialog'
 import type { ProjectListItem } from '@/lib/community-types'
 import { cn } from '@/lib/utils'
 
@@ -213,10 +213,10 @@ export function ShowcaseClient() {
         </>
       )}
 
-      <ShareProjectDialog
+      <ProjectFormDialog
         open={shareOpen}
         onOpenChange={setShareOpen}
-        onCreated={(project) => {
+        onSaved={(project) => {
           setProjects((current) => [project, ...current])
           setTrack('all')
           setQuery('')
