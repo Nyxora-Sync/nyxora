@@ -10,8 +10,6 @@ import {
 import { siteUrl } from '@/lib/seo'
 import { NEWSLETTER_ENABLED } from '@/lib/newsletter-feature'
 
-export const runtime = 'edge'
-
 // Sending to a small list can take longer than the default route budget. The
 // admin UI is intentionally limited to a few hundred recipients per send.
 export const maxDuration = 60

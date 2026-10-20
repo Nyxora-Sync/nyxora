@@ -4,8 +4,6 @@ import { jsonError } from '@/lib/community'
 import { verifyNewsletterToken } from '@/lib/newsletter'
 import { NEWSLETTER_ENABLED } from '@/lib/newsletter-feature'
 
-export const runtime = 'edge'
-
 const schema = z.object({ token: z.string().trim().min(20).max(4096) }).strict()
 
 export async function POST(request: Request) {
