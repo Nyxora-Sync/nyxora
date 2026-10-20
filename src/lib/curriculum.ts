@@ -2,12 +2,23 @@ import { languageTracks } from './language-curriculum'
 
 export type ResourceType = 'video' | 'article' | 'docs' | 'interactive' | 'project' | 'cheatsheet'
 export type Difficulty = 'beginner' | 'intermediate' | 'advanced'
-export type TrackCategory = 'web-development' | 'programming-languages'
+export type TrackCategory =
+  | 'web-development'
+  | 'programming-languages'
+  | 'embedded-systems'
+  | 'mobile-development'
+  | 'data-science'
+  | 'devops-cloud'
+  | 'game-development'
+  | 'desktop-apps'
 
 export interface TrackCategoryInfo {
   id: TrackCategory
   name: string
   description: string
+  icon: string
+  color: string
+  order: number
 }
 
 export const trackCategories: TrackCategoryInfo[] = [
@@ -15,11 +26,65 @@ export const trackCategories: TrackCategoryInfo[] = [
     id: 'web-development',
     name: 'Web Development',
     description: 'Learn the web from first principles, then build and operate full-stack applications.',
+    icon: 'Globe',
+    color: 'emerald',
+    order: 1,
   },
   {
     id: 'programming-languages',
     name: 'Programming Languages',
     description: 'Build durable language foundations, then take each path from beginner to mastery.',
+    icon: 'Code',
+    color: 'blue',
+    order: 2,
+  },
+  {
+    id: 'embedded-systems',
+    name: 'Embedded Systems & IoT',
+    description: 'Program microcontrollers, build IoT devices, and control hardware with code.',
+    icon: 'Cpu',
+    color: 'amber',
+    order: 3,
+  },
+  {
+    id: 'mobile-development',
+    name: 'Mobile Development',
+    description: 'Build native and cross-platform apps for iOS and Android.',
+    icon: 'Smartphone',
+    color: 'violet',
+    order: 4,
+  },
+  {
+    id: 'data-science',
+    name: 'Data Science & AI',
+    description: 'Analyze data, build ML models, and create intelligent applications.',
+    icon: 'Brain',
+    color: 'rose',
+    order: 5,
+  },
+  {
+    id: 'devops-cloud',
+    name: 'DevOps & Cloud',
+    description: 'Deploy, scale, and operate applications on modern cloud infrastructure.',
+    icon: 'Cloud',
+    color: 'indigo',
+    order: 6,
+  },
+  {
+    id: 'game-development',
+    name: 'Game Development',
+    description: 'Create 2D and 3D games with modern engines and frameworks.',
+    icon: 'Gamepad2',
+    color: 'orange',
+    order: 7,
+  },
+  {
+    id: 'desktop-apps',
+    name: 'Desktop Applications',
+    description: 'Build cross-platform desktop apps with native performance.',
+    icon: 'Monitor',
+    color: 'slate',
+    order: 8,
   },
 ]
 
@@ -2810,6 +2875,41 @@ export const tracks: Track[] = [
     modules: specializationModules,
   },
   ...languageTracks,
+  {
+    id: 'embedded',
+    key: 'embedded',
+    name: 'Embedded Systems',
+    description: 'Learn Arduino, ESP32, and microcontroller programming. Build IoT devices, control sensors, and create hardware projects.',
+    category: 'embedded-systems',
+    icon: 'Cpu',
+    color: 'amber',
+    modules: [
+      {
+        id: 'embedded-coming-soon',
+        key: 'coming-soon',
+        name: 'Coming Soon',
+        description: 'Arduino fundamentals, ESP32 WiFi/Bluetooth, sensors & actuators, RTOS, and IoT cloud integration.',
+        order: 1,
+        estimatedHours: 40,
+        icon: 'Cpu',
+        color: 'amber',
+        lessons: [
+          {
+            id: 'embedded-placeholder',
+            title: 'Track in Development',
+            description: 'This learning path is being built. Check back soon for complete Arduino and ESP32 curricula.',
+            order: 1,
+            estimatedMinutes: 5,
+            difficulty: 'beginner',
+            xpReward: 0,
+            keyTakeaways: ['Arduino basics', 'ESP32 WiFi/Bluetooth', 'Sensors & actuators', 'IoT cloud integration'],
+            resources: [],
+            isProject: false,
+          },
+        ],
+      },
+    ],
+  },
 ]
 
 export function getTrack(key: string): Track | undefined {

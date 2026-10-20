@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
-import { Code2, Database, Server, Globe, CheckCircle, ArrowRight, Users, Trophy, Zap, BookOpen, ExternalLink } from 'lucide-react'
+import { Code2, Database, Server, Globe, CheckCircle, ArrowRight, Users, Trophy, Zap, BookOpen, ExternalLink, Cpu, Smartphone, Brain, Cloud, Gamepad2, Monitor } from 'lucide-react'
 import { GithubIcon } from '@/components/icons/brand'
 import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
@@ -11,12 +11,18 @@ import { LanguagePaths } from '@/components/language-paths'
 import { SpecializationsBanner } from '@/components/specializations-banner'
 import { Reveal } from '@/components/motion/reveal'
 import { cn, getAccent } from '@/lib/utils'
-import { tracks as curriculumTracks } from '@/lib/curriculum'
+import { tracks as curriculumTracks, trackCategories } from '@/lib/curriculum'
 import { pageMetadata } from '@/lib/seo'
 
-const trackIcons: Record<string, typeof BookOpen> = {
-  beginner: BookOpen,
-  developer: Code2,
+const categoryIcons: Record<string, typeof Globe> = {
+  'web-development': Globe,
+  'programming-languages': Code2,
+  'embedded-systems': Cpu,
+  'mobile-development': Smartphone,
+  'data-science': Brain,
+  'devops-cloud': Cloud,
+  'game-development': Gamepad2,
+  'desktop-apps': Monitor,
 }
 
 const features = [
@@ -28,14 +34,14 @@ const features = [
   },
   {
     icon: BookOpen,
-    title: 'MERN + Language Paths',
-    description: 'Start with web foundations or learn C, C++, C#, and Python from first program to mastery. Then specialize when you are ready.',
+    title: 'Structured Learning Paths',
+    description: 'From web development to embedded systems — every path takes you from beginner to mastery with real projects.',
     color: 'violet',
   },
   {
     icon: Zap,
     title: 'Interactive Playgrounds',
-    description: 'Run HTML, CSS, JavaScript, React, Node, and Express examples directly in your browser.',
+    description: 'Run HTML, CSS, JavaScript, React, Node, Express, Python, and more directly in your browser.',
     color: 'amber',
   },
   {
@@ -53,7 +59,7 @@ const features = [
   {
     icon: Database,
     title: 'Project-Based Learning',
-    description: 'Build a portfolio site, a blog, an e-commerce app, and a multi-tenant SaaS capstone.',
+    description: 'Build real projects for your portfolio — web apps, CLI tools, IoT devices, and more.',
     color: 'indigo',
   },
 ]
@@ -70,16 +76,12 @@ const tracks = curriculumTracks.map((track) => {
     modules: track.modules.length,
     lessons,
     color: track.color,
-    icon: trackIcons[track.key] ?? BookOpen,
+    icon: track.icon,
     modulesList: track.modules.map(
       (m) => `${m.name} (~${Math.round(m.estimatedHours / 10)} wks)`
     ),
   }
 })
-
-const coreTracks = tracks.filter(
-  (track) => track.category === 'web-development' && track.key !== 'specializations'
-)
 
 const lessonIds = new Set<string>()
 const resourceUrls = new Set<string>()
@@ -109,10 +111,10 @@ const stats = [
 ]
 
 export const metadata = pageMetadata({
-  title: 'Nyxora Sync — Learn MERN, C, C++, C#, and Python for Free',
-  description: `Learn the MERN stack, C, C++, C#, and Python with ${totalLessons} free written lessons, real projects, playgrounds, progress tracking, and complete beginner-to-mastery roadmaps.`,
+  title: 'Nyxora Sync — Free Learning Paths for Developers',
+  description: `Learn web development, programming languages, embedded systems, and more with ${totalLessons} free written lessons, real projects, playgrounds, and progress tracking.`,
   path: '/',
-  keywords: ['MERN stack', 'learn MERN', 'learn Python', 'learn C', 'learn C++', 'learn C#', 'MongoDB', 'Express', 'React', 'Node.js', 'free coding curriculum'],
+  keywords: ['web development', 'programming languages', 'embedded systems', 'IoT', 'Arduino', 'ESP32', 'C', 'C++', 'C#', 'Python', 'MERN', 'React', 'Node.js', 'free coding curriculum'],
 })
 
 export default function HomePage() {
@@ -127,7 +129,7 @@ export default function HomePage() {
             <div className="text-center">
               <div className="inline-flex items-center gap-2 rounded-full bg-emerald-100/50 px-4 py-1.5 text-sm font-medium text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400 mb-6">
                 <span className="relative flex h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" aria-hidden="true" />
-                <span>Now with C, C++, C#, and Python language paths</span>
+                <span>Now with C, C++, C#, Python, and Embedded Systems paths</span>
               </div>
               <h1 className="mt-6 text-4xl font-bold tracking-tight sm:text-6xl lg:text-7xl">
                 Learn to build.{' '}
@@ -137,7 +139,7 @@ export default function HomePage() {
                 Master the craft.
               </h1>
               <p className="mt-6 max-w-2xl mx-auto text-lg text-muted-foreground sm:text-xl">
-                Master the MERN stack, then learn C, C++, C#, and Python through written lessons,
+                Master web development, programming languages, embedded systems, and more through written lessons,
                 real projects, interactive playgrounds, progress tracking, and a supportive community.
                 100% free, open source, no paywalls.
               </p>
@@ -184,71 +186,145 @@ export default function HomePage() {
           </div>
         </section>
 
-        {/* Choose Your Track */}
+        {/* Learning Categories */}
         <section className="py-20 sm:py-24 bg-muted/30">
           <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <div className="text-center max-w-3xl mx-auto mb-16">
-              <p className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
-                Web Development
-              </p>
-              <h2 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">Choose Your Learning Path</h2>
+              <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">Choose Your Path</h2>
               <p className="mt-4 text-lg text-muted-foreground">
-                Two core MERN tracks, same destination. Pick based on your experience level, then
-                specialize or add a language path when you are ready.
+                Every category contains structured learning paths from beginner to mastery.
+                Pick a category, pick a track, start building.
               </p>
             </div>
-            <div className="grid gap-8 md:grid-cols-2">
-              {coreTracks.map((track) => (
-                <Link key={track.key} href={`/learn/${track.key}`} className="group">
-                  <Card className="relative overflow-hidden transition-all motion-safe:hover:-translate-y-1 hover:shadow-xl h-full border-border/50">
-                    <CardHeader>
-                      <div className={cn('flex items-center gap-2 text-sm font-medium', getAccent(track.color).text)}>
-                        <track.icon className="h-5 w-5" aria-hidden="true" />
-                        {track.name}
-                      </div>
-                      <CardTitle className="text-2xl">{track.name}</CardTitle>
-                      <CardDescription className="text-base">{track.description}</CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      <div className="grid grid-cols-3 gap-4 text-center">
-                        <div className="p-3 rounded-lg bg-muted/50">
-                          <p className="text-2xl font-bold">{track.duration}</p>
-                          <p className="text-xs text-muted-foreground">Estimated Time</p>
-                        </div>
-                        <div className="p-3 rounded-lg bg-muted/50">
-                          <p className="text-2xl font-bold">{track.modules}</p>
-                          <p className="text-xs text-muted-foreground">Modules</p>
-                        </div>
-                        <div className="p-3 rounded-lg bg-muted/50">
-                          <p className="text-2xl font-bold">{track.lessons}</p>
-                          <p className="text-xs text-muted-foreground">Lessons</p>
-                        </div>
-                      </div>
-                      <Separator />
-                      <ul className="space-y-2" role="list">
-                        {track.modulesList.map((module, i) => (
-                          <li key={i} className="flex items-center gap-2 text-sm text-muted-foreground group-hover:text-foreground transition-colors">
-                            <CheckCircle className="h-4 w-4 text-emerald-500 shrink-0" aria-hidden="true" />
-                            {module}
-                          </li>
-                        ))}
-                      </ul>
-                    </CardContent>
-                    <CardFooter className="border-t-0 pt-0">
-                      <Button className="w-full" variant="outline">
-                        Start {track.name} <ArrowRight className="ml-2 h-4 w-4" aria-hidden="true" />
-                      </Button>
-                    </CardFooter>
-                  </Card>
-                </Link>
-              ))}
+            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
+              {trackCategories
+                .filter((cat) => curriculumTracks.some((t) => t.category === cat.id))
+                .map((category) => {
+                  const categoryTracks = tracks.filter((t) => t.category === category.id)
+                  const totalLessons = categoryTracks.reduce((sum, t) => sum + t.lessons, 0)
+                  const totalTracks = categoryTracks.length
+                  const Icon = categoryIcons[category.id] ?? Globe
+                  return (
+                    <Link
+                      key={category.id}
+                      href={`/learn?category=${category.id}`}
+                      className="group relative block"
+                    >
+                      <Card className="relative h-full overflow-hidden transition-all motion-safe:hover:-translate-y-1 hover:shadow-xl border-border/50">
+                        <div
+                          className={cn(
+                            'absolute inset-x-0 top-0 h-1 bg-gradient-to-r',
+                            getAccent(category.color).gradient
+                          )}
+                        />
+                        <CardContent className="pt-6 pb-8 flex flex-col h-full">
+                          <div className={cn('mb-4 flex h-12 w-12 items-center justify-center rounded-xl', getAccent(category.color).icon)}>
+                            <Icon className="h-6 w-6" aria-hidden="true" />
+                          </div>
+                          <h3 className="text-xl font-bold group-hover:text-primary transition-colors">
+                            {category.name}
+                          </h3>
+                          <p className="mt-2 text-sm text-muted-foreground flex-1">
+                            {category.description}
+                          </p>
+                          <div className="mt-4 flex items-center justify-between text-xs text-muted-foreground border-t border-border/50 pt-4">
+                            <span>{totalTracks} tracks</span>
+                            <span>{totalLessons} lessons</span>
+                          </div>
+                          <ArrowRight
+                            className="absolute bottom-4 right-4 h-5 w-5 text-muted-foreground/50 group-hover:text-foreground group-hover:right-3 transition-all"
+                            aria-hidden="true"
+                          />
+                        </CardContent>
+                      </Card>
+                    </Link>
+                  )
+                })}
             </div>
           </Reveal>
-          <SpecializationsBanner className="mt-8" />
         </section>
 
-        {/* Language Paths */}
-        <section id="languages" className="py-20 sm:py-24 scroll-mt-20">
+        {/* Featured Tracks from Web Development */}
+        <section className="py-20 sm:py-24">
+          <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <div className="mb-12 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+              <div className="max-w-2xl">
+                <p className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+                  Web Development
+                </p>
+                <h2 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">
+                  Start with the Web
+                </h2>
+                <p className="mt-4 text-lg text-muted-foreground">
+                  Two core MERN tracks, same destination. Pick based on your experience level.
+                </p>
+              </div>
+            </div>
+            <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8" delay={0.1}>
+              <div className="grid gap-8 md:grid-cols-2">
+                {tracks
+                  .filter((t) => t.category === 'web-development' && t.key !== 'specializations')
+                  .map((track) => (
+                    <Link key={track.key} href={`/learn/${track.key}`} className="group">
+                      <Card className="relative overflow-hidden transition-all motion-safe:hover:-translate-y-1 hover:shadow-xl h-full border-border/50">
+                        <div
+                          className={cn(
+                            'absolute inset-x-0 top-0 h-1 bg-gradient-to-r',
+                            getAccent(track.color).gradient
+                          )}
+                        />
+                        <CardHeader>
+                          <div className={cn('flex items-center gap-2 text-sm font-medium', getAccent(track.color).text)}>
+                            <span className="relative flex h-5 w-5" aria-hidden="true">
+                              <span className="absolute inset-0 rounded-full border-2 border-current opacity-20" />
+                              <span className="absolute inset-0 rounded-full border-2 border-current border-t-transparent animate-spin" />
+                            </span>
+                            {track.name}
+                          </div>
+                          <CardTitle className="text-2xl">{track.name}</CardTitle>
+                          <CardDescription className="text-base">{track.description}</CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                          <div className="grid grid-cols-3 gap-4 text-center">
+                            <div className="p-3 rounded-lg bg-muted/50">
+                              <p className="text-2xl font-bold">{track.duration}</p>
+                              <p className="text-xs text-muted-foreground">Estimated Time</p>
+                            </div>
+                            <div className="p-3 rounded-lg bg-muted/50">
+                              <p className="text-2xl font-bold">{track.modules}</p>
+                              <p className="text-xs text-muted-foreground">Modules</p>
+                            </div>
+                            <div className="p-3 rounded-lg bg-muted/50">
+                              <p className="text-2xl font-bold">{track.lessons}</p>
+                              <p className="text-xs text-muted-foreground">Lessons</p>
+                            </div>
+                          </div>
+                          <Separator />
+                          <ul className="space-y-2" role="list">
+                            {track.modulesList.map((module, i) => (
+                              <li key={i} className="flex items-center gap-2 text-sm text-muted-foreground group-hover:text-foreground transition-colors">
+                                <CheckCircle className="h-4 w-4 text-emerald-500 shrink-0" aria-hidden="true" />
+                                {module}
+                              </li>
+                            ))}
+                          </ul>
+                        </CardContent>
+                        <CardFooter className="border-t-0 pt-0">
+                          <Button className="w-full" variant="outline">
+                            Start {track.name} <ArrowRight className="ml-2 h-4 w-4" aria-hidden="true" />
+                          </Button>
+                        </CardFooter>
+                      </Card>
+                    </Link>
+                  ))}
+            </div>
+            <SpecializationsBanner className="mt-8" />
+          </Reveal>
+          </Reveal>
+        </section>
+
+        {/* Programming Languages */}
+        <section id="languages" className="py-20 sm:py-24 scroll-mt-20 bg-muted/30">
           <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <div className="mb-12 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
               <div className="max-w-2xl">
@@ -271,6 +347,56 @@ export default function HomePage() {
               </Button>
             </div>
             <LanguagePaths />
+          </Reveal>
+        </section>
+
+        {/* Embedded Systems Preview */}
+        <section id="embedded" className="py-20 sm:py-24 scroll-mt-20">
+          <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <div className="mb-12 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+              <div className="max-w-2xl">
+                <p className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+                  Embedded Systems & IoT
+                </p>
+                <h2 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">
+                  Code that touches the physical world
+                </h2>
+                <p className="mt-4 text-lg text-muted-foreground">
+                  Arduino, ESP32, sensors, actuators, and IoT cloud. Coming soon.
+                </p>
+              </div>
+              <Button asChild variant="outline" className="gap-2 self-start sm:self-auto">
+                <Link href="/learn?category=embedded-systems">
+                  View embedded tracks
+                  <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                </Link>
+              </Button>
+            </div>
+            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+              {[
+                { title: 'Arduino Fundamentals', desc: 'GPIO, PWM, I2C/SPI, interrupts, and libraries', icon: Cpu, color: 'amber' },
+                { title: 'ESP32 WiFi & Bluetooth', desc: 'Web servers, BLE, MQTT, OTA updates', icon: Cloud, color: 'amber' },
+                { title: 'Sensors & Actuators', desc: 'Temperature, distance, motors, displays', icon: Cpu, color: 'amber' },
+                { title: 'RTOS & FreeRTOS', desc: 'Tasks, queues, semaphores, timing', icon: Cpu, color: 'amber' },
+                { title: 'IoT Cloud Integration', desc: 'AWS IoT, Azure, MQTT brokers', icon: Cloud, color: 'amber' },
+                { title: 'PCB Design Basics', desc: 'KiCad, schematics, layout, manufacturing', icon: Cpu, color: 'amber' },
+              ].map((item) => (
+                <Card key={item.title} className="group transition-all motion-safe:hover:-translate-y-0.5 hover:shadow-lg h-full border-border/50">
+                  <CardHeader>
+                    <div className={cn('mb-3 flex h-12 w-12 items-center justify-center rounded-xl', getAccent(item.color).icon)}>
+                      <item.icon className="h-6 w-6" aria-hidden="true" />
+                    </div>
+                    <CardTitle>{item.title}</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <CardDescription className="text-base">{item.desc}</CardDescription>
+                  </CardContent>
+                  <CardFooter className="border-t-0 pt-0">
+                    <span className="text-xs text-muted-foreground">Coming Soon</span>
+                  </CardFooter>
+                </Card>
+              ))}
+            </div>
           </Reveal>
         </section>
 
@@ -301,45 +427,6 @@ export default function HomePage() {
           </Reveal>
         </section>
 
-        {/* Curriculum Preview */}
-        <section className="py-20 sm:py-24 bg-muted/30">
-          <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-            <div className="text-center max-w-3xl mx-auto mb-16">
-              <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">What You&apos;ll Learn</h2>
-              <p className="mt-4 text-lg text-muted-foreground">
-                Comprehensive curriculum covering the entire MERN ecosystem.
-              </p>
-            </div>
-            <div className="grid gap-6 lg:grid-cols-4">
-              {[
-                { title: 'Node.js & Express', icon: Server, color: 'emerald', topics: ['REST APIs', 'Authentication', 'Middleware', 'Testing', 'Deployment'] },
-                { title: 'MongoDB & Mongoose', icon: Database, color: 'emerald', topics: ['Data Modeling', 'Aggregation', 'Indexes', 'Transactions', 'Performance'] },
-                { title: 'React & Ecosystem', icon: Globe, color: 'violet', topics: ['Hooks & State', 'Routing', 'Forms', 'Data Fetching', 'Performance'] },
-                { title: 'Full Stack Mastery', icon: Code2, color: 'amber', topics: ['Architecture', 'Real-time', 'File Uploads', 'CI/CD', 'Docker'] },
-              ].map((phase) => (
-                <Card key={phase.title} className="h-full">
-                  <CardHeader>
-                    <div className={cn('mb-3 flex h-11 w-11 items-center justify-center rounded-xl', getAccent(phase.color).icon)}>
-                      <phase.icon className="h-6 w-6" aria-hidden="true" />
-                    </div>
-                    <CardTitle>{phase.title}</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <ul className="space-y-2" role="list">
-                      {phase.topics.map((topic) => (
-                        <li key={topic} className="flex items-center gap-2 text-sm text-muted-foreground">
-                          <CheckCircle className={cn('h-3.5 w-3.5', getAccent(phase.color).text)} aria-hidden="true" />
-                          {topic}
-                        </li>
-                      ))}
-                    </ul>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          </Reveal>
-        </section>
-
         {/* CTA */}
         <section className="py-20 sm:py-24">
           <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
@@ -347,10 +434,10 @@ export default function HomePage() {
               <CardContent className="relative py-16 sm:py-24 text-center">
                 <div className="mx-auto max-w-2xl">
                   <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">
-                    Ready to start your MERN journey?
+                    Ready to start learning?
                   </h2>
                   <p className="mt-4 text-lg text-muted-foreground">
-                    Join learners building real projects with the MERN stack — free, self-paced, and open source.
+                    Join thousands of learners building real projects — free, self-paced, and open source.
                   </p>
                   <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
                     <Button size="lg" asChild className="gap-2 w-full sm:w-auto">

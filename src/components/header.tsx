@@ -7,7 +7,7 @@ import { usePathname } from 'next/navigation'
 import { useSession, signOut } from 'next-auth/react'
 import { useTheme } from 'next-themes'
 import { AnimatePresence, motion, useReducedMotion, useScroll, useSpring } from 'motion/react'
-import { Menu, X, Sun, Moon, User, LogOut, BookOpen, Trophy, Users, Code2, Rocket, Search, Languages } from 'lucide-react'
+import { Menu, X, Sun, Moon, User, LogOut, BookOpen, Trophy, Users, Code2, Rocket, Search, Layers } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
@@ -16,7 +16,7 @@ import { cn } from '@/lib/utils'
 
 const navigation = [
   { name: 'Learn', href: '/learn', icon: BookOpen },
-  { name: 'Languages', href: '/learn/languages', icon: Languages },
+  { name: 'Categories', href: '/learn', icon: Layers },
   { name: 'Progress', href: '/dashboard', icon: Trophy, auth: true },
   { name: 'Showcase', href: '/community/showcase', icon: Rocket },
   { name: 'Community', href: '/community', icon: Users },
