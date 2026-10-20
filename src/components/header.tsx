@@ -7,16 +7,29 @@ import { usePathname } from 'next/navigation'
 import { useSession, signOut } from 'next-auth/react'
 import { useTheme } from 'next-themes'
 import { AnimatePresence, motion, useReducedMotion, useScroll, useSpring } from 'motion/react'
-import { Menu, X, Sun, Moon, User, LogOut, BookOpen, Trophy, Users, Code2, Rocket, Search, Layers } from 'lucide-react'
+import { Menu, X, Sun, Moon, User, LogOut, BookOpen, Trophy, Users, Code2, Rocket, Search, Layers, ChevronDown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
+import { trackCategories } from '@/lib/curriculum'
+import { Globe, Code2 as Code2Icon, Cpu, Smartphone, Brain, Cloud, Gamepad2, Monitor } from 'lucide-react'
+
+const categoryIcons: Record<string, typeof Globe> = {
+  'web-development': Globe,
+  'programming-languages': Code2Icon,
+  'embedded-systems': Cpu,
+  'mobile-development': Smartphone,
+  'data-science': Brain,
+  'devops-cloud': Cloud,
+  'game-development': Gamepad2,
+  'desktop-apps': Monitor,
+}
 
 const navigation = [
   { name: 'Learn', href: '/learn', icon: BookOpen },
-  { name: 'Categories', href: '/learn', icon: Layers },
+  { name: 'Categories', href: '/categories', icon: Layers },
   { name: 'Progress', href: '/dashboard', icon: Trophy, auth: true },
   { name: 'Showcase', href: '/community/showcase', icon: Rocket },
   { name: 'Community', href: '/community', icon: Users },
@@ -69,20 +82,70 @@ export function Header() {
           </Link>
 
           <div className="hidden lg:flex lg:items-center lg:gap-6">
-            {navigation.map((item) => (
-              <Link
-                key={item.name}
-                href={item.href}
-                className={cn(
-                  `relative flex items-center gap-1.5 text-sm font-medium transition-colors after:absolute after:-bottom-1 after:left-0 after:h-px after:w-full after:origin-left after:scale-x-0 after:bg-primary after:transition-transform after:duration-200 after:content-[''] hover:text-primary hover:after:scale-x-100`,
-                  session || !item.auth ? 'text-foreground' : 'text-muted-foreground'
-                )}
-                aria-current={activeNavigationHref === item.href ? 'page' : undefined}
-              >
-                <item.icon className="h-4 w-4" aria-hidden="true" />
-                {item.name}
-              </Link>
-            ))}
+            {navigation.map((item) => {
+              // Categories gets a dropdown menu
+              if (item.name === 'Categories') {
+                return (
+                  <DropdownMenu key={item.name}>
+                    <DropdownMenuTrigger asChild>
+                      <Link
+                        href={item.href}
+                        className={cn(
+                          `relative flex items-center gap-1.5 text-sm font-medium transition-colors after:absolute after:-bottom-1 after:left-0 after:h-px after:w-full after:origin-left after:scale-x-0 after:bg-primary after:transition-transform after:duration-200 after:content-[''] hover:text-primary hover:after:scale-x-100`,
+                          session || !item.auth ? 'text-foreground' : 'text-muted-foreground'
+                        )}
+                        aria-current={activeNavigationHref === item.href ? 'page' : undefined}
+                      >
+                        <item.icon className="h-4 w-4" aria-hidden="true" />
+                        {item.name}
+                        <ChevronDown className="h-3.5 w-3.5 ml-0.5" aria-hidden="true" />
+                      </Link>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent className="w-72" align="start" forceMount>
+                      <DropdownMenuLabel className="font-semibold">Browse by Category</DropdownMenuLabel>
+                      {trackCategories
+                        .filter((cat) => cat.order <= 8)
+                        .map((cat) => {
+                          const Icon = categoryIcons[cat.id];
+                          return (
+                            <DropdownMenuItem key={cat.id} asChild>
+                              <Link
+                                href={`/learn?category=${cat.id}`}
+                                className="flex items-center gap-2"
+                              >
+                                <Icon className="h-4 w-4" aria-hidden="true" />
+                                {cat.name}
+                              </Link>
+                            </DropdownMenuItem>
+                          )
+                        })}
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem asChild>
+                        <Link href="/categories" className="flex items-center gap-2 font-medium">
+                          <Layers className="h-4 w-4" aria-hidden="true" />
+                          View All Categories
+                        </Link>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )
+              }
+              
+              return (
+                <Link
+                  key={item.name}
+                  href={item.href}
+                  className={cn(
+                    `relative flex items-center gap-1.5 text-sm font-medium transition-colors after:absolute after:-bottom-1 after:left-0 after:h-px after:w-full after:origin-left after:scale-x-0 after:bg-primary after:transition-transform after:duration-200 after:content-[''] hover:text-primary hover:after:scale-x-100`,
+                    session || !item.auth ? 'text-foreground' : 'text-muted-foreground'
+                  )}
+                  aria-current={activeNavigationHref === item.href ? 'page' : undefined}
+                >
+                  <item.icon className="h-4 w-4" aria-hidden="true" />
+                  {item.name}
+                </Link>
+              )
+            })}
           </div>
         </div>
 
@@ -206,21 +269,41 @@ export function Header() {
                 <Search className="h-5 w-5" aria-hidden="true" />
                 Search the site
               </Link>
-              {navigation.map((item) => (
-                <Link
-                  key={item.name}
-                  href={item.href}
-                  className={cn(
-                    'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-base font-medium transition-colors hover:bg-accent',
-                    session || !item.auth ? 'text-foreground' : 'text-muted-foreground'
-                  )}
-                  aria-current={activeNavigationHref === item.href ? 'page' : undefined}
-                  onClick={() => setMobileMenuOpen(false)}
-                >
-                  <item.icon className="h-5 w-5" aria-hidden="true" />
-                  {item.name}
-                </Link>
-              ))}
+              {navigation.map((item) => {
+                // In mobile, Categories just links to /categories page
+                if (item.name === 'Categories') {
+                  return (
+                    <Link
+                      key={item.name}
+                      href={item.href}
+                      className={cn(
+                        'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-base font-medium transition-colors hover:bg-accent',
+                        session || !item.auth ? 'text-foreground' : 'text-muted-foreground'
+                      )}
+                      aria-current={activeNavigationHref === item.href ? 'page' : undefined}
+                      onClick={() => setMobileMenuOpen(false)}
+                    >
+                      <item.icon className="h-5 w-5" aria-hidden="true" />
+                      {item.name}
+                    </Link>
+                  )
+                }
+                return (
+                  <Link
+                    key={item.name}
+                    href={item.href}
+                    className={cn(
+                      'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-base font-medium transition-colors hover:bg-accent',
+                      session || !item.auth ? 'text-foreground' : 'text-muted-foreground'
+                    )}
+                    aria-current={activeNavigationHref === item.href ? 'page' : undefined}
+                    onClick={() => setMobileMenuOpen(false)}
+                  >
+                    <item.icon className="h-5 w-5" aria-hidden="true" />
+                    {item.name}
+                  </Link>
+                )
+              })}
               {!session && (
                 <div className="flex w-full flex-col gap-2 pt-4">
                   <Button variant="outline" asChild>

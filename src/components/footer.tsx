@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import Image from 'next/image'
-import { Mail, ExternalLink, Cpu, Smartphone, Brain, Cloud, Gamepad2, Monitor, Code2, Globe } from 'lucide-react'
+import { Mail, ExternalLink, Cpu, Smartphone, Brain, Cloud, Gamepad2, Monitor, Code2, Globe, ArrowRight } from 'lucide-react'
 import { GithubIcon } from '@/components/icons/brand'
 import { NewsletterForm } from '@/components/newsletter-form'
 import { NEWSLETTER_ENABLED } from '@/lib/newsletter-feature'
@@ -17,6 +17,9 @@ const categoryIcons: Record<string, React.ComponentType<{ className?: string }>>
   'game-development': Gamepad2,
   'desktop-apps': Monitor,
 }
+
+// Footer shows only top 4 categories + link to all categories
+const footerCategories = trackCategories.filter((cat) => cat.order <= 4)
 
 const platformLinks = [
   { name: 'About', href: '/about' },
@@ -84,7 +87,7 @@ export function Footer() {
           <nav aria-label="Learning Categories">
             <h3 className="font-semibold">Categories</h3>
             <ul className="mt-4 space-y-3">
-              {trackCategories.map((category) => (
+              {footerCategories.map((category) => (
                 <li key={category.id}>
                   <Link
                     href={`/learn?category=${category.id}`}
@@ -98,6 +101,15 @@ export function Footer() {
                   </Link>
                 </li>
               ))}
+              <li>
+                <Link
+                  href="/categories"
+                  className="flex items-center gap-2 text-sm font-medium text-primary hover:text-primary/80 transition-colors"
+                >
+                  <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                  View all categories
+                </Link>
+              </li>
             </ul>
           </nav>
 
