@@ -103,6 +103,26 @@ EMAIL_FROM="MERN Learn <newsletter@your-domain>"
 `EMAIL_FROM` is required. Without usable SMTP, signup returns a friendly `503`
 instead of silently storing an address that can never be confirmed.
 
+### Production checklist
+
+In Vercel, open **Project → Settings → Environment Variables → Production** and
+add the SMTP values from your local `.env.local`:
+
+- `EMAIL_SERVER_HOST`
+- `EMAIL_SERVER_PORT`
+- `EMAIL_SERVER_USER`
+- `EMAIL_SERVER_PASSWORD`
+- `EMAIL_FROM`
+
+Then add `ADMIN_EMAILS` with the exact email address you use to sign in to the
+site. Optionally add `NEWSLETTER_SECRET`; otherwise the site falls back to
+`AUTH_SECRET`. Confirm that `NEXT_PUBLIC_SITE_URL` is the public production
+origin (or let Vercel derive it from `VERCEL_PROJECT_PRODUCTION_URL`) so
+confirmation and unsubscribe links point at the live domain.
+
+Redeploy after changing environment variables. Until SMTP is configured,
+`POST /api/newsletter` intentionally returns `503` and no address is stored.
+
 ### Database and operations
 
 The double opt-in migration added:
