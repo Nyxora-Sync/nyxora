@@ -81,4 +81,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     },
   },
   debug: process.env.NODE_ENV === 'development',
+  // Allow linking OAuth accounts with the same email (e.g., GitHub + Google)
+  // Without this, signing in with a different provider using the same email
+  // throws "OAuthAccountNotLinked" error.
+  allowDangerousEmailAccountLinking: true,
 })
