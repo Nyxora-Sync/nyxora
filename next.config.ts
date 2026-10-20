@@ -2,14 +2,21 @@ import type { NextConfig } from "next";
 import createMDX from "@next/mdx";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  /* Cloudflare Pages requires these settings */
+  output: 'standalone',
+  reactStrictMode: true,
   cacheComponents: true,
   partialPrefetching: true,
+
   images: {
     formats: ["image/avif", "image/webp"],
     minimumCacheTTL: 60 * 60 * 24 * 7,
+    loader: 'custom',
+    loaderFile: './src/lib/image-loader.ts',
   },
+
   pageExtensions: ["js", "jsx", "ts", "tsx", "md", "mdx"],
+
   turbopack: {
     rules: {
       "*.css": {
@@ -18,94 +25,34 @@ const nextConfig: NextConfig = {
       },
     },
   },
+
   async headers() {
     return [
       {
         source: "/:path*",
         headers: [
-          {
-            key: "Cache-Control",
-            value: "public, max-age=0, must-revalidate",
-          },
+          { key: "Cache-Control", value: "public, max-age=0, must-revalidate" },
         ],
       },
       {
         source: "/_next/static/:path*",
         headers: [
-          {
-            key: "Cache-Control",
-            value: "public, max-age=31536000, immutable",
-          },
+          { key: "Cache-Control", value: "public, max-age=31536000, immutable" },
         ],
       },
       {
-        source: "/:path*.jpg",
+        source: "/:path*.(jpg|jpeg|png|webp|avif)",
         headers: [
-          {
-            key: "Cache-Control",
-            value: "public, max-age=86400",
-          },
-        ],
-      },
-      {
-        source: "/:path*.png",
-        headers: [
-          {
-            key: "Cache-Control",
-            value: "public, max-age=86400",
-          },
-        ],
-      },
-      {
-        source: "/:path*.webp",
-        headers: [
-          {
-            key: "Cache-Control",
-            value: "public, max-age=86400",
-          },
-        ],
-      },
-      {
-        source: "/:path*.avif",
-        headers: [
-          {
-            key: "Cache-Control",
-            value: "public, max-age=86400",
-          },
-        ],
-      },
-      {
-        source: "/site-logo.jpg",
-        headers: [
-          {
-            key: "Cache-Control",
-            value: "public, max-age=86400",
-          },
-        ],
-      },
-      {
-        source: "/site-mark.webp",
-        headers: [
-          {
-            key: "Cache-Control",
-            value: "public, max-age=86400",
-          },
+          { key: "Cache-Control", value: "public, max-age=86400" },
         ],
       },
     ];
   },
+
   async redirects() {
     return [
-      {
-        source: "/showcase",
-        destination: "/community/showcase",
-        permanent: true,
-      },
-      {
-        source: "/learn/modules",
-        destination: "/learn",
-        permanent: true,
-      },
+      { source: "/showcase", destination: "/community/showcase", permanent: true },
+      { source: "/learn/modules", destination: "/learn", permanent: true },
     ];
   },
 };
@@ -115,13 +62,7 @@ const withMDX = createMDX({
     remarkPlugins: ["remark-gfm"],
     rehypePlugins: [
       "rehype-slug",
-      [
-        "rehype-pretty-code",
-        {
-          theme: "github-dark-dimmed",
-          keepBackground: false,
-        },
-      ],
+      ["rehype-pretty-code", { theme: "github-dark-dimmed", keepBackground: false }],
     ],
   },
 });
