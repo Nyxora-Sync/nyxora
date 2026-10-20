@@ -1,0 +1,183 @@
+Performance work starts with a measurement, not a clever type. Most C# applications are fast enough with clear code and sane I/O. When a profile shows a hot allocation path, `Span<T>`, `Memory<T>`, pooling, and `StringBuilder` are the tools that remove copies without changing behavior. Used speculatively, they make code harder to read and sometimes slower.
+
+## Where allocations come from
+
+Every `new` on a reference type allocates on the managed heap. So does boxing a value type, capturing a variable in a closure, concatenating strings in a loop, and many LINQ operators that create iterators or intermediate collections.
+
+```csharp
+string csv = "";
+foreach (var row in rows)
+    csv += row.Id + "," + row.Name + "\n"; // repeated allocations and copying
+```
+
+For a handful of rows this is irrelevant. For a hundred thousand, it is quadratic copying plus a large object heap problem. Measure first; then replace it with a `StringBuilder` or write directly to a `Stream`.
+
+## `Span<T>` and `ReadOnlySpan<T>`
+
+A span is a view over contiguous memory: an array, a stack buffer, or a string. It carries a pointer and a length without copying:
+
+```csharp
+using System.Globalization;
+
+public static bool TryReadAmount(ReadOnlySpan<char> line, out decimal amount)
+{
+    var comma = line.LastIndexOf(',');
+    if (comma < 0)
+    {
+        amount = 0;
+        return false;
+    }
+
+    return decimal.TryParse(
+        line[(comma + 1)..],
+        NumberStyles.Number,
+        CultureInfo.InvariantCulture,
+        out amount);
+}
+
+ReadOnlySpan<char> line = "2026-10-20,42.50";
+if (TryReadAmount(line, out var amount))
+    Console.WriteLine(amount); // 42.50
+```
+
+Slicing with `line[(comma + 1)..]` creates another view, not a string. The parser reads directly from the original memory. This is ideal for parsers, protocol handling, and tight loops.
+
+`Span<T>` is a `ref struct`: it can only live on the stack, cannot be boxed, cannot be a field of a normal class, and cannot cross an `await`. That restriction is deliberate — the memory it points to may not survive an asynchronous continuation.
+
+```csharp
+Span<byte> buffer = stackalloc byte[256];
+```
+
+`stackalloc` avoids the heap for small, short-lived buffers. Keep it small; a large stack allocation can overflow the thread stack, and the size must be known before use.
+
+## `Memory<T>` for asynchronous code
+
+When the buffer must survive an `await`, use `Memory<T>` or `ReadOnlyMemory<T>`. It is not a ref struct and can be stored and passed across asynchronous boundaries:
+
+```csharp
+public static async Task<long> CountBytesAsync(
+    Stream stream,
+    Memory<byte> buffer,
+    CancellationToken ct)
+{
+    long total = 0;
+    int read;
+
+    while ((read = await stream.ReadAsync(buffer, ct)) > 0)
+        total += read;
+
+    return total;
+}
+```
+
+You can obtain a `Memory<T>` from an array, and a `Span<T>` from a `Memory<T>` for synchronous processing.
+
+## `ArrayPool<T>`
+
+When a buffer is large or used frequently, renting it from a pool avoids repeated garbage collection:
+
+```csharp
+var buffer = ArrayPool<byte>.Shared.Rent(64 * 1024);
+try
+{
+    var read = await stream.ReadAsync(buffer.AsMemory(0, buffer.Length), ct);
+    Console.WriteLine($"Read {read} bytes");
+}
+finally
+{
+    ArrayPool<byte>.Shared.Return(buffer);
+}
+```
+
+`Rent` may return a larger array than requested, so always slice to the valid length. Return the buffer in a `finally`, and never keep a reference after returning it. If the buffer held passwords or personal data, clear it before returning (`Return(buffer, clearArray: true)`).
+
+## `StringBuilder`
+
+`StringBuilder` avoids allocating a new string for every append:
+
+```csharp
+var sb = new StringBuilder(capacity: 4096);
+
+foreach (var row in rows)
+{
+    sb.Append(row.Id).Append(',')
+      .Append(row.Name).AppendLine();
+}
+
+var csv = sb.ToString();
+```
+
+Set an initial capacity when you can estimate it; otherwise the builder still grows and copies internally. For a fixed, small number of pieces, interpolation is clearer and perfectly fine.
+
+## BenchmarkDotNet
+
+Stopwatch measurements in a console app are distorted by JIT warmup, tiered compilation, and the garbage collector. BenchmarkDotNet runs a proper harness:
+
+```csharp
+using System.Globalization;
+using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Running;
+
+[MemoryDiagnoser]
+public class ParseBenchmarks
+{
+    private const string Input = "2026-10-20,42.50";
+
+    [Benchmark(Baseline = true)]
+    public decimal SplitAndParse()
+    {
+        var parts = Input.Split(',');
+        return decimal.Parse(parts[1], CultureInfo.InvariantCulture);
+    }
+
+    [Benchmark]
+    public decimal SpanParse()
+    {
+        var span = Input.AsSpan();
+        var comma = span.LastIndexOf(',');
+        return decimal.Parse(span[(comma + 1)..], CultureInfo.InvariantCulture);
+    }
+}
+
+BenchmarkRunner.Run<ParseBenchmarks>();
+```
+
+Add the `BenchmarkDotNet` package, run with `dotnet run -c Release`, and read both time and allocated bytes. A faster method that allocates less is usually the better result; a method that is 5 percent faster but unreadable is often not worth merging.
+
+## Profiling and the garbage collector
+
+Use `dotnet-counters` for a live view of CPU, allocation rate, exception rate, thread-pool queue length, and GC pause time:
+
+```bash
+dotnet-counters monitor -p <pid> System.Runtime
+```
+
+Use `dotnet-trace` for CPU sampling and `dotnet-dump` for heap analysis when a process is leaking. Visual Studio, Rider, and PerfView provide the same data with a UI.
+
+The managed heap has generations. Gen 0 collections are cheap and frequent; Gen 1 is a buffer; Gen 2 is expensive and can pause the application. Objects of 85,000 bytes or more go to the Large Object Heap, which is collected with Gen 2 and is not compacted by default. Server GC uses one heap and thread per core for throughput; workstation GC uses less memory and is common for desktop apps. Choose based on the workload, and do not call `GC.Collect()` to “fix” memory pressure — it usually makes latency worse.
+
+## When not to optimize
+
+Optimize when a profiler shows a hot path that affects a user-visible metric: request latency, throughput, memory ceiling, or startup time. Optimize the 95th or 99th percentile, not only the average. A micro-optimization in a method called twice per request is noise; an unnecessary `ToArray()` on a 100,000-row query is not.
+
+Prefer the simplest code that meets the budget. Allocations in Gen 0 are cheap, and clarity has a maintenance value that does not appear in a benchmark. Revisit after measuring, not before.
+
+## Common mistakes
+
+- Using `Span<T>` in an `async` method; it cannot cross an `await`.
+- Returning a pooled array to callers or using it after `Return`.
+- Assuming `ArrayPool.Rent(n)` returns exactly `n` elements.
+- `stackalloc` for a size controlled by user input.
+- Concatenating strings in a loop and calling it “fast enough” without measuring.
+- Benchmarking Debug builds, or benchmarking with a debugger attached.
+- Optimizing a cold path while the database query remains the bottleneck.
+- Caching everything without an eviction policy, turning a performance fix into a memory leak.
+
+## Practice
+
+1. Write two versions of a CSV row parser: one using `Split` and one using `ReadOnlySpan<char>`. Benchmark both with `[MemoryDiagnoser]` and compare allocations.
+2. Implement an async file copier using a pooled 64 KB buffer. Return the buffer in `finally` and prove the copied length is correct for a file smaller than the buffer.
+3. Add a `StringBuilder` report generator and measure the difference against string concatenation for 10,000 rows.
+4. Run `dotnet-counters` against a small API under load. Record allocation rate, Gen 2 count, and thread-pool queue length before and after a change.
+5. Deliberately create a large object (over 85,000 bytes) and observe which generation it lands in using a memory profiler.
+6. Write a short note explaining one optimization you decided **not** to make, with the measurement that justified leaving the code alone.

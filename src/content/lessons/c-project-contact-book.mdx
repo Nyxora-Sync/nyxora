@@ -1,0 +1,499 @@
+A contact book is a useful C project because it combines every core skill so far: dynamic arrays, string handling, safe input, structs, files, error checking, and cleanup. The program keeps records in memory, saves them to a text file after every change, and reloads them on the next run.
+
+It supports five commands: add, list, search, delete, and quit. Search is case-insensitive across names and email addresses. Deletion uses the number shown by the list command, which avoids ambiguous partial-name matches.
+
+## Data model
+
+Each contact has a fixed-size name and email field inside a dynamically allocated array. The array grows by doubling when it fills. The `ContactBook` owns its `items` pointer; `book_free` releases it exactly once.
+
+```text
+ContactBook
+  items -----> Contact[capacity]
+  count       number of initialized records
+  capacity    number of allocated slots
+```
+
+Names and addresses are copied into the record, so the input buffers can be reused. The book is the single owner of the storage, which makes cleanup straightforward.
+
+## Safe input
+
+`read_line` wraps `fgets`, removes the trailing newline, and discards the rest of an overlong line. It returns 1 for a complete line, 0 for end of input, and -1 for a truncated line. The caller can then reject the record instead of silently accepting partial data.
+
+Validation is intentionally simple. A name must be non-empty, shorter than the field, and free of control characters. An email must contain one `@`, have text before it, and contain a dot with more text after it. That rejects obvious mistakes but does not claim to implement the full email grammar.
+
+## Persistence
+
+The file format is two lines per contact: name, then email. That keeps the file readable with any text editor. Validation prevents embedded newlines from breaking the record layout.
+
+Saving writes to `contacts.txt.tmp` and renames it over the real file only after every record is written and `fclose` succeeds. A crash during the write leaves the previous file intact. This is a small but important reliability habit. Loading skips malformed records rather than trusting the file blindly.
+
+## Implementation
+
+The complete program is one translation unit:
+
+```c
+#include <ctype.h>
+#include <errno.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define DATA_FILE "contacts.txt"
+#define NAME_MAX 64
+#define EMAIL_MAX 128
+
+typedef struct {
+    char name[NAME_MAX];
+    char email[EMAIL_MAX];
+} Contact;
+
+typedef struct {
+    Contact *items;
+    size_t count;
+    size_t capacity;
+} ContactBook;
+
+static int read_line(const char *prompt, char *buffer, size_t capacity)
+{
+    if (capacity == 0) {
+        return 0;
+    }
+    if (prompt != NULL) {
+        fputs(prompt, stdout);
+        fflush(stdout);
+    }
+    if (fgets(buffer, (int)capacity, stdin) == NULL) {
+        return 0;
+    }
+
+    size_t length = strlen(buffer);
+    if (length > 0 && buffer[length - 1] == '\n') {
+        buffer[length - 1] = '\0';
+        return 1;
+    }
+
+    int ch = getchar();
+    if (ch == '\n' || ch == EOF) {
+        return 1;
+    }
+    while ((ch = getchar()) != '\n' && ch != EOF) {
+        /* discard the rest of an oversized line */
+    }
+    return -1;
+}
+
+static void trim_newline(char *text)
+{
+    text[strcspn(text, "\r\n")] = '\0';
+}
+
+static int copy_field(char *destination, size_t capacity, const char *source)
+{
+    size_t length = strlen(source);
+    if (length >= capacity) {
+        return 0;
+    }
+    memcpy(destination, source, length + 1);
+    return 1;
+}
+
+static int valid_name(const char *name)
+{
+    size_t length = strlen(name);
+    int has_visible = 0;
+
+    if (length == 0 || length >= NAME_MAX) {
+        return 0;
+    }
+    for (const char *p = name; *p != '\0'; p++) {
+        if (iscntrl((unsigned char)*p)) {
+            return 0;
+        }
+        if (!isspace((unsigned char)*p)) {
+            has_visible = 1;
+        }
+    }
+    return has_visible;
+}
+
+static int valid_email(const char *email)
+{
+    const char *at = strchr(email, '@');
+    const char *dot;
+
+    if (strlen(email) >= EMAIL_MAX || at == NULL || at == email) {
+        return 0;
+    }
+    if (strchr(at + 1, '@') != NULL) {
+        return 0;
+    }
+    dot = strchr(at + 1, '.');
+    if (dot == NULL || dot == at + 1 || dot[1] == '\0') {
+        return 0;
+    }
+    for (const char *p = email; *p != '\0'; p++) {
+        if (isspace((unsigned char)*p)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int book_reserve(ContactBook *book, size_t needed)
+{
+    if (needed <= book->capacity) {
+        return 1;
+    }
+
+    size_t new_capacity = book->capacity == 0 ? 8 : book->capacity;
+    while (new_capacity < needed) {
+        if (new_capacity > SIZE_MAX / 2) {
+            return 0;
+        }
+        new_capacity *= 2;
+    }
+    if (new_capacity > SIZE_MAX / sizeof *book->items) {
+        return 0;
+    }
+
+    Contact *items = realloc(book->items, new_capacity * sizeof *book->items);
+    if (items == NULL) {
+        return 0;
+    }
+    book->items = items;
+    book->capacity = new_capacity;
+    return 1;
+}
+
+static int book_add(ContactBook *book, const Contact *contact)
+{
+    if (!book_reserve(book, book->count + 1)) {
+        return 0;
+    }
+    book->items[book->count] = *contact;
+    book->count++;
+    return 1;
+}
+
+static void book_free(ContactBook *book)
+{
+    free(book->items);
+    book->items = NULL;
+    book->count = 0;
+    book->capacity = 0;
+}
+
+static int save_book(const ContactBook *book)
+{
+    const char *temporary = "contacts.txt.tmp";
+    FILE *file = fopen(temporary, "w");
+    if (file == NULL) {
+        perror(temporary);
+        return 0;
+    }
+
+    int ok = 1;
+    for (size_t i = 0; i < book->count; i++) {
+        if (fprintf(file, "%s\n%s\n",
+                    book->items[i].name, book->items[i].email) < 0) {
+            perror("writing contacts");
+            ok = 0;
+            break;
+        }
+    }
+    if (fclose(file) != 0) {
+        perror("fclose");
+        ok = 0;
+    }
+    if (!ok) {
+        remove(temporary);
+        return 0;
+    }
+    if (rename(temporary, DATA_FILE) != 0) {
+        perror("rename");
+        remove(temporary);
+        return 0;
+    }
+    return 1;
+}
+
+static int load_book(ContactBook *book)
+{
+    FILE *file = fopen(DATA_FILE, "r");
+    if (file == NULL) {
+        if (errno == ENOENT) {
+            return 1;
+        }
+        perror(DATA_FILE);
+        return 0;
+    }
+
+    char name_line[NAME_MAX + 2];
+    char email_line[EMAIL_MAX + 2];
+    int ok = 1;
+    Contact contact;
+
+    while (fgets(name_line, sizeof name_line, file) != NULL) {
+        if (fgets(email_line, sizeof email_line, file) == NULL) {
+            break;
+        }
+        trim_newline(name_line);
+        trim_newline(email_line);
+
+        if (!valid_name(name_line) || !valid_email(email_line)) {
+            continue;
+        }
+        if (!copy_field(contact.name, sizeof contact.name, name_line)
+            || !copy_field(contact.email, sizeof contact.email, email_line)
+            || !book_add(book, &contact)) {
+            ok = 0;
+            break;
+        }
+    }
+    if (ferror(file)) {
+        perror("reading contacts");
+        ok = 0;
+    }
+    if (fclose(file) != 0) {
+        perror("fclose");
+        ok = 0;
+    }
+    return ok;
+}
+
+static void print_contact(size_t number, const Contact *contact)
+{
+    printf("%zu. %-32s %s\n", number, contact->name, contact->email);
+}
+
+static void list_contacts(const ContactBook *book)
+{
+    if (book->count == 0) {
+        puts("No contacts yet.");
+        return;
+    }
+    for (size_t i = 0; i < book->count; i++) {
+        print_contact(i + 1, &book->items[i]);
+    }
+}
+
+static int contains_ci(const char *haystack, const char *needle)
+{
+    size_t needle_length = strlen(needle);
+    if (needle_length == 0) {
+        return 1;
+    }
+    for (const char *start = haystack; *start != '\0'; start++) {
+        size_t i = 0;
+        while (i < needle_length && start[i] != '\0'
+               && tolower((unsigned char)start[i])
+                   == tolower((unsigned char)needle[i])) {
+            i++;
+        }
+        if (i == needle_length) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void search_contacts(const ContactBook *book)
+{
+    char term[NAME_MAX];
+    if (read_line("Search name or email: ", term, sizeof term) != 1) {
+        puts("Search cancelled.");
+        return;
+    }
+    if (term[0] == '\0') {
+        puts("Enter a search term.");
+        return;
+    }
+
+    size_t matches = 0;
+    for (size_t i = 0; i < book->count; i++) {
+        if (contains_ci(book->items[i].name, term)
+            || contains_ci(book->items[i].email, term)) {
+            print_contact(i + 1, &book->items[i]);
+            matches++;
+        }
+    }
+    if (matches == 0) {
+        puts("No matching contacts.");
+    }
+}
+
+static void add_contact(ContactBook *book)
+{
+    char name[NAME_MAX];
+    char email[EMAIL_MAX];
+    Contact contact;
+
+    if (read_line("Name: ", name, sizeof name) != 1
+        || read_line("Email: ", email, sizeof email) != 1) {
+        puts("Add cancelled.");
+        return;
+    }
+    if (!valid_name(name)) {
+        puts("Name must be non-empty and shorter than 64 characters.");
+        return;
+    }
+    if (!valid_email(email)) {
+        puts("Enter a basic address such as name@example.com.");
+        return;
+    }
+    if (!copy_field(contact.name, sizeof contact.name, name)
+        || !copy_field(contact.email, sizeof contact.email, email)
+        || !book_add(book, &contact)) {
+        puts("Could not add the contact.");
+        return;
+    }
+
+    if (!save_book(book)) {
+        puts("Contact is in memory, but saving to disk failed.");
+    } else {
+        printf("Added %s.\n", name);
+    }
+}
+
+static void delete_contact(ContactBook *book)
+{
+    char line[32];
+    char *end;
+    long number;
+
+    if (book->count == 0) {
+        puts("No contacts to delete.");
+        return;
+    }
+    list_contacts(book);
+    if (read_line("Contact number to delete: ", line, sizeof line) != 1) {
+        puts("Delete cancelled.");
+        return;
+    }
+
+    errno = 0;
+    number = strtol(line, &end, 10);
+    while (isspace((unsigned char)*end)) {
+        end++;
+    }
+    if (end == line || *end != '\0' || errno == ERANGE
+        || number < 1 || (unsigned long)number > book->count) {
+        puts("Invalid contact number.");
+        return;
+    }
+
+    size_t index = (size_t)number - 1;
+    for (size_t i = index + 1; i < book->count; i++) {
+        book->items[i - 1] = book->items[i];
+    }
+    book->count--;
+    puts("Deleted.");
+
+    if (!save_book(book)) {
+        puts("Deletion is in memory, but saving to disk failed.");
+    }
+}
+
+static void print_menu(void)
+{
+    puts("\n1. Add");
+    puts("2. List");
+    puts("3. Search");
+    puts("4. Delete");
+    puts("5. Quit");
+}
+
+int main(void)
+{
+    ContactBook book = {0};
+    if (!load_book(&book)) {
+        book_free(&book);
+        return EXIT_FAILURE;
+    }
+
+    for (;;) {
+        int choice;
+        char line[32];
+        print_menu();
+
+        int status = read_line("Choice: ", line, sizeof line);
+        if (status == 0) {
+            puts("\nGoodbye.");
+            break;
+        }
+        if (status < 0) {
+            puts("Input line too long.");
+            continue;
+        }
+        char extra;
+        if (sscanf(line, "%d %c", &choice, &extra) != 1) {
+            puts("Enter a number from 1 to 5.");
+            continue;
+        }
+
+        switch (choice) {
+        case 1:
+            add_contact(&book);
+            break;
+        case 2:
+            list_contacts(&book);
+            break;
+        case 3:
+            search_contacts(&book);
+            break;
+        case 4:
+            delete_contact(&book);
+            break;
+        case 5:
+            puts("Goodbye.");
+            book_free(&book);
+            return EXIT_SUCCESS;
+        default:
+            puts("Enter a number from 1 to 5.");
+            break;
+        }
+    }
+
+    book_free(&book);
+    return EXIT_SUCCESS;
+}
+```
+
+## Build and run
+
+```bash
+cc -std=c17 -Wall -Wextra -Wpedantic -g contact_book.c -o contact_book
+./contact_book
+```
+
+A basic session adds two contacts, lists them, searches for `ada`, deletes number 1, and quits. The file should contain the remaining record in the two-line format. Restart the program and confirm that the record is still there.
+
+## Test plan
+
+1. **Add validation**: empty name, whitespace-only name, a name without `@`, two `@` symbols, a missing dot, and whitespace inside an email should all be rejected.
+2. **Boundaries**: enter a 63-character name and a 127-character email. Both should save and reload. Try values one character longer and confirm they are rejected.
+3. **Search**: match by partial name, partial email, different letter case, and a term with no matches.
+4. **Delete**: test 0, a number greater than the list length, non-numeric input, and deleting every record.
+5. **Persistence**: quit and restart after each operation. Check that add and delete are reflected on disk.
+6. **Failure paths**: run in a directory where the data file cannot be created and confirm that the program reports the failure. Feed end of input with `printf '2\n' | ./contact_book` and confirm a clean exit.
+7. **Memory**: run under AddressSanitizer and Valgrind while adding, deleting, and quitting.
+
+## Common mistakes
+
+- Reading names with `scanf("%s")`, which splits on spaces and has no width limit.
+- Forgetting to check `realloc`, then losing the original pointer on failure.
+- Saving after only some commands, so the file and memory disagree.
+- Writing directly to the final file and corrupting it when a write fails midway.
+- Accepting an overlong line after silently truncating it.
+- Using a contact number after a deletion without recomputing the list.
+- Treating the simple email check as a complete validation standard.
+
+## Practice
+
+1. Add an edit command that changes a contact's name or email while preserving its position.
+2. Sort the book alphabetically by name with `qsort`, and keep deletion numbers consistent with the displayed order.
+3. Import and export CSV. Handle commas and quotes in names, and test a malformed file.
+4. Replace the text file with a binary format that writes each field's length before its bytes. Verify the file on load and reject impossible lengths.
+5. Add pagination for long lists, showing ten records at a time with next and previous commands.
+6. Write a command-line mode such as `./contact_book add "Ada" ada@example.com` that performs one operation and exits, while keeping the interactive mode working.

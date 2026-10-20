@@ -39,7 +39,7 @@ export async function generateMetadata({
 
   return pageMetadata({
     title: mod.name,
-    description: `${mod.description} Explore ${mod.lessons.length} free written lessons in the ${canonicalTrack.name} on MERN Learn.`,
+    description: `${mod.description} Explore ${mod.lessons.length} free written lessons in the ${canonicalTrack.name} on Nyxora Sync.`,
     path: canonicalLearnPath(track.key, mod.key),
     keywords: [mod.name, track.name, 'MERN module', 'learn MERN'],
   })

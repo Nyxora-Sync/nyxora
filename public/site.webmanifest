@@ -1,7 +1,7 @@
 {
-  "name": "MERN Learn",
-  "short_name": "MERN Learn",
-  "description": "A free, written MERN stack curriculum from beginner foundations to production mastery.",
+  "name": "Nyxora Sync",
+  "short_name": "Nyxora Sync",
+  "description": "Free written paths for MERN, C, C++, C#, and Python, from beginner foundations to mastery.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

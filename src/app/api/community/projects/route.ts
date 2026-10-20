@@ -2,6 +2,7 @@ import type { Prisma } from '@prisma/client'
 import { auth } from '@/lib/auth/auth'
 import { prisma } from '@/lib/db'
 import { serializeProject } from '@/lib/community-project'
+import { tracks } from '@/lib/curriculum'
 import {
   COMMUNITY_DISABLED,
   communityEnabled,
@@ -29,7 +30,7 @@ export async function GET(request: Request) {
   const userId = session?.user?.id ?? null
 
   const where: Prisma.ProjectWhereInput = {}
-  if (track === 'beginner' || track === 'developer') where.track = track
+  if (track && tracks.some((entry) => entry.key === track)) where.track = track
   if (tag) where.tags = { has: tag }
   if (q) {
     where.OR = [

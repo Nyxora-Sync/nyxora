@@ -5,7 +5,7 @@ import { ProjectDetailClient } from '@/components/community/project-detail-clien
 
 export const metadata: Metadata = {
   title: 'Project',
-  description: 'A project shared by a MERN Learn learner.',
+  description: 'A project shared by a Nyxora Sync learner.',
   robots: { index: false, follow: true },
 }
 

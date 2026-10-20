@@ -1,0 +1,393 @@
+This capstone builds a small HTTP server on POSIX sockets. It listens on a port, accepts one connection at a time, parses a request line and headers, routes two endpoints, and sends a complete response. It also handles Ctrl-C cleanly and explains the concurrency choices a real server would need.
+
+This is teaching code, not production infrastructure. It has no TLS, no keep-alive, no request-body handling, and no defense against slow clients beyond a fixed request buffer. The point is to see the HTTP protocol and the socket API in the same program.
+
+## HTTP on the wire
+
+HTTP is a text protocol. A minimal request looks like this:
+
+```text
+GET /health HTTP/1.1\r\n
+Host: 127.0.0.1:8080\r\n
+User-Agent: curl/8.0\r\n
+\r\n
+```
+
+The first line contains the method, target, and version. Header lines follow, each with a colon. A blank line ends the header block. For a GET request, there is usually no body, so the server can respond after seeing the blank line.
+
+A response has the same shape:
+
+```text
+HTTP/1.1 200 OK\r\n
+Content-Type: text/plain; charset=utf-8\r\n
+Content-Length: 3\r\n
+Connection: close\r\n
+\r\n
+ok\n
+```
+
+`Content-Length` is the number of bytes in the body, not the number of characters in a human sense. The server sends the headers, then exactly that many bytes. This toy server always closes the connection after one response, which makes framing simple.
+
+## The socket lifecycle
+
+A TCP server follows a fixed sequence:
+
+1. `socket(AF_INET, SOCK_STREAM, 0)` creates the endpoint.
+2. `bind` attaches it to an address and port.
+3. `listen` marks it as accepting connections and sets a backlog.
+4. `accept` blocks until a client connects and returns a new socket for that connection.
+5. `recv` and `send` exchange bytes on the connected socket.
+6. `close` releases each client socket and, eventually, the listening socket.
+
+`htons` converts the port to network byte order. `htonl(INADDR_ANY)` binds every local IPv4 interface; use `INADDR_LOOPBACK` if the server should only be reachable from the same machine. `SO_REUSEADDR` allows a restart while old connections linger in the TCP time-wait state.
+
+The address structures and the socket functions are POSIX APIs. They work on Linux and macOS; Windows uses Winsock and different initialization and types. Keep platform-specific networking behind a small abstraction if the program must be portable.
+
+## Parsing safely
+
+The server reads into a fixed buffer and appends a null terminator after every `recv`. It stops when it finds `\r\n\r\n`, the end of the header block, or when the buffer is full. The size limit prevents an attacker from making the server allocate unlimited memory, but the teaching server does not implement a timeout. A client that sends one byte forever can occupy the only worker.
+
+The request line is parsed with bounded conversions:
+
+```c
+char method[16];
+char target[512];
+char version[16];
+
+if (sscanf(request, "%15s %511s %15s", method, target, version) != 3) {
+    /* malformed request */
+}
+```
+
+The numeric widths leave room for the null terminator. Never use unbounded `%s` on network input. The version must be `HTTP/1.1` or `HTTP/1.0`, the method must be GET, and the target must be a known path. The server does not percent-decode paths or route query strings, so `/health?full=1` is treated as an unknown path.
+
+Header parsing is case-insensitive for field names. The `Host` header is extracted into a bounded buffer and logged. Header values are never copied into the response, which avoids header injection in this small design. A production server must also reject conflicting `Content-Length` and `Transfer-Encoding` headers, enforce limits on every field, and handle connection timeouts.
+
+## Responses and routing
+
+Each response uses a status line, a content type, a content length, and `Connection: close`. The helper `send_all` loops because `send` may write fewer bytes than requested. A single `send` call is not a promise that the whole response left the machine.
+
+The router is intentionally small: `/` serves a tiny HTML page, `/health` serves plain text, and everything else gets a 404. A non-GET method gets 405. The root page and health endpoint are enough to demonstrate that routing happens after parsing, not inside the socket setup.
+
+## The complete server
+
+```c
+#define _POSIX_C_SOURCE 200809L
+
+#include <arpa/inet.h>
+#include <errno.h>
+#include <netinet/in.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <strings.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
+#define PORT 8080
+#define REQUEST_MAX 8192
+
+static volatile sig_atomic_t running = 1;
+
+static void handle_shutdown(int signo)
+{
+    (void)signo;
+    running = 0;
+}
+
+static int send_all(int socket_fd, const char *data, size_t length)
+{
+    while (length > 0) {
+        ssize_t sent = send(socket_fd, data, length, 0);
+        if (sent < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return 0;
+        }
+        if (sent == 0) {
+            return 0;
+        }
+        data += sent;
+        length -= (size_t)sent;
+    }
+    return 1;
+}
+
+static void send_response(int socket_fd, int status, const char *reason,
+                          const char *content_type, const char *body)
+{
+    char header[512];
+    int length = snprintf(header, sizeof header,
+                          "HTTP/1.1 %d %s\r\n"
+                          "Content-Type: %s\r\n"
+                          "Content-Length: %zu\r\n"
+                          "Connection: close\r\n"
+                          "\r\n",
+                          status, reason, content_type, strlen(body));
+
+    if (length <= 0 || (size_t)length >= sizeof header) {
+        return;
+    }
+    if (send_all(socket_fd, header, (size_t)length)) {
+        send_all(socket_fd, body, strlen(body));
+    }
+}
+
+static int header_value(const char *request, const char *name,
+                        char *output, size_t capacity)
+{
+    if (capacity == 0) {
+        return 0;
+    }
+
+    const char *line = strstr(request, "\r\n");
+    if (line == NULL) {
+        return 0;
+    }
+    line += 2;
+
+    size_t name_length = strlen(name);
+    while (*line != '\0' && *line != '\r' && *line != '\n') {
+        const char *end = strstr(line, "\r\n");
+        if (end == NULL) {
+            break;
+        }
+        if ((size_t)(end - line) > name_length
+            && strncasecmp(line, name, name_length) == 0
+            && line[name_length] == ':') {
+            const char *value = line + name_length + 1;
+            while (*value == ' ' || *value == '\t') {
+                value++;
+            }
+            size_t value_length = (size_t)(end - value);
+            if (value_length >= capacity) {
+                value_length = capacity - 1;
+            }
+            memcpy(output, value, value_length);
+            output[value_length] = '\0';
+            return 1;
+        }
+        line = end + 2;
+    }
+    return 0;
+}
+
+static void serve_client(int socket_fd)
+{
+    char request[REQUEST_MAX];
+    size_t used = 0;
+    int complete = 0;
+
+    while (used < sizeof request - 1) {
+        ssize_t received = recv(socket_fd, request + used,
+                                sizeof request - 1 - used, 0);
+        if (received < 0) {
+            if (errno == EINTR) {
+                if (!running) {
+                    return;
+                }
+                continue;
+            }
+            return;
+        }
+        if (received == 0) {
+            break;
+        }
+        used += (size_t)received;
+        request[used] = '\0';
+        if (strstr(request, "\r\n\r\n") != NULL) {
+            complete = 1;
+            break;
+        }
+    }
+
+    if (!complete) {
+        send_response(socket_fd, 400, "Bad Request",
+                      "text/plain; charset=utf-8", "Incomplete request\n");
+        return;
+    }
+
+    char method[16];
+    char target[512];
+    char version[16];
+    if (sscanf(request, "%15s %511s %15s", method, target, version) != 3) {
+        send_response(socket_fd, 400, "Bad Request",
+                      "text/plain; charset=utf-8", "Malformed request line\n");
+        return;
+    }
+
+    if (strcmp(version, "HTTP/1.1") != 0
+        && strcmp(version, "HTTP/1.0") != 0) {
+        send_response(socket_fd, 505, "HTTP Version Not Supported",
+                      "text/plain; charset=utf-8", "Unsupported HTTP version\n");
+        return;
+    }
+    if (strcmp(method, "GET") != 0) {
+        send_response(socket_fd, 405, "Method Not Allowed",
+                      "text/plain; charset=utf-8", "Only GET is supported\n");
+        return;
+    }
+
+    char host[128] = "unknown";
+    header_value(request, "Host", host, sizeof host);
+    fprintf(stderr, "%s %s (Host: %s)\n", method, target, host);
+
+    if (strcmp(target, "/") == 0) {
+        const char *body =
+            "<!doctype html><html><head><title>C server</title></head>"
+            "<body><h1>Hello from C</h1>"
+            "<p>Try <a href=\"/health\">/health</a>.</p>"
+            "</body></html>\n";
+        send_response(socket_fd, 200, "OK", "text/html; charset=utf-8", body);
+    } else if (strcmp(target, "/health") == 0) {
+        send_response(socket_fd, 200, "OK",
+                      "text/plain; charset=utf-8", "ok\n");
+    } else {
+        send_response(socket_fd, 404, "Not Found",
+                      "text/plain; charset=utf-8", "Not Found\n");
+    }
+}
+
+int main(void)
+{
+    struct sigaction action;
+    memset(&action, 0, sizeof action);
+    action.sa_handler = handle_shutdown;
+    sigemptyset(&action.sa_mask);
+    if (sigaction(SIGINT, &action, NULL) < 0
+        || sigaction(SIGTERM, &action, NULL) < 0) {
+        perror("sigaction");
+        return 1;
+    }
+
+    struct sigaction ignore;
+    memset(&ignore, 0, sizeof ignore);
+    ignore.sa_handler = SIG_IGN;
+    sigemptyset(&ignore.sa_mask);
+    if (sigaction(SIGPIPE, &ignore, NULL) < 0) {
+        perror("sigaction");
+        return 1;
+    }
+
+    int server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_fd < 0) {
+        perror("socket");
+        return 1;
+    }
+
+    int reuse = 1;
+    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR,
+                   &reuse, sizeof reuse) < 0) {
+        perror("setsockopt");
+        close(server_fd);
+        return 1;
+    }
+
+    struct sockaddr_in address;
+    memset(&address, 0, sizeof address);
+    address.sin_family = AF_INET;
+    address.sin_port = htons(PORT);
+    address.sin_addr.s_addr = htonl(INADDR_ANY);
+
+    if (bind(server_fd, (struct sockaddr *)&address, sizeof address) < 0) {
+        perror("bind");
+        close(server_fd);
+        return 1;
+    }
+    if (listen(server_fd, 16) < 0) {
+        perror("listen");
+        close(server_fd);
+        return 1;
+    }
+
+    printf("Listening on http://127.0.0.1:%d\n", PORT);
+    fflush(stdout);
+
+    while (running) {
+        struct sockaddr_in peer;
+        socklen_t peer_length = sizeof peer;
+        int client_fd = accept(server_fd, (struct sockaddr *)&peer,
+                               &peer_length);
+        if (client_fd < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            if (running) {
+                perror("accept");
+            }
+            break;
+        }
+        if (!running) {
+            close(client_fd);
+            break;
+        }
+        serve_client(client_fd);
+        close(client_fd);
+    }
+
+    close(server_fd);
+    puts("Server stopped.");
+    return 0;
+}
+```
+
+## Shutdown and concurrency
+
+The signal handler only sets `running` to zero. `accept` is interrupted, the loop condition fails, and the listening socket is closed. The handler does not call `printf` or `malloc`, because signal handlers may interrupt those functions. `SIGPIPE` is ignored so a client that disconnects early cannot terminate the process during `send`.
+
+This server handles one client at a time. That is simple and adequate for a demonstration, but a slow or idle client blocks everyone else. Real designs include:
+
+- **Process per connection**: strong isolation, but process creation and memory costs are higher. Useful when handling untrusted work.
+- **Thread per connection**: shares memory and is cheaper than a process, but introduces races, locking, and a thread limit.
+- **Event loop**: one or a few threads handle many sockets with nonblocking I/O. It scales well but makes parsing and state management more complex.
+- **Connection limits and timeouts**: necessary in every design to prevent resource exhaustion.
+
+Processes are often safer when a request may crash or corrupt memory, because each process has its own address space. Threads are convenient when many connections must share a cache or other in-memory state. Neither choice removes the need for limits.
+
+## Test with curl
+
+Build and start the server:
+
+```bash
+cc -std=c17 -Wall -Wextra -Wpedantic -g http_server.c -o http_server
+./http_server
+```
+
+In another terminal:
+
+```bash
+curl -i http://127.0.0.1:8080/
+curl -i http://127.0.0.1:8080/health
+curl -i http://127.0.0.1:8080/missing
+curl -i -X POST http://127.0.0.1:8080/health
+curl -i -H 'Host: example.test' http://127.0.0.1:8080/health
+```
+
+You should see 200 for the root and health endpoints, 404 for the unknown path, and 405 for POST. The server log prints the parsed method, target, and host. Press Ctrl-C and confirm that it prints `Server stopped.` and returns to the shell.
+
+To test a malformed request without curl, send raw bytes with `printf` and `nc` if it is installed. Send a request with no blank line and confirm the 400 response. Then try a request line with a missing target.
+
+## Common mistakes
+
+- Ignoring short writes from `send` and assuming the entire response went out.
+- Using unbounded `%s` while parsing network input.
+- Reading with `recv` once and assuming the whole request arrived.
+- Forgetting that header names are case-insensitive.
+- Sending a response body with a `Content-Length` that does not match its byte count.
+- Treating a request as a C string before adding the terminator.
+- Calling unsafe functions from a signal handler.
+- Assuming one client connection is the same as one request in every protocol design.
+- Exposing `INADDR_ANY` on a machine where the service should only be local.
+
+## Practice
+
+1. Add a `/version` endpoint that returns plain text and a 200 status. Confirm the body length with curl.
+2. Parse and route a query string for `/greet?name=Ada`, with a bounded, validated name and a fallback when it is missing.
+3. Add a request read timeout with `SO_RCVTIMEO` and return 408 when the client sends nothing in time.
+4. Refactor the server to handle each connection in a detached thread. Add a connection limit and protect any shared counters with a mutex.
+5. Add a process-per-connection version with `fork` and `waitpid`. Explain why zombie handling and file-descriptor inheritance matter.
+6. Write a test script that starts the server, checks several HTTP status codes with curl, sends one malformed request, and verifies graceful shutdown.
+7. Run the server with only loopback binding and confirm that it is not reachable from another machine.
+8. Add a minimal request log with timestamps and response status, keeping every logged field bounded and sanitized.

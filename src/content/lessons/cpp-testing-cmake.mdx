@@ -1,0 +1,232 @@
+A test suite is not proof that a program is correct, but it is a reliable record of the behavior you have checked. CMake turns that record into a repeatable build, and sanitizers and static analysis catch classes of defects that ordinary tests miss. This lesson builds a small library with tests, then adds the engineering around it: presets, sanitizer builds, analysis, and pinned dependencies.
+
+## Structure tests around behavior
+
+A useful test has three parts: arrange the inputs, perform one action, and assert the observable result. Test the public contract, not private helper functions. A test that breaks whenever a private implementation detail changes is a maintenance cost with little diagnostic value.
+
+For a small calculator library, the public header might look like this:
+
+```cpp
+// include/calc/calc.hpp
+#pragma once
+
+#include <optional>
+#include <string_view>
+
+int add(int lhs, int rhs);
+std::optional<int> parsePort(std::string_view text);
+```
+
+`parsePort` accepts a decimal TCP port from 1 through 65535 and returns `std::nullopt` for anything else. That range gives us boundaries worth testing: zero, one, 65535, 65536, an empty string, and trailing garbage.
+
+```cpp
+// src/calc.cpp
+#include "calc/calc.hpp"
+
+#include <charconv>
+#include <system_error>
+
+int add(int lhs, int rhs) {
+    return lhs + rhs;
+}
+
+std::optional<int> parsePort(std::string_view text) {
+    int value = 0;
+    const auto [ptr, error] = std::from_chars(
+        text.data(), text.data() + text.size(), value);
+
+    if (error != std::errc{} ||
+        ptr != text.data() + text.size() ||
+        value < 1 || value > 65535) {
+        return std::nullopt;
+    }
+    return value;
+}
+```
+
+## GoogleTest basics
+
+Add GoogleTest through CMake's `FetchContent` module and write tests against the public header:
+
+```cpp
+// tests/test_calc.cpp
+#include <gtest/gtest.h>
+
+#include "calc/calc.hpp"
+
+TEST(AddTest, AddsTwoPositiveNumbers) {
+    EXPECT_EQ(add(2, 3), 5);
+}
+
+TEST(AddTest, HandlesNegativeNumbers) {
+    EXPECT_EQ(add(-4, 1), -3);
+}
+
+TEST(ParsePortTest, AcceptsTheLowestValidPort) {
+    const auto port = parsePort("1");
+    ASSERT_TRUE(port.has_value());
+    EXPECT_EQ(*port, 1);
+}
+
+TEST(ParsePortTest, RejectsZeroAndTooLargeValues) {
+    EXPECT_FALSE(parsePort("0").has_value());
+    EXPECT_FALSE(parsePort("65536").has_value());
+}
+
+TEST(ParsePortTest, RejectsTrailingCharacters) {
+    EXPECT_FALSE(parsePort("8080x").has_value());
+    EXPECT_FALSE(parsePort("").has_value());
+}
+```
+
+`EXPECT_EQ` records a failure and continues. `ASSERT_TRUE` stops the current test, which is appropriate when the rest of the test would dereference an empty optional. Keep one reason for failure per test where practical, and name tests after the behavior, not after the function under test alone.
+
+## CMake targets
+
+A library target lets the tests link the same code the application uses. Do not compile the implementation twice with different flags.
+
+```cmake
+# CMakeLists.txt
+cmake_minimum_required(VERSION 3.24)
+project(calc LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+option(ENABLE_SANITIZERS "Build with AddressSanitizer and UBSan" OFF)
+if(ENABLE_SANITIZERS AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=address,undefined)
+endif()
+
+add_library(calc src/calc.cpp)
+target_include_directories(calc PUBLIC include)
+
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(calc PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
+endif()
+
+enable_testing()
+add_subdirectory(tests)
+```
+
+```cmake
+# tests/CMakeLists.txt
+include(FetchContent)
+
+FetchContent_Declare(
+    googletest
+    URL https://github.com/google/googletest/archive/refs/tags/v1.14.0.tar.gz
+)
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(googletest)
+
+add_executable(calc_tests test_calc.cpp)
+target_link_libraries(calc_tests PRIVATE calc GTest::gtest_main)
+
+include(GoogleTest)
+gtest_discover_tests(calc_tests)
+```
+
+`GTest::gtest_main` supplies `main`, so the test file must not define another one. `gtest_discover_tests` registers each GoogleTest case with CTest, allowing `ctest` to run and report them individually.
+
+## Presets make builds repeatable
+
+CMake presets store generator, build directory, and cache settings in version-controlled JSON:
+
+```json
+{
+  "version": 5,
+  "configurePresets": [
+    {
+      "name": "debug",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "release",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "debug", "configurePreset": "debug" },
+    { "name": "release", "configurePreset": "release" }
+  ],
+  "testPresets": [
+    {
+      "name": "debug",
+      "configurePreset": "debug",
+      "output": { "outputOnFailure": true }
+    }
+  ]
+}
+```
+
+```bash
+cmake --preset debug
+cmake --build --preset debug
+ctest --preset debug
+```
+
+A fresh machine now needs three commands, not a paragraph of flags. The `compile_commands.json` file produced in the debug build is used by clangd, clang-tidy, and many editors to understand include paths and standard flags.
+
+## Sanitizers catch what assertions miss
+
+Rebuild with sanitizers enabled and run the same tests:
+
+```bash
+cmake --preset debug -DENABLE_SANITIZERS=ON
+cmake --build --preset debug
+ctest --preset debug
+```
+
+AddressSanitizer detects out-of-bounds access, use-after-free, and leaks. UndefinedBehaviorSanitizer detects signed integer overflow, invalid shifts, misaligned access, and similar operations that the standard does not define. A sanitizer build is slower and uses more memory, so use it for tests and debugging, not for performance measurements.
+
+ThreadSanitizer is separate: build with `-fsanitize=thread` in its own directory. Do not combine it with AddressSanitizer in one build, because the runtimes conflict.
+
+## Static analysis and warnings
+
+Compiler warnings are the cheapest static analysis. `-Wall -Wextra -Wpedantic` should be clean before code review; add `-Wconversion` for projects where implicit narrowing is a recurring risk. Do not add `-Werror` to a local build until the warning set is stable, or a compiler upgrade will block work for reasons unrelated to the change.
+
+For deeper checks, use the compile database:
+
+```bash
+clang-tidy -p build/debug src/calc.cpp
+cppcheck --enable=warning,performance,portability --std=c++20 src
+```
+
+`clang-tidy` needs a `.clang-tidy` configuration to select checks; start with a small, explicit set rather than enabling every check. `cppcheck` is a separate parser and catches some issues a compiler does not. Neither replaces tests, and neither should be treated as a score to maximize.
+
+## Dependencies without surprises
+
+`FetchContent` is convenient for small, header-only or test dependencies. Pin a release tag or commit, and ideally a URL hash, so the build cannot silently change. Fetching during configure requires network access and makes the build slower; in restricted environments, pre-populate the source directory or point `FETCHCONTENT_SOURCE_DIR_GOOGLETEST` at a vendored copy.
+
+For larger dependency graphs, a package manager such as vcpkg or Conan is a better fit. Both can produce a manifest and lock versions, and CMake's `find_package` consumes the result. Whichever route you choose, keep dependency versions in version control and document how a new developer provisions them.
+
+## Common mistakes
+
+- Writing tests that only cover the happy path and never the boundaries.
+- Testing private implementation details, then rewriting tests after every refactor.
+- Forgetting `enable_testing()` or adding the test subdirectory before the library target exists.
+- Linking `GTest::gtest_main` while also defining `main` in the test file.
+- Running sanitizer tests against a stale build directory.
+- Fetching an unpinned dependency from a branch, so yesterday's build cannot be reproduced.
+- Treating a warning-free build as proof of correctness.
+
+## Practice
+
+1. Create the `calc` project with `add` and `parsePort`. Write the tests shown, then add cases for a negative port, a value with leading whitespace, and the exact upper boundary.
+2. Add a test that verifies `parsePort` rejects a plus sign and one that verifies it accepts `"65535"`.
+3. Configure and run the debug preset, then the release preset. Confirm that CTest reports each test separately.
+4. Build with sanitizers and intentionally introduce an out-of-bounds read in a temporary test. Confirm that AddressSanitizer reports it, then remove the bug.
+5. Add a small `.clang-tidy` file with one check for unused variables and run clang-tidy using the compile database.
+6. Break the network by clearing the build directory and configuring with `FETCHCONTENT_FULLY_DISCONNECTED=ON`. Explain why the configure fails and what a vendored dependency would change.

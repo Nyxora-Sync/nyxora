@@ -12,6 +12,7 @@ const staticPages: Array<{
 }> = [
   { path: '/', priority: 1, changeFrequency: 'weekly' },
   { path: '/learn', priority: 0.9, changeFrequency: 'weekly' },
+  { path: '/learn/languages', priority: 0.9, changeFrequency: 'weekly' },
   { path: '/roadmap', priority: 0.8, changeFrequency: 'monthly' },
   { path: '/resources', priority: 0.7, changeFrequency: 'monthly' },
   { path: '/playground', priority: 0.6, changeFrequency: 'monthly' },

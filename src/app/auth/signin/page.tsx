@@ -3,7 +3,7 @@ import { pageMetadata } from '@/lib/seo'
 
 export const metadata = pageMetadata({
   title: 'Sign In',
-  description: 'Sign in to MERN Learn to sync your progress across devices.',
+  description: 'Sign in to Nyxora Sync to sync your progress across devices.',
   path: '/auth/signin',
   noIndex: true,
 })

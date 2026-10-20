@@ -1,5 +1,27 @@
+import { languageTracks } from './language-curriculum'
+
 export type ResourceType = 'video' | 'article' | 'docs' | 'interactive' | 'project' | 'cheatsheet'
 export type Difficulty = 'beginner' | 'intermediate' | 'advanced'
+export type TrackCategory = 'web-development' | 'programming-languages'
+
+export interface TrackCategoryInfo {
+  id: TrackCategory
+  name: string
+  description: string
+}
+
+export const trackCategories: TrackCategoryInfo[] = [
+  {
+    id: 'web-development',
+    name: 'Web Development',
+    description: 'Learn the web from first principles, then build and operate full-stack applications.',
+  },
+  {
+    id: 'programming-languages',
+    name: 'Programming Languages',
+    description: 'Build durable language foundations, then take each path from beginner to mastery.',
+  },
+]
 
 export interface Resource {
   type: ResourceType
@@ -26,6 +48,7 @@ export interface Lesson {
     description: string
   }
   keyTakeaways: string[]
+  isProject?: boolean
 }
 
 export interface Module {
@@ -45,6 +68,7 @@ export interface Track {
   key: string
   name: string
   description: string
+  category: TrackCategory
   icon: string
   color: string
   modules: Module[]
@@ -2760,6 +2784,7 @@ export const tracks: Track[] = [
     key: 'beginner',
     name: 'Beginner Track',
     description: 'No coding experience? Start here. We\'ll guide you from zero to full-stack developer.',
+    category: 'web-development',
     icon: 'BookOpen',
     color: 'emerald',
     modules: beginnerModules,
@@ -2769,6 +2794,7 @@ export const tracks: Track[] = [
     key: 'developer',
     name: 'Developer Track',
     description: 'Already know JavaScript? Skip the basics, master the MERN stack, then go deeper with TypeScript, testing, security, DevOps, architecture, performance, and a master capstone.',
+    category: 'web-development',
     icon: 'Code2',
     color: 'violet',
     modules: developerModules,
@@ -2778,10 +2804,12 @@ export const tracks: Track[] = [
     key: 'specializations',
     name: 'Specializations',
     description: 'Completed the core MERN curriculum? Pick a direction and go deeper: production Next.js, cloud DevOps, scalable systems, or React Native.',
+    category: 'web-development',
     icon: 'Sparkles',
     color: 'cyan',
     modules: specializationModules,
   },
+  ...languageTracks,
 ]
 
 export function getTrack(key: string): Track | undefined {

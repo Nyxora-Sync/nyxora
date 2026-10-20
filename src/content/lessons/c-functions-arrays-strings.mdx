@@ -1,0 +1,215 @@
+A function gives a name to a reusable operation. An array gives a name to a block of same-sized values. A C string is just an array of characters with a null terminator. These three ideas fit together, and most early C bugs come from misunderstanding their boundaries.
+
+## Declaring functions before use
+
+C reads a source file from top to bottom. A function must be declared before it is called, even if its body appears later. The declaration, or **prototype**, tells the compiler the return type and parameter types:
+
+```c
+#include <stdio.h>
+
+static int clamp(int value, int low, int high);
+
+int main(void)
+{
+    printf("%d\n", clamp(12, 0, 10));
+    return 0;
+}
+
+static int clamp(int value, int low, int high)
+{
+    if (value < low) {
+        return low;
+    }
+    if (value > high) {
+        return high;
+    }
+    return value;
+}
+```
+
+`static` at file scope gives the function internal linkage: it is visible only in this translation unit. Use it for helpers that are not part of the module's public interface. Without a prototype, older C allowed an implicit declaration, but modern compilers rightly treat that as an error or a serious warning.
+
+Keep prototypes in a header when several source files need them. A prototype is a promise about the function's interface; the definition fulfills it.
+
+## Parameters are copied
+
+C passes every ordinary argument by value. The function receives a copy, so assigning to a parameter does not change the caller's variable:
+
+```c
+#include <stdio.h>
+
+void add_one(int x)
+{
+    x = x + 1;
+}
+
+int main(void)
+{
+    int n = 5;
+    add_one(n);
+    printf("%d\n", n); /* still 5 */
+    return 0;
+}
+```
+
+To let a function modify the caller's value, pass its address with a pointer. That is the mechanism behind `scanf`.
+
+## Scope and lifetime
+
+A variable declared inside a block is local to that block. A local variable normally lives on the stack for the duration of its function call. Add `static` to a local variable and it keeps its value between calls:
+
+```c
+static int next_id(void)
+{
+    static int counter = 0;
+    counter++;
+    return counter;
+}
+```
+
+The first call returns 1, the second returns 2, and so on. `static` locals are initialized once. They are not thread-safe, because all calls share the same storage. Avoid file-scope mutable variables unless a design clearly calls for them; hidden shared state makes programs hard to reason about.
+
+## Arrays and bounds
+
+An array stores a fixed number of elements of one type:
+
+```c
+int scores[5] = {90, 82, 77, 95, 88};
+```
+
+Valid indexes are 0 through 4. C does **not** check bounds at runtime. Reading or writing `scores[5]` is undefined behavior, even if it appears to work. Use a size that is part of the data, not a guess:
+
+```c
+#include <stddef.h>
+
+long sum(const int values[], size_t count)
+{
+    long total = 0;
+    for (size_t i = 0; i < count; i++) {
+        total += values[i];
+    }
+    return total;
+}
+```
+
+Inside that function, `values` is a pointer to the first element, not an array object. The `[]` notation is a convenience. This is called **array decay**, and it is why the length must be passed separately.
+
+The `sizeof` operator gives the size in bytes. For a real array in the same scope:
+
+```c
+int scores[5] = {90, 82, 77, 95, 88};
+size_t count = sizeof scores / sizeof scores[0]; /* 5 */
+```
+
+Inside a function where `scores` has decayed to a pointer, `sizeof scores` is the size of the pointer, not the array. A common bug is computing a count there and getting 8 instead of 5.
+
+## Strings are null-terminated character arrays
+
+A C string is a sequence of characters followed by a null character, `'\0'`. The terminator is not part of the visible text, but it tells functions where the data ends.
+
+```c
+#include <stdio.h>
+#include <string.h>
+
+int main(void)
+{
+    char name[16] = "Ada";
+    const char *message = "hello";
+
+    printf("%s has %zu characters\n", name, strlen(name));
+    printf("%zu bytes reserved for name\n", sizeof name);
+    printf("%zu bytes in \"%s\"\n", sizeof "hello", message);
+    return 0;
+}
+```
+
+`strlen` counts characters before the null, excluding it. `sizeof name` is the full array size, 16. `sizeof "hello"` includes the terminator, so it is 6. Do not confuse the two concepts.
+
+A string literal such as `"hello"` should be accessed through `const char *`; modifying it is undefined behavior. A writable array must be initialized from the literal instead:
+
+```c
+char greeting[] = "hello"; /* writable copy, 6 bytes */
+greeting[0] = 'H';
+```
+
+## Copying and concatenating safely
+
+`strcpy` copies until it finds a null terminator, with no idea how large the destination is. If the source is too large, it writes past the destination and corrupts memory. `strncpy` limits the number of bytes copied, but it has two traps: it pads the destination with nulls, and if the source length is at least the limit, it may leave no terminator at all.
+
+The safest portable approach is to check lengths and copy an exact number of bytes:
+
+```c
+#include <stddef.h>
+#include <string.h>
+
+int copy_name(char *dest, size_t capacity, const char *src)
+{
+    size_t length = strlen(src);
+    if (length >= capacity) {
+        return 0;
+    }
+    memcpy(dest, src, length + 1);
+    return 1;
+}
+```
+
+For building text, `snprintf` is usually clearer:
+
+```c
+char path[64];
+int written = snprintf(path, sizeof path, "%s/%s", directory, filename);
+if (written < 0 || (size_t)written >= sizeof path) {
+    /* the result was truncated */
+}
+```
+
+`snprintf` returns the number of characters it wanted to write, excluding the terminator. If that number is greater than or equal to the buffer size, truncation occurred.
+
+## Multidimensional arrays
+
+A two-dimensional array is an array of arrays:
+
+```c
+int grid[2][3] = {
+    {1, 2, 3},
+    {4, 5, 6}
+};
+```
+
+Elements are stored row by row. When passing such an array to a function, the compiler needs every dimension except the first:
+
+```c
+#include <stddef.h>
+#include <stdio.h>
+
+void print_grid(const int rows[][3], size_t row_count)
+{
+    for (size_t r = 0; r < row_count; r++) {
+        for (int c = 0; c < 3; c++) {
+            printf("%d ", rows[r][c]);
+        }
+        putchar('\n');
+    }
+}
+```
+
+The inner dimension is part of the parameter type. It tells the compiler how far to jump for each row.
+
+## Common mistakes
+
+- Reading or writing one element past the end of an array.
+- Using `sizeof` on a pointer and assuming it is the array length.
+- Calling `strlen` on a character array that has no null terminator.
+- Using `strcpy` with an unchecked source.
+- Assuming `strncpy` always terminates the destination.
+- Modifying a string literal through a `char *`.
+- Forgetting a function prototype and letting the compiler guess.
+
+## Practice
+
+1. Write `int max_of(const int values[], size_t count)` and test it with arrays of different lengths.
+2. Write a function that reverses a string in place. Pass a writable array, swap characters, and print the result.
+3. Implement a safe string-copy function with a capacity parameter. Test exact fit, one byte too small, and an empty source.
+4. Create a 3-by-4 integer grid, print it, then print the sum of each row. Pass the grid to a function rather than looping in `main`.
+5. Write a function that counts how many times a character appears in a string. Compare the result with `strchr` for a few cases.
+6. Break a program on purpose by writing past the end of an array. Then rebuild with `-fsanitize=address` and observe the report.

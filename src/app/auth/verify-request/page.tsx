@@ -67,7 +67,7 @@ function VerifyRequestContent() {
                     <p className="font-medium mb-2">What happens next:</p>
                     <ul className="space-y-1 text-muted-foreground">
                       <li className="flex items-center gap-2"><CheckCircle className="h-4 w-4 text-emerald-500" aria-hidden="true" />Open your email inbox</li>
-                      <li className="flex items-center gap-2"><CheckCircle className="h-4 w-4 text-emerald-500" aria-hidden="true" />Find the email from MERN Learn</li>
+                      <li className="flex items-center gap-2"><CheckCircle className="h-4 w-4 text-emerald-500" aria-hidden="true" />Find the email from Nyxora Sync</li>
                       <li className="flex items-center gap-2"><CheckCircle className="h-4 w-4 text-emerald-500" aria-hidden="true" />Click the sign-in link</li>
                       <li className="flex items-center gap-2"><CheckCircle className="h-4 w-4 text-emerald-500" aria-hidden="true" />Start learning!</li>
                     </ul>

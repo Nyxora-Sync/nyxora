@@ -1,0 +1,234 @@
+Tests are not proof that code is correct. They are a fast, repeatable record of the behavior you care about, written in a form the next person can run. pytest makes that record cheap to write: plain functions, ordinary `assert` statements, and fixtures that replace setup boilerplate.
+
+## Layout and the first test
+
+Mirror the source tree under `tests/`:
+
+```text
+src/taskman/
+├── storage.py
+└── tasks.py
+tests/
+├── test_storage.py
+└── test_tasks.py
+```
+
+A test is a function whose name starts with `test_`. Arrange the input, act on the code, assert the result:
+
+```python
+# tests/test_tasks.py
+import pytest
+
+from taskman.tasks import new_task, validate_title
+
+
+def test_new_task_normalizes_tags():
+    task = new_task(1, "  Write report  ", ["Work", "work", " urgent "])
+
+    assert task["title"] == "Write report"
+    assert task["tags"] == ["urgent", "work"]
+    assert task["done"] is False
+
+
+def test_empty_title_is_rejected():
+    with pytest.raises(ValueError, match="empty"):
+        validate_title("   ")
+```
+
+Run the suite from the project root:
+
+```bash
+python3 -m pytest -q
+python3 -m pytest tests/test_tasks.py::test_new_task_normalizes_tags -q
+```
+
+The second command runs one test by node ID. Learn it early; rerunning a single failing test is the normal debugging loop.
+
+## Fixtures
+
+Fixtures provide setup and cleanup. pytest injects them by parameter name:
+
+```python
+from pathlib import Path
+
+import pytest
+
+from taskman.storage import StorageError, load_tasks, save_tasks
+from taskman.tasks import new_task
+
+
+@pytest.fixture
+def tasks_file(tmp_path: Path) -> Path:
+    path = tmp_path / "tasks.json"
+    save_tasks(path, [new_task(1, "Existing task")])
+    return path
+
+
+def test_load_returns_saved_tasks(tasks_file: Path):
+    tasks = load_tasks(tasks_file)
+    assert [task["title"] for task in tasks] == ["Existing task"]
+```
+
+`tmp_path` is a built-in fixture that creates a unique temporary directory per test and cleans it up. Never write tests against the real `tasks.json`.
+
+Fixtures can use `yield` when teardown is required:
+
+```python
+import sqlite3
+
+import pytest
+
+
+@pytest.fixture
+def database():
+    connection = sqlite3.connect(":memory:")
+    yield connection
+    connection.close()
+```
+
+Put shared fixtures in `tests/conftest.py`. pytest discovers that file automatically without imports. Keep fixture scope narrow by default; a session-scoped fixture that mutates state is a common source of tests that pass alone and fail together.
+
+## Parametrization
+
+When the same behavior has several inputs, parametrize instead of copying the test:
+
+```python
+import pytest
+
+
+def parse_tags(raw: str) -> list[str]:
+    return sorted({part.strip().lower() for part in raw.split(",") if part.strip()})
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (" Work ", ["work"]),
+        ("work, urgent", ["urgent", "work"]),
+        ("", []),
+        (" , , ", []),
+    ],
+)
+def test_parse_tags(raw: str, expected: list[str]):
+    assert parse_tags(raw) == expected
+```
+
+Each case appears separately in the output, so a failure names the exact input. Add an `id` list when the values are hard to read.
+
+## Testing exceptions
+
+Use `pytest.raises` and assert on the message when the message is part of the contract:
+
+```python
+def test_missing_file_is_empty(tmp_path: Path):
+    assert load_tasks(tmp_path / "missing.json") == []
+
+
+def test_malformed_json_names_the_file(tmp_path: Path):
+    path = tmp_path / "broken.json"
+    path.write_text("{not json", encoding="utf-8")
+
+    with pytest.raises(StorageError, match="broken.json"):
+        load_tasks(path)
+```
+
+Avoid asserting an entire traceback or an exact error string that will change with punctuation. Match the meaningful fragment. If code is supposed to return an error value rather than raise, test that value instead.
+
+## Mocking boundaries, not internals
+
+A mock replaces a collaborator you do not control. Good candidates are HTTP APIs, clocks, random generators, email senders, and cloud storage. Bad candidates are the private helper functions inside the code under test.
+
+Prefer dependency injection, which makes fakes ordinary objects:
+
+```python
+class FakeNotifier:
+    def __init__(self) -> None:
+        self.messages: list[str] = []
+
+    def send(self, message: str) -> None:
+        self.messages.append(message)
+
+
+class MemoryStorage:
+    def __init__(self) -> None:
+        self.items: dict[str, str] = {}
+
+    def save(self, key: str, value: str) -> None:
+        self.items[key] = value
+
+    def load(self, key: str) -> str | None:
+        return self.items.get(key)
+
+
+class TaskService:
+    def __init__(self, storage: MemoryStorage, notifier: FakeNotifier) -> None:
+        self.storage = storage
+        self.notifier = notifier
+
+    def complete(self, key: str) -> None:
+        if self.storage.load(key) is None:
+            raise KeyError(key)
+        self.storage.save(key, "done")
+        self.notifier.send(f"Completed {key}")
+
+
+def test_completion_notifies():
+    notifier = FakeNotifier()
+    storage = MemoryStorage()
+    storage.save("1", "open")
+    service = TaskService(storage=storage, notifier=notifier)
+    service.complete("1")
+    assert notifier.messages == ["Completed 1"]
+    assert storage.load("1") == "done"
+```
+
+When you must patch, target where the name is looked up, not where it was defined:
+
+```python
+import os
+from pathlib import Path
+
+
+def default_path() -> Path:
+    return Path(os.environ.get("TASKMAN_FILE", "tasks.json"))
+
+
+def test_uses_environment(monkeypatch):
+    monkeypatch.setenv("TASKMAN_FILE", "custom.json")
+    assert default_path() == Path("custom.json")
+```
+
+`monkeypatch` automatically restores environment variables, attributes, and the working directory after the test. For HTTP, use a library such as `respx` with httpx or `responses` with requests, so you assert on the request and supply a realistic response. Mocking the client method itself proves little about URL, headers, or JSON handling.
+
+## Coverage and test boundaries
+
+Measure coverage to find untested branches, not to hit a number:
+
+```bash
+python3 -m pip install pytest-cov
+python3 -m pytest --cov=taskman --cov-branch --cov-report=term-missing
+```
+
+The missing-lines report is more useful than the percentage. A line can execute without being meaningfully tested, and a high percentage says nothing about whether the assertions are good.
+
+Keep most tests fast and isolated: validation, filtering, pricing, parsing. Add a smaller set of integration tests that exercise real files, a temporary database, or the CLI through `subprocess`. Those catch wiring mistakes that unit tests cannot. If an integration test needs the network, mark it and run it in a separate job; ordinary tests should pass offline.
+
+## Deterministic tests
+
+A deterministic test gives the same result on every machine, in any order, at any time. Use `tmp_path` for files, `monkeypatch` for environment variables, and a fixed timestamp injected into code that records time. Seed random data explicitly. Avoid `sleep` for synchronization; wait on a condition or inject a clock. Make each test create its own state instead of depending on a previous test.
+
+Common failures:
+
+- A fixture returns a shared mutable list, and one test appends to it.
+- Tests rely on files left by another test.
+- A mock asserts an internal call order that the user never observes.
+- The test passes only in the developer's timezone or locale.
+- Assertions check log text rather than return values or exit codes.
+
+## Practice
+
+1. Write tests for `validate_title`, `filter_tasks`, and `load_tasks`, using `tmp_path` for the file and parametrization for at least four input cases.
+2. Add a `FakeNotifier` and test that completing a task sends exactly one message. Then test that completing an unknown ID sends none.
+3. Use `monkeypatch` to set an environment variable that controls the task file path, and verify the default path changes.
+4. Corrupt a JSON file and assert that `StorageError` names the file. Then make the file contain a JSON object instead of a list and test that error too.
+5. Run coverage with branch reporting. Add tests for the uncovered branches, then inspect whether any covered line still lacks a meaningful assertion.

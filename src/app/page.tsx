@@ -7,6 +7,7 @@ import { GithubIcon } from '@/components/icons/brand'
 import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
 import { HeroVisual } from '@/components/home/hero-visual'
+import { LanguagePaths } from '@/components/language-paths'
 import { SpecializationsBanner } from '@/components/specializations-banner'
 import { Reveal } from '@/components/motion/reveal'
 import { cn, getAccent } from '@/lib/utils'
@@ -27,8 +28,8 @@ const features = [
   },
   {
     icon: BookOpen,
-    title: 'Core Tracks + Specializations',
-    description: 'Start with beginner foundations or go straight to MERN. Then choose a specialization and ship something more ambitious.',
+    title: 'MERN + Language Paths',
+    description: 'Start with web foundations or learn C, C++, C#, and Python from first program to mastery. Then specialize when you are ready.',
     color: 'violet',
   },
   {
@@ -64,6 +65,7 @@ const tracks = curriculumTracks.map((track) => {
     key: track.key,
     name: track.name,
     description: track.description,
+    category: track.category,
     duration: `~${Math.round(totalHours / 10)} wks`,
     modules: track.modules.length,
     lessons,
@@ -75,7 +77,9 @@ const tracks = curriculumTracks.map((track) => {
   }
 })
 
-const coreTracks = tracks.filter((track) => track.key !== 'specializations')
+const coreTracks = tracks.filter(
+  (track) => track.category === 'web-development' && track.key !== 'specializations'
+)
 
 const lessonIds = new Set<string>()
 const resourceUrls = new Set<string>()
@@ -86,7 +90,7 @@ for (const track of curriculumTracks) {
     for (const lesson of mod.lessons) {
       lessonIds.add(lesson.id)
       for (const resource of lesson.resources) resourceUrls.add(resource.url)
-      if (lesson.resources.some((resource) => resource.type === 'project')) {
+      if (lesson.isProject || lesson.resources.some((resource) => resource.type === 'project')) {
         projectLessonIds.add(lesson.id)
       }
     }
@@ -105,10 +109,10 @@ const stats = [
 ]
 
 export const metadata = pageMetadata({
-  title: 'MERN Learn — Master the MERN Stack for Free',
-  description: `Learn MongoDB, Express, React, and Node.js with ${totalLessons} free written lessons, playgrounds, progress tracking, and a full roadmap from beginner to production.`,
+  title: 'Nyxora Sync — Learn MERN, C, C++, C#, and Python for Free',
+  description: `Learn the MERN stack, C, C++, C#, and Python with ${totalLessons} free written lessons, real projects, playgrounds, progress tracking, and complete beginner-to-mastery roadmaps.`,
   path: '/',
-  keywords: ['MERN stack', 'learn MERN', 'MongoDB', 'Express', 'React', 'Node.js', 'free coding curriculum'],
+  keywords: ['MERN stack', 'learn MERN', 'learn Python', 'learn C', 'learn C++', 'learn C#', 'MongoDB', 'Express', 'React', 'Node.js', 'free coding curriculum'],
 })
 
 export default function HomePage() {
@@ -123,18 +127,19 @@ export default function HomePage() {
             <div className="text-center">
               <div className="inline-flex items-center gap-2 rounded-full bg-emerald-100/50 px-4 py-1.5 text-sm font-medium text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400 mb-6">
                 <span className="relative flex h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" aria-hidden="true" />
-                <span>v2.0 launched — Now with interactive playgrounds!</span>
+                <span>Now with C, C++, C#, and Python language paths</span>
               </div>
               <h1 className="mt-6 text-4xl font-bold tracking-tight sm:text-6xl lg:text-7xl">
-                Master the{' '}
+                Learn to build.{' '}
                 <span className="bg-gradient-to-r from-emerald-500 via-violet-500 to-amber-500 bg-clip-text text-transparent">
-                  MERN Stack
+                  Go deeper.
                 </span>{' '}
-                from Zero to Mastery
+                Master the craft.
               </h1>
               <p className="mt-6 max-w-2xl mx-auto text-lg text-muted-foreground sm:text-xl">
-                Learn MongoDB, Express, React, and Node.js with curated free resources, interactive code playgrounds,
-                progress tracking, and a supportive community. 100% free, open source, no paywalls.
+                Master the MERN stack, then learn C, C++, C#, and Python through written lessons,
+                real projects, interactive playgrounds, progress tracking, and a supportive community.
+                100% free, open source, no paywalls.
               </p>
               <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
                 <Button size="lg" asChild className="gap-2 w-full sm:w-auto">
@@ -183,9 +188,13 @@ export default function HomePage() {
         <section className="py-20 sm:py-24 bg-muted/30">
           <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <div className="text-center max-w-3xl mx-auto mb-16">
-              <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">Choose Your Learning Path</h2>
+              <p className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+                Web Development
+              </p>
+              <h2 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">Choose Your Learning Path</h2>
               <p className="mt-4 text-lg text-muted-foreground">
-                Two core tracks, same destination. Pick based on your experience level, then specialize when you are ready.
+                Two core MERN tracks, same destination. Pick based on your experience level, then
+                specialize or add a language path when you are ready.
               </p>
             </div>
             <div className="grid gap-8 md:grid-cols-2">
@@ -236,6 +245,33 @@ export default function HomePage() {
             </div>
           </Reveal>
           <SpecializationsBanner className="mt-8" />
+        </section>
+
+        {/* Language Paths */}
+        <section id="languages" className="py-20 sm:py-24 scroll-mt-20">
+          <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <div className="mb-12 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+              <div className="max-w-2xl">
+                <p className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+                  Programming Languages
+                </p>
+                <h2 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">
+                  Go deeper than the framework
+                </h2>
+                <p className="mt-4 text-lg text-muted-foreground">
+                  Four complete paths from beginner to mastery. Learn memory, types, concurrency, and
+                  production tooling — then build something real in each language.
+                </p>
+              </div>
+              <Button asChild variant="outline" className="gap-2 self-start sm:self-auto">
+                <Link href="/learn/languages">
+                  Explore languages
+                  <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                </Link>
+              </Button>
+            </div>
+            <LanguagePaths />
+          </Reveal>
         </section>
 
         {/* Features */}

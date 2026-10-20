@@ -1,0 +1,228 @@
+Concurrency is how a program does more than one thing at once. In C, that usually means either multiple **processes**, which have separate address spaces, or multiple **threads**, which share one address space. The distinction determines what can go wrong and what isolation you get.
+
+This lesson covers the process model, signals, POSIX threads, the synchronization primitives that make shared state safe, and the design choices between processes and threads.
+
+## Process memory
+
+Each process has its own virtual address space. A simplified layout looks like this:
+
+```text
+high addresses
+    stack       local variables and call frames
+    ...
+    heap        malloc allocations
+    bss         zero-initialized globals
+    data        initialized globals
+    text        machine instructions
+low addresses
+```
+
+Two processes cannot directly read each other's variables. When one calls `fork`, the child gets a copy of the parent's address space. Modern systems use copy-on-write, so pages are shared until either process writes to them. After that, changes remain private.
+
+A process has a process ID, an exit status, file descriptors, signal dispositions, and other kernel state. File descriptors are inherited across `fork`, which is why a child can write to the same terminal or pipe.
+
+## fork and waitpid
+
+`fork` creates a child process. It returns 0 in the child, the child's process ID in the parent, and -1 on failure:
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+int main(void)
+{
+    pid_t pid = fork();
+    if (pid < 0) {
+        perror("fork");
+        return 1;
+    }
+
+    if (pid == 0) {
+        printf("child: %ld\n", (long)getpid());
+        fflush(stdout);
+        _exit(0);
+    }
+
+    int status;
+    if (waitpid(pid, &status, 0) < 0) {
+        perror("waitpid");
+        return 1;
+    }
+    if (WIFEXITED(status)) {
+        printf("parent: child exited with %d\n", WEXITSTATUS(status));
+    }
+    return 0;
+}
+```
+
+The child should use `_exit` rather than `exit` if it inherited buffered output that has not been flushed; `exit` flushes standard I/O buffers again and can duplicate output. Flush explicitly before `fork` if that matters.
+
+The parent must wait for the child to collect its exit status. A terminated child that has not been waited for is a **zombie**. `waitpid` can be interrupted by a signal, so robust code retries on `EINTR`. Check `WIFEXITED` before calling `WEXITSTATUS`; a child killed by a signal uses `WIFSIGNALED` instead.
+
+`fork` is available on POSIX systems such as Linux and macOS, not on Windows in the same form.
+
+## Signals
+
+Signals are asynchronous notifications. `SIGINT` comes from Ctrl-C, `SIGTERM` is a request to terminate, and `SIGSEGV` indicates a memory fault. Install a handler with `sigaction`, not the older `signal`, for predictable behavior.
+
+A signal handler may run at almost any point. It should do as little as possible. Setting a `volatile sig_atomic_t` flag is the standard safe pattern:
+
+```c
+#define _POSIX_C_SOURCE 200809L
+
+#include <signal.h>
+#include <string.h>
+
+static volatile sig_atomic_t stop_requested = 0;
+
+static void handle_signal(int signo)
+{
+    (void)signo;
+    stop_requested = 1;
+}
+
+int main(void)
+{
+    struct sigaction action;
+    memset(&action, 0, sizeof action);
+    action.sa_handler = handle_signal;
+    sigemptyset(&action.sa_mask);
+    sigaction(SIGINT, &action, NULL);
+
+    while (!stop_requested) {
+        /* do work, checking the flag between operations */
+    }
+    return 0;
+}
+```
+
+Do not call `printf`, `malloc`, or most library functions from a handler. They are not async-signal-safe. If a handler sends a signal that interrupts a blocking call, the call may return `EINTR`; handle that explicitly.
+
+## Threads
+
+A thread is a flow of execution inside a process. Threads share globals, heap allocations, and file descriptors, but each has its own stack and register state. POSIX threads are available through `pthread.h` and usually require `-pthread` at compile and link time:
+
+```bash
+cc -std=c17 -Wall -Wextra -pthread threads.c -o threads
+```
+
+Creating and joining a thread:
+
+```c
+#include <pthread.h>
+#include <stdio.h>
+
+static void *worker(void *argument)
+{
+    const char *name = argument;
+    printf("hello from %s\n", name);
+    return NULL;
+}
+
+int main(void)
+{
+    pthread_t thread;
+    int error = pthread_create(&thread, NULL, worker, "worker");
+    if (error != 0) {
+        fprintf(stderr, "pthread_create: %d\n", error);
+        return 1;
+    }
+    pthread_join(thread, NULL);
+    return 0;
+}
+```
+
+`pthread_create` returns an error number directly; it does not set `errno`. Always join or detach a thread. Joining lets you wait for completion and retrieve its return value. A detached thread cleans up automatically, but you cannot join it later.
+
+## Races and mutexes
+
+Shared mutable data is the central danger. Two threads incrementing the same variable can lose updates because the read-modify-write sequence is not atomic:
+
+```c
+static long counter = 0;
+
+static void *increment(void *argument)
+{
+    (void)argument;
+    for (int i = 0; i < 100000; i++) {
+        counter++;
+    }
+    return NULL;
+}
+```
+
+With two threads, the final value is often less than 200000, and the behavior is a data race with undefined behavior. A mutex makes the critical section exclusive:
+
+```c
+#include <pthread.h>
+
+static pthread_mutex_t counter_lock = PTHREAD_MUTEX_INITIALIZER;
+static long counter = 0;
+
+static void increment_once(void)
+{
+    pthread_mutex_lock(&counter_lock);
+    counter++;
+    pthread_mutex_unlock(&counter_lock);
+}
+```
+
+Lock only what needs protection. Holding a mutex during slow I/O serializes every thread and can create deadlocks if another path takes locks in a different order. Establish one lock order and follow it everywhere. For a single counter, `<stdatomic.h>` and `atomic_fetch_add` are simpler and avoid a mutex entirely.
+
+## Condition variables
+
+A condition variable lets a thread sleep until a predicate becomes true. It must be used with a mutex, and the predicate must be checked in a `while` loop because wakeups can be spurious:
+
+```c
+pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t ready = PTHREAD_COND_INITIALIZER;
+int has_item = 0;
+
+/* consumer */
+pthread_mutex_lock(&lock);
+while (!has_item) {
+    pthread_cond_wait(&ready, &lock);
+}
+has_item = 0;
+pthread_mutex_unlock(&lock);
+
+/* producer */
+pthread_mutex_lock(&lock);
+has_item = 1;
+pthread_cond_signal(&ready);
+pthread_mutex_unlock(&lock);
+```
+
+`pthread_cond_wait` atomically releases the mutex while sleeping and reacquires it before returning. That is why the predicate must be rechecked after every wakeup. Use `pthread_cond_broadcast` when several waiters might be able to proceed.
+
+## Designing for safety
+
+Make shared state explicit and small. Keep data local to a thread when possible, pass messages through bounded queues, and use locks for the rest. Document which fields are protected by which mutex. Avoid calling arbitrary callbacks while holding a lock. Use atomics for flags and counters that do not need a larger invariant, not as a substitute for a mutex around multi-step updates.
+
+## Processes or threads?
+
+Processes are safer when failure isolation matters. A bug that corrupts memory or crashes one process does not necessarily crash the others, and operating system permissions apply per process. Use processes for untrusted plugins, independent services, and work that may exhaust memory or segfault. The cost is more expensive creation and inter-process communication through pipes, sockets, or shared memory with explicit synchronization.
+
+Threads are a better fit when many tasks need to operate on the same in-memory data structure, or when creating a process per request is too expensive. They are not automatically faster; contention, cache coherence, and synchronization can make a threaded program slower. Measure the workload.
+
+## Common mistakes
+
+- Not waiting for children, leaving zombies, or waiting with a status variable before checking the result.
+- Ignoring `fork` failure and continuing as if a child exists.
+- Doing complex work in a signal handler.
+- Reading or writing shared data without synchronization and calling it "probably fine."
+- Waiting on a condition with `if` instead of `while`.
+- Acquiring two mutexes in opposite orders in different code paths.
+- Forgetting to join threads at shutdown.
+- Using `fork` in a multithreaded process without restricting the child to async-signal-safe operations before `exec`.
+
+## Practice
+
+1. Write a program that forks three children, has each child print its PID, waits for all of them, and reports each exit status.
+2. Install a `SIGINT` handler that sets a stop flag. Run a loop that checks the flag and exits cleanly on Ctrl-C.
+3. Build the unsynchronized counter example, run it repeatedly, then fix it with a mutex and compare the results.
+4. Implement a one-slot producer-consumer queue with a mutex and two condition variables: not-empty and not-full. Test one producer and two consumers.
+5. Write the same workload with two processes communicating over a pipe and with two threads sharing a protected array. Explain the tradeoff in isolation, latency, and complexity.
+6. Create a deadlock with two mutexes, observe it, then fix the lock ordering. Run the corrected program under a thread sanitizer if your toolchain supports it.

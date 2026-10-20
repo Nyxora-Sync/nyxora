@@ -26,7 +26,7 @@ export const instant = false
 
 export const metadata: Metadata = pageMetadata({
   title: 'Search',
-  description: 'Search lessons, modules, resources, pages, FAQ answers, and community projects on MERN Learn.',
+  description: 'Search lessons, modules, resources, pages, FAQ answers, and community projects on Nyxora Sync.',
   path: '/search',
   noIndex: true,
 })

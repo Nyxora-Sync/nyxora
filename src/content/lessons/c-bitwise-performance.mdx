@@ -1,0 +1,197 @@
+Bitwise operations let you work with the individual bits of an integer. They are the basis of flags, compact data formats, device registers, hash functions, and parts of compression and cryptography. They are also a place where C's undefined behavior rules matter, because a signed shift can be invalid even when the result looks correct on one machine.
+
+This lesson builds from binary notation to practical masking, then turns to the performance side: byte order, memory locality, allocation, and measurement.
+
+## Binary and hexadecimal
+
+A byte is eight bits in ordinary desktop environments. Hexadecimal is convenient because each hex digit represents exactly four bits:
+
+```text
+binary      hex
+0000        0
+0001        1
+1010        A
+1111        F
+1010 0101   A5
+```
+
+Print an unsigned 32-bit value in both forms:
+
+```c
+#include <inttypes.h>
+#include <stdint.h>
+#include <stdio.h>
+
+int main(void)
+{
+    uint32_t value = 0xA5u;
+    printf("hex: %08" PRIx32 "\n", value);
+    printf("decimal: %" PRIu32 "\n", value);
+    return 0;
+}
+```
+
+`PRIx32` and `PRIu32` come from `inttypes.h` and make the format portable. Avoid assuming that `%x` matches every unsigned type.
+
+## Masks
+
+A mask is a value with selected bits set. Use bitwise AND to test bits, OR to set them, AND with the complement to clear them, and XOR to toggle them:
+
+```c
+#include <inttypes.h>
+#include <stdint.h>
+#include <stdio.h>
+
+int main(void)
+{
+    uint32_t flags = 0;
+    uint32_t read_bit = UINT32_C(1) << 2; /* bit 2, value 4 */
+
+    flags |= read_bit;            /* set */
+    int is_set = (flags & read_bit) != 0;
+
+    flags &= ~read_bit;           /* clear */
+    flags ^= read_bit;            /* toggle */
+
+    printf("set: %d, flags: %08" PRIx32 "\n", is_set, flags);
+    return 0;
+}
+```
+
+`~read_bit` flips every bit in the unsigned type, producing a mask with every bit except bit 2 set. Using unsigned types avoids surprises with sign extension. Parenthesize masks in conditions: `flags & read_bit` has lower precedence than `!=`, so write `(flags & read_bit) != 0`.
+
+## Shifts
+
+Left shift moves bits toward the most significant end; right shift moves them toward the least significant end. For unsigned values, left shift discards bits that move past the top, and right shift fills with zeros.
+
+```c
+uint32_t packed = ((uint32_t)version & 0xFFu) << 24;
+packed |= ((uint32_t)kind & 0xFFu) << 16;
+packed |= (uint32_t)length & 0xFFFFu;
+
+uint32_t extracted_version = (packed >> 24) & 0xFFu;
+uint32_t extracted_kind = (packed >> 16) & 0xFFu;
+uint32_t extracted_length = packed & 0xFFFFu;
+```
+
+Shifting by a negative count, or by a count greater than or equal to the width of the promoted left operand, is undefined behavior. Shifting a negative signed value left is also undefined. Prefer unsigned types for bit manipulation and use an explicit width such as `UINT32_C(1)`.
+
+Right shift of a negative signed value is implementation-defined. That is another reason to use unsigned types for flags and bit patterns.
+
+## Flags
+
+Powers of two make independent flags. A set can be stored in one integer and passed around cheaply:
+
+```c
+#include <stdint.h>
+
+enum Permission {
+    PERM_READ  = 1u << 0,
+    PERM_WRITE = 1u << 1,
+    PERM_EXEC  = 1u << 2
+};
+
+int has_permission(uint32_t permissions, uint32_t flag)
+{
+    return (permissions & flag) != 0;
+}
+```
+
+To test whether all flags in a group are present, compare the masked result with the mask: `(permissions & mask) == mask`. Testing any flag uses `!= 0`.
+
+## Counting bits
+
+A compact way to count set bits is to clear the lowest set bit repeatedly:
+
+```c
+#include <stdint.h>
+
+unsigned count_set_bits(uint32_t value)
+{
+    unsigned count = 0;
+    while (value != 0) {
+        value &= value - 1;
+        count++;
+    }
+    return count;
+}
+```
+
+Each iteration removes exactly one set bit. The loop runs once per set bit, not once per bit position. GCC and Clang also provide `__builtin_popcount`, which may compile to a single instruction when the target supports it. If portability is a priority, keep the portable fallback and select the builtin behind a compiler check.
+
+## Endianness
+
+Endianness is the order in which the bytes of an integer are stored. A 16-bit value `0x1234` is stored as `34 12` on a little-endian machine and `12 34` on a big-endian machine. The value is the same; only its byte representation differs.
+
+```c
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+
+int main(void)
+{
+    uint16_t value = UINT16_C(0x1234);
+    unsigned char bytes[sizeof value];
+    memcpy(bytes, &value, sizeof bytes);
+
+    printf("%02x %02x\n", (unsigned)bytes[0], (unsigned)bytes[1]);
+    return 0;
+}
+```
+
+`memcpy` avoids aliasing and alignment problems. Do not inspect an integer through a differently typed pointer. For network protocols, use `htons`, `htonl`, `ntohs`, and `ntohl` from the socket headers so fields have a defined wire order. For files, write each field in an agreed order rather than dumping a struct whose padding and byte order are compiler-dependent.
+
+## Cache locality and allocation
+
+Modern CPUs are much faster than main memory, so the order in which you touch memory matters. A two-dimensional array in C is stored row by row. Loop over rows first and columns second to walk contiguous memory:
+
+```c
+for (size_t row = 0; row < rows; row++) {
+    for (size_t column = 0; column < columns; column++) {
+        total += grid[row][column];
+    }
+}
+```
+
+The reverse order jumps across rows and is less cache-friendly. The same principle favors contiguous arrays over pointer-chasing linked lists for hot loops, even when both have the same logical complexity.
+
+A struct-of-arrays layout can also help when a loop uses only one field from many records. It packs the used values together instead of loading unused bytes into cache. Do not restructure blindly; measure with a realistic data set.
+
+Avoid allocation in a hot loop when a reusable buffer will do. `malloc` and `free` are not free, and frequent small allocations fragment memory and hurt locality. But an allocation outside the loop is usually irrelevant. Optimize the path that actually dominates runtime.
+
+## Measure instead of guessing
+
+Compile with optimization enabled, use representative inputs, and time repeated runs:
+
+```bash
+cc -std=c17 -O2 -Wall -Wextra benchmark.c -o benchmark
+/usr/bin/time -v ./benchmark
+```
+
+For more reliable command timing, use `hyperfine` if it is installed:
+
+```bash
+hyperfine './benchmark'
+```
+
+`perf stat ./benchmark` can show cycles, instructions, and cache behavior on Linux. Measure before and after one change, and keep correctness tests in place. A bit trick that saves a fraction of a percent is not worth unreadable code if profiling shows the time is elsewhere.
+
+## Common mistakes
+
+- Using `1 << 31` when `int` is 32 bits; use an unsigned constant.
+- Shifting by the width of the type, which is undefined behavior.
+- Using `&` when `&&` was intended, or `|` when `||` was intended.
+- Clearing a bit without a mask of the correct unsigned width.
+- Assuming the machine's byte order when reading binary data.
+- Writing raw structs to a file or network and expecting another machine to read them.
+- Micro-optimizing without a profiler or a repeatable benchmark.
+- Reading uninitialized bytes while trying to count or inspect bits.
+
+## Practice
+
+1. Write functions to set, clear, toggle, and test an arbitrary bit in a `uint32_t`. Reject bit numbers outside 0 through 31.
+2. Pack a date into a 32-bit integer: year offset, month, and day. Write pack and unpack functions and test boundary values.
+3. Implement `count_set_bits` and compare it with `__builtin_popcount` on a million values.
+4. Write a program that reports the machine's byte order using `memcpy`. Then serialize a 32-bit value in big-endian order manually.
+5. Benchmark row-first and column-first traversal of a large matrix at `-O2`. Explain the result using cache behavior rather than assumption.
+6. Add a flag group for read, write, and execute permissions. Implement grant, revoke, and "has all of" operations, then test every combination.

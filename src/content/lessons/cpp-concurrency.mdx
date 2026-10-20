@@ -1,0 +1,304 @@
+Concurrency is not a feature you add at the end. It changes which operations are safe, which lifetimes are valid, and which bugs are reproducible only once a week under production load. The reliable approach is to start with a small number of well-understood primitives: threads with clear ownership, a mutex around shared state, condition variables for waiting, atomics for simple counters and flags, and futures for one-shot results.
+
+## Threads and `std::jthread`
+
+`std::thread` starts execution immediately. Every joinable thread must be joined or detached before destruction; destroying a joinable `std::thread` terminates the program. That rule is easy to violate on an early return or an exception path.
+
+```cpp
+#include <chrono>
+#include <iostream>
+#include <thread>
+
+void work(int id) {
+    std::this_thread::sleep_for(std::chrono::milliseconds{20});
+    std::cout << "worker " << id << " done\n";
+}
+
+int main() {
+    std::thread first{work, 1};
+    first.join();
+
+    std::jthread second{work, 2}; // joins automatically
+}
+```
+
+`std::jthread` is the C++20 improvement. Its destructor requests a stop and then joins, so it cannot silently terminate the process. If the callable accepts a `std::stop_token` as its first parameter, the thread receives a cooperative cancellation handle:
+
+```cpp
+std::jthread worker{[](std::stop_token token) {
+    while (!token.stop_requested()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{50});
+    }
+}};
+```
+
+Stopping is cooperative. The token is a request, not a kill signal; the thread must check it and return. Code that blocks in a system call may not notice the request until the call returns.
+
+## Shared state needs a mutex
+
+Two threads incrementing the same ordinary `int` is a data race, and a data race is undefined behavior even if the final number looks plausible.
+
+```cpp
+#include <mutex>
+
+int counter = 0;
+std::mutex counterMutex;
+
+void incrementSafely() {
+    std::scoped_lock lock{counterMutex};
+    ++counter;
+}
+```
+
+`std::scoped_lock` releases the mutex at the end of the scope, including when an exception is thrown. Never call `lock()` and `unlock()` manually when an RAII wrapper will do. Keep the critical section small: do not perform file I/O, network calls, or callbacks while holding a lock. If another thread needs the same lock and is blocked behind slow work, the entire system appears to stall.
+
+When two mutexes must be held together, acquire them with one `std::scoped_lock`:
+
+```cpp
+std::scoped_lock lock{firstMutex, secondMutex};
+```
+
+The standard library uses a deadlock-avoidance algorithm. That does not rescue you if other code acquires the same mutexes in a different order elsewhere; a consistent lock hierarchy remains the simpler policy.
+
+## Condition variables
+
+A condition variable lets a thread sleep until a predicate becomes true. The wait must happen in a loop, and the predicate must be checked while holding the mutex:
+
+```cpp
+#include <condition_variable>
+#include <deque>
+#include <mutex>
+
+std::mutex queueMutex;
+std::condition_variable notEmpty;
+std::deque<int> jobs;
+bool stopping = false;
+
+int takeJob() {
+    std::unique_lock lock{queueMutex};
+    notEmpty.wait(lock, [] {
+        return stopping || !jobs.empty();
+    });
+
+    if (jobs.empty()) {
+        return -1; // stopping and drained
+    }
+
+    const int job = jobs.front();
+    jobs.pop_front();
+    return job;
+}
+```
+
+The predicate handles spurious wakeups and lost notifications. `wait` atomically releases the mutex while sleeping and reacquires it before returning. A notifier should change the state while holding the mutex, then notify after or during the critical section; the predicate is what makes the protocol correct either way.
+
+## Atomics and memory orders
+
+`std::atomic<T>` makes individual reads and writes indivisible. It does not automatically protect nearby non-atomic data. For a counter, relaxed ordering is enough because you only care about the final total, not about ordering relative to other memory:
+
+```cpp
+#include <atomic>
+
+std::atomic<int> requests{0};
+
+void recordRequest() {
+    requests.fetch_add(1, std::memory_order_relaxed);
+}
+
+int requestCount() {
+    return requests.load(std::memory_order_relaxed);
+}
+```
+
+For publishing data from one thread to another, the ordering matters. A release store and an acquire load establish a happens-before relationship:
+
+```cpp
+std::atomic<bool> ready{false};
+int payload = 0;
+
+void producer() {
+    payload = 42;
+    ready.store(true, std::memory_order_release);
+}
+
+void consumer() {
+    while (!ready.load(std::memory_order_acquire)) {
+        // wait
+    }
+    // The release/acquire pair makes this read safe.
+    std::cout << payload << '\n';
+}
+```
+
+`memory_order_seq_cst` is the default and the easiest to reason about: all sequentially consistent operations appear in one global order. `relaxed` provides atomicity but no synchronization. `acquire` prevents later reads and writes from moving before the load; `release` prevents earlier reads and writes from moving after the store. Use the default until a measured need and a clear proof justify weakening it. `volatile` is not a synchronization primitive.
+
+## Futures and promises
+
+`std::async` runs a callable and gives you a `std::future` for its result. Exceptions are captured and rethrown by `get()`:
+
+```cpp
+#include <future>
+
+auto result = std::async(std::launch::async, [] {
+    return expensiveComputation();
+});
+
+// Do independent work here.
+
+const int value = result.get(); // waits and may rethrow
+```
+
+Without `std::launch::async`, the implementation may defer the call until `get()`, which is legal but often not what you intended. The destructor of a future from `std::async` waits for the task, so do not let it run at an unpredictable point in a hot path.
+
+`std::promise` is the lower-level handoff:
+
+```cpp
+std::promise<int> promise;
+std::future<int> future = promise.get_future();
+
+std::jthread producer{[&promise] {
+    promise.set_value(42);
+}};
+
+std::cout << future.get() << '\n';
+```
+
+If the promise is destroyed without a value, `get()` throws `std::future_error` with `broken_promise`. Use `set_exception` to deliver a failure deliberately. A `std::future` is move-only; use `std::shared_future` when several threads need to wait for the same result.
+
+## A bounded thread pool
+
+A thread pool owns a fixed set of workers and a queue of jobs. Bounded means the queue has a maximum size, so producers experience backpressure instead of consuming unbounded memory.
+
+```cpp
+#include <condition_variable>
+#include <cstddef>
+#include <deque>
+#include <functional>
+#include <mutex>
+#include <stdexcept>
+#include <stop_token>
+#include <thread>
+#include <utility>
+#include <vector>
+
+class ThreadPool {
+public:
+    ThreadPool(std::size_t workers, std::size_t capacity)
+        : capacity_(capacity) {
+        if (workers == 0 || capacity == 0) {
+            throw std::invalid_argument{"workers and capacity must be positive"};
+        }
+
+        try {
+            for (std::size_t i = 0; i < workers; ++i) {
+                workers_.emplace_back([this](std::stop_token) {
+                    workerLoop();
+                });
+            }
+        } catch (...) {
+            {
+                std::scoped_lock lock{mutex_};
+                stopping_ = true;
+            }
+            notEmpty_.notify_all();
+            notFull_.notify_all();
+            throw;
+        }
+    }
+
+    ~ThreadPool() {
+        {
+            std::scoped_lock lock{mutex_};
+            stopping_ = true;
+        }
+        notEmpty_.notify_all();
+        notFull_.notify_all();
+        // jthread destructors request stop and join the workers.
+    }
+
+    bool submit(std::function<void()> job) {
+        std::unique_lock lock{mutex_};
+        notFull_.wait(lock, [this] {
+            return stopping_ || jobs_.size() < capacity_;
+        });
+
+        if (stopping_) {
+            return false;
+        }
+
+        jobs_.push_back(std::move(job));
+        lock.unlock();
+        notEmpty_.notify_one();
+        return true;
+    }
+
+private:
+    void workerLoop() {
+        while (true) {
+            std::function<void()> job;
+            {
+                std::unique_lock lock{mutex_};
+                notEmpty_.wait(lock, [this] {
+                    return stopping_ || !jobs_.empty();
+                });
+
+                if (jobs_.empty()) {
+                    if (stopping_) {
+                        return;
+                    }
+                    continue;
+                }
+
+                job = std::move(jobs_.front());
+                jobs_.pop_front();
+            }
+
+            notFull_.notify_one();
+
+            try {
+                job();
+            } catch (...) {
+                // A production pool should log or report the failure.
+            }
+        }
+    }
+
+    std::mutex mutex_;
+    std::condition_variable notEmpty_;
+    std::condition_variable notFull_;
+    std::deque<std::function<void()>> jobs_;
+    std::size_t capacity_;
+    bool stopping_{};
+    std::vector<std::jthread> workers_;
+};
+```
+
+The destructor stops new submissions, wakes every waiter, and lets workers drain the queue before the `jthread` objects join. If jobs can block forever, shutdown can block forever too; cancellation and timeouts are part of the design, not an afterthought. `submit` blocks when the queue is full. That is one backpressure policy; rejecting the job or applying a timeout are also valid, but the choice must be explicit.
+
+## Preventing races and deadlocks
+
+- Keep shared mutable state behind one owner or one lock. Prefer message passing through a queue when the ownership is naturally sequential.
+- Hold locks for the smallest possible region, and never invoke unknown callbacks while holding a lock.
+- Use `std::scoped_lock` for multiple mutexes and establish a lock hierarchy.
+- Wait with a predicate; do not assume one notification per state change.
+- Do not detach threads that reference stack objects. Join or use `jthread`.
+- Prefer atomics for counters and flags, not for protecting a data structure.
+- Use sequential consistency first. Weakening memory order requires a proof, not a hunch.
+
+## Common mistakes
+
+- Reading and writing an ordinary variable from two threads without synchronization.
+- Destroying a joinable `std::thread`, which calls `std::terminate`.
+- Waiting on a condition variable without a predicate and waking spuriously.
+- Calling `notify_one` before the waiting thread has entered the wait, while also forgetting the predicate.
+- Holding a mutex while performing slow I/O, creating a bottleneck or deadlock.
+- Assuming `shared_ptr` makes the pointed-to object thread-safe.
+- Using `volatile` instead of `std::atomic`.
+
+## Practice
+
+1. Run two threads that increment a shared `int` one million times without synchronization. Build with ThreadSanitizer, observe the report, then fix it with a mutex and with an atomic counter.
+2. Measure the difference between the mutex and relaxed atomic versions on your machine. Explain why the atomic version is not automatically correct for more complex state.
+3. Implement the bounded queue with `push` and `pop` using a condition variable. Close it from another thread and verify that blocked producers and consumers both wake.
+4. Extend the thread pool with `submit` returning a `std::future` for the job result, using `std::packaged_task`. Ensure exceptions reach the future.
+5. Add a stop token check to a long-running worker job. Request stop from the main thread and confirm that the job exits and the pool joins cleanly.

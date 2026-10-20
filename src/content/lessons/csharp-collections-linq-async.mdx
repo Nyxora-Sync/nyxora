@@ -1,0 +1,202 @@
+Most C# application code does three things: holds data in collections, filters and shapes it with LINQ, and waits for I/O without blocking a thread. The first two are synchronous and easy to reason about. The third has a few traps that account for a large share of production outages.
+
+## Arrays, lists, dictionaries, and sets
+
+An array has a fixed length. A `List<T>` grows dynamically and is the default choice for an ordered sequence:
+
+```csharp
+var names = new List<string> { "Aki", "Mina" };
+names.Add("Rui");
+names.Remove("Aki");
+
+Console.WriteLine(names.Count);    // 2
+Console.WriteLine(names[0]);       // Mina
+```
+
+A `Dictionary<TKey, TValue>` maps unique keys to values with fast lookup. Use `TryGetValue` instead of catching a missing-key exception:
+
+```csharp
+var stock = new Dictionary<string, int>
+{
+    ["keyboard"] = 12,
+    ["cable"] = 40
+};
+
+if (stock.TryGetValue("cable", out var count))
+    Console.WriteLine($"Cables: {count}");
+
+stock["monitor"] = 5; // add or replace
+```
+
+A `HashSet<T>` stores unique values and answers “have I seen this?” quickly. Pass a comparer when case should not matter:
+
+```csharp
+var tags = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "api", "rest" };
+Console.WriteLine(tags.Contains("API")); // true
+```
+
+`List<T>`, `Dictionary<TKey, TValue>`, and `HashSet<T>` are not thread-safe. Concurrent reads are fine if nobody writes; shared writes need a lock or `ConcurrentDictionary<TKey, TValue>`. Return `IReadOnlyList<T>` or `IReadOnlyDictionary<TKey, TValue>` from public APIs when callers should not mutate the collection.
+
+## `IEnumerable<T>` and deferred execution
+
+`IEnumerable<T>` is the contract for “something I can loop over”. A method using `yield return` produces items lazily, one at a time:
+
+```csharp
+IEnumerable<int> EvenNumbers(int max)
+{
+    for (var i = 0; i <= max; i++)
+    {
+        if (i % 2 == 0)
+            yield return i;
+    }
+}
+
+foreach (var n in EvenNumbers(6))
+    Console.Write($"{n} "); // 0 2 4 6
+```
+
+The method body does not run when you call `EvenNumbers`. It runs when enumeration begins. This is **deferred execution**, and it is why a LINQ query is a description rather than a result:
+
+```csharp
+var query = names.Where(n => n.Length > 3);
+
+names.Add("Alexander"); // the query sees this
+foreach (var name in query)
+    Console.WriteLine(name);
+```
+
+If the source changes between enumerations, the results change. If enumeration is expensive or the source is a database, materialize once with `ToList()` and reuse the list. Enumerating the same deferred query repeatedly is a common hidden performance problem.
+
+## LINQ: queries over sequences
+
+LINQ provides a consistent vocabulary for filtering, projecting, grouping, joining, and aggregating. Method syntax is the most common:
+
+```csharp
+public sealed record Order(Guid Id, string Customer, decimal Total, string Status);
+
+var report = orders
+    .Where(o => o.Status == "paid")
+    .GroupBy(o => o.Customer)
+    .Select(g => new
+    {
+        Customer = g.Key,
+        Revenue = g.Sum(o => o.Total),
+        Count = g.Count()
+    })
+    .OrderByDescending(row => row.Revenue)
+    .Take(5)
+    .ToList();
+```
+
+Query syntax is equivalent and sometimes reads better for joins and grouping:
+
+```csharp
+var report =
+    (from o in orders
+     where o.Status == "paid"
+     group o by o.Customer into g
+     orderby g.Sum(o => o.Total) descending
+     select new { Customer = g.Key, Revenue = g.Sum(o => o.Total) })
+    .Take(5)
+    .ToList();
+```
+
+Both compile to the same method calls. Use whichever makes the intent clearer.
+
+Know the shape of the result:
+
+- `Where` filters, `Select` projects, `OrderBy` sorts.
+- `Any()` answers “is there at least one?” without counting everything.
+- `First()` throws when empty; `FirstOrDefault()` returns `null` or `default`.
+- `Single()` throws unless exactly one match; use it when duplicates are a bug.
+- `GroupBy` returns groups you must project before returning from an API.
+- `SelectMany` flattens a sequence of sequences.
+
+Once the source is `IQueryable<T>` — as with EF Core — the same operators are translated to SQL. Keep that boundary in mind: calling a custom C# method inside `Where` may prevent translation.
+
+## `async` and `await`
+
+An asynchronous method returns a `Task` or `Task<T>` representing work in progress. `await` releases the current thread while waiting for I/O, then continues when the operation completes:
+
+```csharp
+public async Task<decimal> GetPriceAsync(
+    HttpClient client,
+    string sku,
+    CancellationToken ct)
+{
+    using var response = await client.GetAsync($"/prices/{sku}", ct);
+    response.EnsureSuccessStatusCode();
+
+    var price = await response.Content.ReadFromJsonAsync<decimal>(ct);
+    return price;
+}
+```
+
+`async` does not create a thread. It lets the runtime suspend the method at an await and resume it later, which is exactly what a web server needs while waiting on a database or another service. Use `Task.Run` only for CPU-bound work you deliberately want on a thread-pool thread, not to “make code async”.
+
+Await independent operations concurrently:
+
+```csharp
+var priceTask = GetPriceAsync(client, "KB-01", ct);
+var stockTask = GetStockAsync(client, "KB-01", ct);
+
+await Task.WhenAll(priceTask, stockTask);
+
+var price = await priceTask;
+var stock = await stockTask;
+```
+
+Do not run two operations concurrently on the same `DbContext`; a context is not thread-safe.
+
+## Cancellation
+
+Pass a `CancellationToken` through every I/O call. A timeout is cancellation with a deadline:
+
+```csharp
+using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+try
+{
+    var price = await GetPriceAsync(client, "KB-01", cts.Token);
+    Console.WriteLine(price);
+}
+catch (OperationCanceledException) when (cts.IsCancellationRequested)
+{
+    Console.WriteLine("The price service timed out.");
+}
+```
+
+In ASP.NET Core, the framework supplies a token that fires when the client disconnects. Accept it as a parameter and forward it. Swallowing cancellation or converting it into a generic failure makes shutdown and timeouts harder to diagnose.
+
+## What not to do
+
+```csharp
+// Blocks a thread and can deadlock in synchronous contexts.
+var price = GetPriceAsync(client, "KB-01", ct).Result;
+
+// Exceptions and completion are unobserved; the request may end first.
+_ = SendConfirmationAsync(order);
+
+// async void is only for event handlers.
+async void Process() { await Task.Delay(100); }
+```
+
+Await the task, or hand the work to a background service with a proper lifetime and error handling. Avoid `Task.Run` around I/O, sequential awaits for independent calls, and `async` lambdas inside `Select` unless you explicitly collect and await the tasks.
+
+## Common mistakes
+
+- Enumerating a LINQ query repeatedly and hitting the database each time.
+- Modifying a collection inside a `foreach` over it; iterate over a copy or collect changes first.
+- Using `Count() == 0` instead of `Any()`, which can scan an entire sequence.
+- Calling `First()` on a query that may be empty.
+- Forgetting to pass the cancellation token to the methods that actually do I/O.
+- Treating `Task` as a value: creating it and never awaiting it.
+
+## Practice
+
+1. Create a console app with a `List<Order>` of at least eight records. Produce a report grouped by customer, ordered by revenue, showing count and average order value.
+2. Rewrite one query using query syntax. Confirm the output is identical.
+3. Add a `yield return` method that streams orders above a threshold, then prove it is deferred by changing the source list before enumerating.
+4. Read orders from a text file asynchronously, line by line, with a `CancellationToken`. Parse each line defensively and collect invalid line numbers instead of crashing.
+5. For each customer, fetch a simulated shipping quote with `Task.Delay` and `Task.WhenAll`. Time the sequential version against the concurrent version.
+6. Add a five-second timeout. Print a distinct message for timeout, malformed input, and an empty file.

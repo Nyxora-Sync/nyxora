@@ -25,13 +25,8 @@ import { CommentThread } from '@/components/community/comment-thread'
 import { ProjectFormDialog } from '@/components/community/project-form-dialog'
 import type { ProjectDetail } from '@/lib/community-types'
 import { shortDate, timeAgo } from '@/lib/time'
-import { getAccent } from '@/lib/utils'
+import { getAccent, getTrackColor } from '@/lib/utils'
 import { GithubIcon } from '@/components/icons/brand'
-
-const trackAccent: Record<string, string> = {
-  beginner: 'emerald',
-  developer: 'violet',
-}
 
 export function ProjectDetailClient({ id }: { id: string }) {
   const router = useRouter()
@@ -134,7 +129,7 @@ export function ProjectDetailClient({ id }: { id: string }) {
           <div className="mb-3 flex flex-wrap items-center gap-2">
             <Badge
               variant="outline"
-              className={`capitalize ${getAccent(trackAccent[project.track] ?? 'slate').text}`}
+              className={`capitalize ${getAccent(getTrackColor(project.track)).text}`}
             >
               {project.track} track
             </Badge>

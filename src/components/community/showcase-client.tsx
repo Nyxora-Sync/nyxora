@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input'
 import { ProjectCard } from '@/components/community/project-card'
 import { Reveal } from '@/components/motion/reveal'
 import type { ProjectListItem } from '@/lib/community-types'
-import { cn } from '@/lib/utils'
+import { tracks } from '@/lib/curriculum'
 
 const ProjectFormDialog = dynamic(
   () =>
@@ -21,7 +21,7 @@ const ProjectFormDialog = dynamic(
   { ssr: false }
 )
 
-type TrackFilter = 'all' | 'beginner' | 'developer'
+type TrackFilter = 'all' | string
 type SortFilter = 'newest' | 'popular'
 
 export function ShowcaseClient() {
@@ -113,22 +113,19 @@ export function ShowcaseClient() {
             />
           </div>
 
-          <div className="flex rounded-lg border border-border/60 p-1" role="group" aria-label="Filter by track">
-            {(['all', 'beginner', 'developer'] as const).map((option) => (
-              <button
-                key={option}
-                type="button"
-                onClick={() => setTrack(option)}
-                aria-pressed={track === option}
-                className={cn(
-                  'rounded-md px-3 py-1.5 text-xs font-medium capitalize transition-colors',
-                  track === option ? 'bg-muted text-foreground hover:bg-muted/70' : 'text-muted-foreground hover:text-foreground'
-                )}
-              >
-                {option}
-              </button>
+          <select
+            value={track}
+            onChange={(event) => setTrack(event.target.value)}
+            aria-label="Filter by track"
+            className="h-9 rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
+          >
+            <option value="all">All tracks</option>
+            {tracks.map((entry) => (
+              <option key={entry.key} value={entry.key}>
+                {entry.name}
+              </option>
             ))}
-          </div>
+          </select>
 
           <select
             value={sort}

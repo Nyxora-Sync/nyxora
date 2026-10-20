@@ -119,6 +119,11 @@ export function getTrackColor(track: string): string {
   switch (track) {
     case 'beginner': return 'emerald'
     case 'developer': return 'violet'
+    case 'specializations': return 'cyan'
+    case 'c': return 'blue'
+    case 'cpp': return 'indigo'
+    case 'csharp': return 'violet'
+    case 'python': return 'amber'
     default: return 'slate'
   }
 }

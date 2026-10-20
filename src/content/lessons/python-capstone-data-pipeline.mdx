@@ -1,0 +1,338 @@
+This capstone assembles the course into one small production-shaped system: a CSV sales pipeline that validates every row, normalizes it, upserts it into SQLite, reports rejects, and can be run again safely. The same structure applies when the source is an API and the destination is PostgreSQL.
+
+## Project shape
+
+```text
+sales-pipeline/
+├── pyproject.toml
+├── src/
+│   └── sales_pipeline/
+│       ├── __init__.py
+│       ├── __main__.py
+│       ├── extract.py
+│       ├── load.py
+│       ├── models.py
+│       └── pipeline.py
+└── tests/
+    └── test_pipeline.py
+```
+
+```text
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sales-pipeline"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = ["pydantic>=2.7,<3"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<9"]
+
+[project.scripts]
+sales-pipeline = "sales_pipeline.pipeline:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sales_pipeline"]
+```
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install -e ".[dev]"
+sales-pipeline data/sales.csv --db sales.db --failures failures.json
+```
+
+## Validate at the boundary
+
+The source file is untrusted. Define the accepted record once and reject everything else before it reaches storage:
+
+```python
+# src/sales_pipeline/models.py
+from datetime import datetime
+from decimal import Decimal
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+class Sale(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    order_id: str = Field(min_length=1, max_length=40)
+    customer: str = Field(min_length=1, max_length=120)
+    amount: Decimal = Field(gt=0, max_digits=12, decimal_places=2)
+    currency: str = Field(min_length=3, max_length=3)
+    occurred_at: datetime
+
+    @field_validator("currency")
+    @classmethod
+    def uppercase_currency(cls, value: str) -> str:
+        return value.upper()
+```
+
+Money is a `Decimal`, not a float. Binary floating point cannot represent every cent exactly, and financial totals drift. The field constraints reject negative amounts and more than two decimal places. `extra="forbid"` catches renamed or unexpected CSV columns instead of silently discarding them.
+
+## Extract and validate rows
+
+The extractor reads the header and keeps line numbers for the failure report:
+
+```python
+# src/sales_pipeline/extract.py
+import csv
+from pathlib import Path
+
+
+def read_csv(path: Path) -> list[dict[str, str | None]]:
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle)
+        if reader.fieldnames is None:
+            raise ValueError(f"{path} has no header row")
+        return [dict(row) for row in reader]
+```
+
+```python
+# src/sales_pipeline/pipeline.py
+import argparse
+import json
+import logging
+from decimal import Decimal
+from pathlib import Path
+
+from pydantic import ValidationError
+
+from sales_pipeline.extract import read_csv
+from sales_pipeline.load import connect, load
+from sales_pipeline.models import Sale
+
+logger = logging.getLogger(__name__)
+
+
+def validate_rows(
+    rows: list[dict[str, str | None]],
+) -> tuple[list[Sale], list[dict[str, object]]]:
+    valid: list[Sale] = []
+    failures: list[dict[str, object]] = []
+
+    for line_number, row in enumerate(rows, start=2):
+        try:
+            valid.append(Sale.model_validate(row))
+        except ValidationError as exc:
+            failures.append(
+                {
+                    "line": line_number,
+                    "order_id": row.get("order_id"),
+                    "errors": exc.errors(include_url=False),
+                }
+            )
+    return valid, failures
+```
+
+A bad row does not stop the file. Valid rows can still load, while every reject is reported with its original line number and field-level error. Returning a non-zero exit code signals that the run had data-quality problems.
+
+## Transform and deduplicate
+
+Transformation should be explicit and deterministic:
+
+```python
+def normalize(sale: Sale) -> Sale:
+    return sale.model_copy(
+        update={
+            "customer": " ".join(sale.customer.split()),
+            "amount": sale.amount.quantize(Decimal("0.01")),
+        }
+    )
+
+
+def deduplicate(sales: list[Sale]) -> list[Sale]:
+    by_order = {sale.order_id: sale for sale in sales}
+    return list(by_order.values())
+```
+
+Collapsing internal whitespace makes customer names comparable. Quantizing to cents fixes the storage representation. Deduplication by `order_id` means a repeated row in the same file does not create two records; the last occurrence wins. Log how many duplicates were removed so the behavior is visible rather than magical.
+
+## Load idempotently into SQLite
+
+```python
+# src/sales_pipeline/load.py
+import sqlite3
+from pathlib import Path
+
+from sales_pipeline.models import Sale
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS sales (
+    order_id TEXT PRIMARY KEY,
+    customer TEXT NOT NULL,
+    amount_cents INTEGER NOT NULL,
+    currency TEXT NOT NULL,
+    occurred_at TEXT NOT NULL
+)
+"""
+
+
+def connect(path: Path) -> sqlite3.Connection:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(path)
+    connection.execute("PRAGMA journal_mode=WAL")
+    connection.executescript(SCHEMA)
+    return connection
+
+
+def load(connection: sqlite3.Connection, sales: list[Sale]) -> int:
+    rows = [
+        (
+            sale.order_id,
+            sale.customer,
+            int(sale.amount * 100),
+            sale.currency,
+            sale.occurred_at.isoformat(),
+        )
+        for sale in sales
+    ]
+    with connection:
+        connection.executemany(
+            """
+            INSERT INTO sales (order_id, customer, amount_cents, currency, occurred_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(order_id) DO UPDATE SET
+                customer = excluded.customer,
+                amount_cents = excluded.amount_cents,
+                currency = excluded.currency,
+                occurred_at = excluded.occurred_at
+            """,
+            rows,
+        )
+    return len(rows)
+```
+
+The primary key plus upsert makes the load idempotent: rerunning the same file updates existing orders instead of inserting duplicates. The transaction covers the whole batch; a failure rolls it back. Storing cents as an integer avoids float rounding and keeps queries fast.
+
+## Run and report
+
+```python
+def run(csv_path: Path, db_path: Path, failure_path: Path) -> int:
+    rows = read_csv(csv_path)
+    valid, failures = validate_rows(rows)
+    normalized = [normalize(sale) for sale in valid]
+    unique = deduplicate(normalized)
+
+    if len(unique) != len(normalized):
+        logger.warning("dropped %d duplicate order_id rows", len(normalized) - len(unique))
+
+    connection = connect(db_path)
+    try:
+        loaded = load(connection, unique)
+    finally:
+        connection.close()
+
+    if failures:
+        failure_path.parent.mkdir(parents=True, exist_ok=True)
+        failure_path.write_text(
+            json.dumps(failures, indent=2, default=str) + "\n",
+            encoding="utf-8",
+        )
+        logger.error("rejected %d rows; report: %s", len(failures), failure_path)
+    elif failure_path.exists():
+        failure_path.unlink()
+
+    logger.info("loaded %d records from %d rows", loaded, len(rows))
+    return 1 if failures else 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    parser = argparse.ArgumentParser(description="Validate and load sales CSV data")
+    parser.add_argument("csv", type=Path, help="Input CSV file")
+    parser.add_argument("--db", type=Path, default=Path("sales.db"))
+    parser.add_argument("--failures", type=Path, default=Path("failures.json"))
+    args = parser.parse_args(argv)
+    return run(args.csv, args.db, args.failures)
+```
+
+```python
+# src/sales_pipeline/__main__.py
+from sales_pipeline.pipeline import main
+
+raise SystemExit(main())
+```
+
+The installed `sales-pipeline` command calls the same `main` through the script entry in `pyproject.toml`, while `python3 -m sales_pipeline` runs `__main__.py`. Both paths share the parser, defaults, and exit status.
+
+Deleting a stale failure report on a clean run prevents an old file from making a successful run look broken. In a real system, send failures to a dead-letter table or object store as well; a local JSON file is only a starting point.
+
+For an API source, replace `read_csv` with an `httpx` call, call `raise_for_status`, and validate each JSON object with `Sale.model_validate`. Keep pagination and a watermark outside this function so the transform and load stages stay testable.
+
+## Tests
+
+```python
+import json
+import sqlite3
+from contextlib import closing
+
+from sales_pipeline.pipeline import run
+
+HEADER = "order_id,customer,amount,currency,occurred_at\n"
+
+
+def test_run_is_idempotent(tmp_path):
+    source = tmp_path / "sales.csv"
+    source.write_text(
+        HEADER + "A1,Ada,10.00,usd,2026-01-01T00:00:00Z\n",
+        encoding="utf-8",
+    )
+    db = tmp_path / "sales.db"
+    failures = tmp_path / "failures.json"
+
+    assert run(source, db, failures) == 0
+    assert run(source, db, failures) == 0
+
+    with closing(sqlite3.connect(db)) as connection:
+        count = connection.execute("SELECT COUNT(*) FROM sales").fetchone()[0]
+    assert count == 1
+    assert not failures.exists()
+
+
+def test_invalid_row_is_reported(tmp_path):
+    source = tmp_path / "sales.csv"
+    source.write_text(
+        HEADER
+        + "A1,Ada,-5,usd,2026-01-01T00:00:00Z\n"
+        + "A2,Grace,12.50,usd,2026-01-02T00:00:00Z\n",
+        encoding="utf-8",
+    )
+    db = tmp_path / "sales.db"
+    failures = tmp_path / "failures.json"
+
+    assert run(source, db, failures) == 1
+    report = json.loads(failures.read_text(encoding="utf-8"))
+    assert report[0]["line"] == 2
+    with closing(sqlite3.connect(db)) as connection:
+        count = connection.execute("SELECT COUNT(*) FROM sales").fetchone()[0]
+    assert count == 1
+```
+
+Add cases for a missing header, malformed dates, duplicate order IDs, unknown columns, and a database failure. Use `tmp_path` for every file. Run `python3 -m pytest -q`.
+
+## Production hardening still required
+
+This pipeline is runnable, not finished. Before production, add configuration through environment variables rather than hard-coded paths, and credentials through a secret manager. Replace local SQLite with PostgreSQL when multiple workers need concurrent writes, and introduce schema migrations instead of relying on `CREATE TABLE IF NOT EXISTS`.
+
+The API variant needs timeouts, bounded retries with backoff, rate-limit handling, pagination, and a durable watermark. Scheduling needs a lock to prevent overlapping runs, a timezone decision, missed-run recovery, and alerting when a run fails or processes zero rows unexpectedly. Monitoring should track rows extracted, rejected, loaded, and updated, plus run duration and lag.
+
+Operationally, define retention and PII rules, back up the database, test restore, and publish a dead-letter report. Add CI that runs tests, linting, and type checking; build an installable artifact; run the pipeline against a staging copy; and verify idempotency there. Containerization should use a non-root user and read-only mounts where possible.
+
+Data quality needs its own contract: required columns, accepted currencies, duplicate policy, late-arriving records, and what “success” means when some rows fail. Those decisions belong in tests, not in a comment.
+
+## Practice
+
+1. Add a `--source` option that reads JSON from an HTTP endpoint with `httpx`, using the same `Sale` model and failure report.
+2. Add a watermark table so incremental runs only request records updated since the last successful load. Test a rerun with no new data.
+3. Write a query that reports total cents by currency and day, and expose it as a `report` subcommand.
+4. Simulate a database failure during load and prove the transaction leaves no partial batch. Then prove a retry succeeds.
+5. Extend the failure report with a machine-readable error code and add a test asserting the code for an invalid amount versus a malformed date.
+6. Package the project, install the wheel in a clean environment, and run the full pipeline from the installed command against a sample file.

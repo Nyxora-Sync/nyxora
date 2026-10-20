@@ -13,7 +13,7 @@ import { absoluteUrl, pageMetadata } from '@/lib/seo'
 export const metadata: Metadata = pageMetadata({
   title: 'Frequently Asked Questions',
   description:
-    'Answers about MERN Learn: cost, accounts, tracks, progress, the playground, contributing, accessibility, and licenses.',
+    'Answers about Nyxora Sync: cost, accounts, tracks, progress, the playground, contributing, accessibility, and licenses.',
   path: '/faq',
 })
 

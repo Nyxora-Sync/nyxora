@@ -1,0 +1,196 @@
+Small scripts can live on dictionaries and functions. Larger systems need names for concepts, invariants that hold across the codebase, and tools that catch mistakes before tests run. Classes, dataclasses, and type hints are three separate answers to those needs — and they are most useful when used together deliberately.
+
+## Classes model behavior and state
+
+A class groups data with the operations that keep that data valid:
+
+```python
+class Task:
+    def __init__(self, title: str, done: bool = False) -> None:
+        self.title = title.strip()
+        if not self.title:
+            raise ValueError("Title cannot be empty")
+        self.done = done
+
+    def complete(self) -> None:
+        self.done = True
+
+    def __repr__(self) -> str:
+        state = "done" if self.done else "open"
+        return f"Task(title={self.title!r}, state={state!r})"
+
+
+task = Task("Write report")
+task.complete()
+print(task)  # Task(title='Write report', state='done')
+```
+
+`__init__` establishes the invariant: a `Task` always has a non-empty title. `__repr__` is for developers and debugging; make it unambiguous. Methods that change state should be named for the change.
+
+Use properties when a value needs computation or validation without exposing a method call:
+
+```python
+class Invoice:
+    def __init__(self, subtotal: float, tax_rate: float) -> None:
+        self.subtotal = subtotal
+        self.tax_rate = tax_rate
+
+    @property
+    def total(self) -> float:
+        return self.subtotal * (1 + self.tax_rate)
+```
+
+A property should be cheap and free of surprising side effects. If reading it performs network access or mutates state, use a method with a verb instead.
+
+## Inheritance and composition
+
+Inheritance expresses an “is a” relationship. It is useful when subclasses genuinely share an interface and behavior. It is overused when the real goal is code reuse.
+
+```python
+class Storage:
+    def save(self, key: str, value: str) -> None:
+        raise NotImplementedError
+
+    def load(self, key: str) -> str | None:
+        raise NotImplementedError
+
+
+class MemoryStorage(Storage):
+    def __init__(self) -> None:
+        self._items: dict[str, str] = {}
+
+    def save(self, key: str, value: str) -> None:
+        self._items[key] = value
+
+    def load(self, key: str) -> str | None:
+        return self._items.get(key)
+```
+
+Composition expresses “has a” and usually ages better:
+
+```python
+class TaskService:
+    def __init__(self, storage: Storage, notifier: "Notifier") -> None:
+        self.storage = storage
+        self.notifier = notifier
+
+    def complete(self, key: str) -> None:
+        value = self.storage.load(key)
+        if value is None:
+            raise KeyError(key)
+        self.storage.save(key, "done")
+        self.notifier.send(f"Completed {key}")
+```
+
+The service does not inherit storage or notification behavior; it receives collaborators. That makes replacement and testing trivial. Prefer composition by default, and introduce inheritance when a stable hierarchy already exists.
+
+## Protocols and structural typing
+
+A protocol describes the methods an object must provide, without requiring inheritance:
+
+```python
+from typing import Protocol
+
+
+class Notifier(Protocol):
+    def send(self, message: str) -> None: ...
+
+
+class ConsoleNotifier:
+    def send(self, message: str) -> None:
+        print(message)
+
+
+class RecordingNotifier:
+    def __init__(self) -> None:
+        self.messages: list[str] = []
+
+    def send(self, message: str) -> None:
+        self.messages.append(message)
+```
+
+Both notifier classes satisfy `Notifier` structurally. Static checkers accept either one wherever `Notifier` is expected. This is the Pythonic alternative to forcing every implementation through a shared base class. Standard protocols such as `Iterable`, `Sequence`, `Mapping`, and `Callable` work the same way and live in `collections.abc`.
+
+## Dataclasses remove boilerplate
+
+A dataclass generates `__init__`, `__repr__`, and `__eq__` from annotated fields:
+
+```python
+from dataclasses import dataclass, field, replace
+
+
+@dataclass(frozen=True, slots=True)
+class Task:
+    id: int
+    title: str
+    tags: tuple[str, ...] = ()
+    done: bool = False
+
+    def completed(self) -> "Task":
+        return replace(self, done=True)
+
+
+@dataclass
+class Project:
+    name: str
+    tasks: list[Task] = field(default_factory=list)
+```
+
+`frozen=True` prevents attribute reassignment and makes instances hashable when their fields are hashable. `slots=True` reduces memory and catches typos that create new attributes. `replace` returns a changed copy, which suits the immutable task model.
+
+The `field(default_factory=list)` is mandatory for a mutable default. Writing `tasks: list[Task] = []` raises an error at class definition time in modern Python, but the equivalent bug in a hand-written `__init__` silently shares one list between instances.
+
+Dataclasses are for data-heavy classes. If a class has complex behavior, a hand-written class or a regular class with a few dataclass fields may be clearer.
+
+## Type hints are a design tool
+
+Annotations describe intent and power static analysis, but Python does not enforce them at runtime:
+
+```python
+from collections.abc import Iterable, Sequence
+
+
+def average(values: Sequence[float]) -> float:
+    if not values:
+        raise ValueError("average() requires at least one value")
+    return sum(values) / len(values)
+
+
+def first[T](items: Iterable[T]) -> T | None:
+    return next(iter(items), None)
+```
+
+`Sequence` accepts lists and tuples but not sets, because sets are not ordered. That is more precise than `list[float]` and more honest than `Iterable[float]`, which would allow a one-pass iterator. `first` uses the Python 3.12 type-parameter syntax; the same function can be written with a `TypeVar` if a library must support older versions.
+
+Use built-in generics (`list[str]`, `dict[str, int]`), unions with `|`, and the protocols from `collections.abc` before reaching for `typing.Any`. `Any` disables checking wherever it flows. `object` is the safe “I accept anything” type when you only need identity and printing.
+
+## Static checking
+
+Install a checker and run it in CI:
+
+```bash
+python3 -m pip install mypy
+mypy src
+```
+
+```text
+# pyproject.toml
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_ignores = true
+```
+
+Pyright is an equally good choice; it is fast and has excellent editor integration. Start with strict mode on new code. On an existing codebase, enable it incrementally rather than sprinkling `# type: ignore` everywhere. A type checker catches wrong argument types, missing attributes, impossible union branches, and forgotten return values — but it cannot validate untrusted JSON. Validate external data at the boundary with Pydantic or explicit checks.
+
+## When dynamic typing is enough
+
+A short automation script, a one-off data exploration, or a throwaway notebook does not need a full type model. Add annotations where they clarify a public function or prevent a costly mistake, and let local variables infer. Dynamic typing is a feature; the goal is not to annotate every line. The goal is to make the important contracts visible.
+
+## Practice
+
+1. Replace a dictionary-based task record with a frozen dataclass. Add a method that returns a completed copy without mutating the original.
+2. Build a `Project` dataclass containing a list of tasks. Write a function that returns only open tasks and verify that it does not modify the project.
+3. Define a `Notifier` protocol and two implementations: one prints to the console, one records messages in a list. Inject each into a service and test both.
+4. Add type hints to a function that accepts any iterable and returns a list of unique items. Check that a set, a list, and a generator all work.
+5. Run mypy or pyright in strict mode on the project. Fix every error without using `Any` or `type: ignore`, then explain which annotation was hardest to get right.

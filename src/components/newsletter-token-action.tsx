@@ -58,7 +58,7 @@ export function NewsletterTokenAction({ mode, token }: { mode: Mode; token: stri
         <div className="flex flex-wrap gap-3">
           <Button asChild>
             <Link href={mode === 'confirm' ? '/learn' : '/'}>
-              {mode === 'confirm' ? 'Start learning' : 'Back to MERN Learn'}
+              {mode === 'confirm' ? 'Start learning' : 'Back to Nyxora Sync'}
             </Link>
           </Button>
           {mode === 'unsubscribe' && (

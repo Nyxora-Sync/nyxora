@@ -1,0 +1,185 @@
+C++ gives you direct control over where values live, whether a function receives a copy, and how long an object remains valid. That control is the source of both its performance and many of its sharp edges. This lesson builds the practical model: references, pointers, `const`, type deduction, overloads, strings, and the iteration syntax you will use in every program.
+
+## Value categories without the standardese
+
+Every expression in C++ has a type and a value category. For everyday code, two categories matter:
+
+- An **lvalue** has a stable identity. A named variable is the canonical example: `int x = 4;` makes `x` an lvalue. You can take its address with `&x`.
+- An **rvalue** is a temporary value without a lasting identity: a literal such as `42`, the result of `x + 1`, or a string returned by value from a function.
+
+References and moves depend on this distinction. An lvalue reference binds to something with a stable identity. A `const` lvalue reference can also bind to a temporary, which is why `const std::string&` parameters accept both named strings and literals. Rvalue references, written with two ampersands, are mostly used to implement move semantics later in this path.
+
+The practical rule: if you can name it and take its address, it is an lvalue. If it exists only for the duration of the expression, it is an rvalue.
+
+## Initialization and type deduction
+
+Prefer brace initialization. It rejects narrowing conversions that would silently lose data:
+
+```cpp
+int count{3};
+double price{9.99};
+bool active{true};
+
+// int broken{3.5}; // error: narrowing conversion
+int rounded = static_cast<int>(3.5); // explicit and visible
+```
+
+`auto` asks the compiler to deduce a type from the initializer. It is static typing, not dynamic typing: the type is fixed at compile time.
+
+```cpp
+auto total = 0;              // int
+auto ratio = 0.75;           // double
+auto label = std::string{"items"}; // std::string
+
+const auto& name = label;    // no copy, read-only view of label
+```
+
+Deduction drops top-level `const` and references from the initializer. If you need to preserve either, write it explicitly. Use `auto` when the type is obvious from the right-hand side or painfully long; write the type when it carries meaning a reader needs.
+
+`std::int32_t` and friends from `<cstdint>` are useful when a binary format or network protocol requires an exact width. For ordinary counts, `int` and `std::size_t` are normally enough. Be careful with unsigned types: subtracting below zero wraps around instead of producing a negative number.
+
+## References versus pointers
+
+A reference is an alias for an existing object. It must be initialized, cannot be rebound, and cannot be null. A pointer stores an address, can be null, can be reseated, and supports arithmetic.
+
+```cpp
+void print(const std::string& text); // read without copying
+void increment(int& value) { ++value; }
+
+int score = 10;
+increment(score); // score is now 11
+
+int* optional = nullptr; // use when "no object" is a valid state
+if (optional != nullptr) {
+    std::cout << *optional << '\n';
+}
+```
+
+Use references for required parameters and pointers only when nullability, reseating, or low-level address work is part of the design. A reference can still dangle if the object it refers to dies, so lifetime discipline matters more than the syntax.
+
+Pass small, cheap types such as `int` and `double` by value. Pass larger objects by `const` reference when the function only reads them. Pass by non-const reference when the function genuinely modifies the caller's object. Returning a reference to a local variable is always a bug:
+
+```cpp
+const std::string& broken() {
+    std::string local = "gone";
+    return local; // dangling reference
+}
+```
+
+Return by value instead. Modern C++ elides the copy or moves the result efficiently.
+
+## `const` means "I will not modify through this"
+
+`const` is a contract that lets readers trust a function and lets the compiler catch accidental writes.
+
+```cpp
+int x = 1;
+int y = 2;
+
+const int* p = &x; // pointer to const int: cannot write through p
+p = &y;            // can reseat
+
+int* const q = &x; // const pointer: can write through q
+*q = 5;            // fine
+// q = &y;         // error: cannot reseat
+```
+
+Read pointer declarations from right to left: `q` is a const pointer to an `int`; `p` is a pointer to a const `int`. In classes, mark member functions `const` when they do not change logical state. That is what allows them to be called on const objects.
+
+## Overloads and default arguments
+
+Function overloading lets several functions share a name when they perform the same conceptual operation on different parameter types:
+
+```cpp
+double area(double radius);              // circle
+double area(double width, double height); // rectangle
+```
+
+The compiler chooses an overload from the argument types. You cannot overload on return type alone, and you should avoid overloads that require surprising implicit conversions. An `int` argument can match both an `int` overload and a `double` overload; the exact match wins, but a mix of conversions can create ambiguity.
+
+Default arguments fill in trailing parameters:
+
+```cpp
+std::string greet(std::string_view name, std::string_view greeting = "Hello");
+```
+
+Defaults must be trailing, and a default should appear only once across the declaration and definition, normally in the header. Defaults plus overloads can make a call ambiguous, so keep the set small and predictable.
+
+## `std::string` and `std::string_view`
+
+`std::string` owns its characters and manages the buffer automatically. `std::string_view` is a non-owning pointer-and-length pair. It is cheap to copy and ideal for read-only parameters, but it does not extend the lifetime of the text it points to.
+
+```cpp
+#include <string>
+#include <string_view>
+
+std::size_t countSpaces(std::string_view text) {
+    std::size_t spaces = 0;
+    for (char ch : text) {
+        if (ch == ' ') {
+            ++spaces;
+        }
+    }
+    return spaces;
+}
+
+std::string owned = "hello world";
+std::cout << countSpaces(owned) << '\n';
+std::cout << countSpaces("literal") << '\n';
+```
+
+Never return a `string_view` that points into a local string:
+
+```cpp
+std::string_view dangling() {
+    std::string local = "temporary";
+    return local; // the string dies here
+}
+```
+
+Use `std::string` when you need to store or modify text, and `std::string_view` when you only need to inspect it during a call. A view is not guaranteed to be null-terminated, so do not pass its `.data()` to a C function that expects a null-terminated string.
+
+## Range-based for and structured bindings
+
+Range-based loops remove index bookkeeping. Choose the reference form deliberately:
+
+```cpp
+std::vector<std::string> names{"Ada", "Linus", "Grace"};
+
+for (const auto& name : names) {
+    std::cout << name << '\n'; // read only, no copy
+}
+
+for (auto& name : names) {
+    name += "!";
+}
+```
+
+Structured bindings unpack pairs, tuples, and small structs:
+
+```cpp
+std::map<std::string, int> stock{{"bolts", 40}, {"nuts", 25}};
+
+for (const auto& [part, quantity] : stock) {
+    std::cout << part << ": " << quantity << '\n';
+}
+```
+
+Use `const auto&` in the loop when you do not intend to modify the map. Writing `auto [part, quantity]` copies each pair; for strings and large values that is wasted work. You cannot modify the key of a map element, because the key is const.
+
+## Common mistakes
+
+- Returning a reference or `string_view` to a local object, producing a dangling handle.
+- Writing `for (auto item : items)` and silently copying every element.
+- Confusing `const int*` with `int* const`.
+- Repeating a default argument in both declaration and definition.
+- Assuming `auto` means "no type" or that it preserves const and references automatically.
+- Using a pointer where a reference expresses the contract better, or a reference where null is a legitimate state.
+
+## Practice
+
+1. Write `void scale(double& value, double factor)` and call it on a local variable. Then rewrite it to return a new `double` and compare which interface is clearer.
+2. Create a `std::map<std::string, int>` of three item counts, print it with structured bindings, and increment one count through a reference.
+3. Write `std::string_view trimLeft(std::string_view text)` that skips leading spaces. Test it with a named `std::string` and a string literal.
+4. Write two overloads of `describe`: one for `int`, one for `double`. Call both and then call with a `float`, noting which overload is selected.
+5. Revisit the `dangling` function from the string section. Rewrite it to return a `std::string` instead of a `std::string_view`, or make the caller own the storage. Explain the lifetime in one sentence.

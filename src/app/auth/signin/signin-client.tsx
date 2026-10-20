@@ -83,7 +83,7 @@ function SignInContent({ enabled }: { enabled: EnabledProviders }) {
             <Link href="/" className="mb-6 inline-block">
               <Image
                 src="/site-logo.jpg"
-                alt="MERN Learn"
+                alt="Nyxora Sync"
                 width={480}
                 height={240}
                 sizes="260px"

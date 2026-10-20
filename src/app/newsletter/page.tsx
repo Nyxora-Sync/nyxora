@@ -15,7 +15,7 @@ import { NEWSLETTER_ENABLED } from '@/lib/newsletter-feature'
 export const metadata: Metadata = pageMetadata({
   title: 'Newsletter',
   description:
-    'Occasional MERN Learn updates: new modules, major lesson rewrites, and community milestones. Double opt-in, no spam, unsubscribe anytime.',
+    'Occasional Nyxora Sync updates: new modules, major lesson rewrites, and community milestones. Double opt-in, no spam, unsubscribe anytime.',
   path: '/newsletter',
 })
 

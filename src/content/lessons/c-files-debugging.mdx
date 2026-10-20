@@ -1,0 +1,215 @@
+Files are where a program meets the messy outside world: missing paths, permission errors, partial writes, malformed input, and data that outlives a single run. C gives you a small, explicit I/O API through `stdio.h`. It also gives you very little automatic protection, so checking every operation is part of writing correct code.
+
+This lesson covers text and binary I/O, error reporting, exit status, and the debugger and sanitizer tools you will use when a program misbehaves.
+
+## Opening files
+
+`fopen` returns a `FILE *` handle, or `NULL` on failure:
+
+```c
+#include <errno.h>
+#include <stdio.h>
+#include <string.h>
+
+int main(void)
+{
+    const char *path = "data.txt";
+    FILE *file = fopen(path, "r");
+    if (file == NULL) {
+        fprintf(stderr, "cannot open %s: %s\n", path, strerror(errno));
+        return 1;
+    }
+
+    /* use the file */
+
+    if (fclose(file) != 0) {
+        perror("fclose");
+        return 1;
+    }
+    return 0;
+}
+```
+
+The common modes are:
+
+- `"r"`: read an existing text file.
+- `"w"`: create or **truncate** a text file for writing.
+- `"a"`: append to a text file, creating it if needed.
+- `"r+"`: read and write an existing file.
+- `"w+"`: create or truncate, then read and write.
+- `"a+"`: append and read.
+- `"rb"`, `"wb"`, `"ab"`, and the corresponding plus modes: binary versions.
+
+`"w"` destroys existing contents immediately. There is no confirmation prompt. Use `"a"` when you mean to add records, and use a temporary file plus a rename when replacing important data atomically.
+
+On POSIX systems, text and binary modes behave the same for many purposes. On Windows, text mode translates line endings and treats end-of-file markers differently. Open the mode that matches the data, not the platform you happen to be using.
+
+## Reading text
+
+`fgets` reads at most a fixed number of characters and always null-terminates the buffer. It stops at a newline or when the buffer is full:
+
+```c
+#include <stdio.h>
+#include <string.h>
+
+void print_lines(FILE *file)
+{
+    char line[256];
+
+    while (fgets(line, sizeof line, file) != NULL) {
+        line[strcspn(line, "\n")] = '\0';
+        puts(line);
+    }
+
+    if (ferror(file)) {
+        perror("reading");
+    }
+}
+```
+
+A buffer of 256 bytes may be too small for a line. When the input does not end with a newline and the buffer is full, the rest of the line is still waiting in the stream. For record-oriented formats, detect that condition and either grow the buffer or discard the remainder deliberately. Do not silently split one logical record into two.
+
+`feof` does not predict the end of a file. It becomes true only after a read attempts to pass the end. A loop that checks `feof` before reading often processes the last buffer twice. Test the return value of the read instead.
+
+`fscanf` reads formatted tokens, not lines. It skips leading whitespace, leaves trailing newlines in the stream, and can fail halfway through a record. When input is line-oriented, read a line with `fgets` and parse it with `sscanf`, checking the conversion count.
+
+## Writing text
+
+`fprintf` and `fputs` write text. Check their return values when a failed write matters, and always check `fclose` for output files: buffered writes may fail only when the buffer is flushed at close.
+
+```c
+FILE *out = fopen("report.txt", "w");
+if (out == NULL) {
+    perror("fopen");
+    return 1;
+}
+if (fprintf(out, "total: %d\n", 42) < 0) {
+    perror("fprintf");
+    fclose(out);
+    return 1;
+}
+if (fclose(out) != 0) {
+    perror("fclose");
+    return 1;
+}
+```
+
+Use `fflush` only when you deliberately need data visible before closing. It does not replace error handling, and calling it on every line can hurt performance.
+
+## Binary files
+
+For binary data, use `fread` and `fwrite`. Their return value is the number of complete elements transferred, which may be less than requested at end of file or on error:
+
+```c
+#include <stdint.h>
+#include <stdio.h>
+
+int write_values(const char *path)
+{
+    uint32_t values[3] = {10, 20, 30};
+    FILE *file = fopen(path, "wb");
+    if (file == NULL) {
+        return 0;
+    }
+
+    size_t written = fwrite(values, sizeof values[0], 3, file);
+    int ok = (written == 3);
+
+    if (fclose(file) != 0) {
+        ok = 0;
+    }
+    return ok;
+}
+```
+
+Check the element count, not the byte count. A short write may indicate a full disk or another error. For reads, distinguish end of file from failure with `feof` and `ferror` after the read returns short.
+
+Do not write a struct that contains pointers, and do not assume raw structs are portable between compilers or machines. Padding, alignment, integer width, and byte order can differ. Serialize fields explicitly for a stable file format.
+
+## Error reporting with errno
+
+`errno` holds an error number set by a failed library call. It is meaningful only immediately after a failure, and successful calls may leave an old value behind. Save it before doing anything else:
+
+```c
+#include <errno.h>
+#include <stdio.h>
+#include <string.h>
+
+FILE *open_file(const char *path)
+{
+    errno = 0;
+    FILE *file = fopen(path, "r");
+    if (file == NULL) {
+        fprintf(stderr, "%s: %s\n", path, strerror(errno));
+    }
+    return file;
+}
+```
+
+`perror("label")` is the compact form. Use `strerror` when you need to embed the message in a larger string. Include the path and operation in the error; "No such file" without a filename is rarely enough.
+
+## Exit codes
+
+Return `EXIT_SUCCESS` or `EXIT_FAILURE` from `main`, or return 0 and a nonzero value. Scripts, Makefiles, and CI systems decide whether a command succeeded from that status. When a program fails to open a required file, report the problem and return failure. Do not print an error and then continue as if the data were valid.
+
+## GDB basics
+
+Compile with debugging information and without aggressive optimization:
+
+```bash
+cc -std=c17 -g -O0 -Wall -Wextra app.c -o app
+gdb ./app
+```
+
+Useful commands:
+
+```text
+break main          stop at the start of main
+run                 start the program
+next                execute the next source line, stepping over calls
+step                enter the next function call
+print value         inspect a variable
+info locals         show local variables
+backtrace           show the call stack
+continue            resume until the next breakpoint or crash
+quit                leave GDB
+```
+
+Set a breakpoint just before a suspicious line, run, inspect the variables, then step. A debugger is most useful when you have a small reproduction, not when you randomly break everywhere.
+
+## Sanitizers and Valgrind
+
+AddressSanitizer catches out-of-bounds access, use-after-free, and many leaks. UndefinedBehaviorSanitizer catches signed overflow and other invalid operations:
+
+```bash
+cc -std=c17 -g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer app.c -o app
+./app
+```
+
+Valgrind runs an unmodified binary and reports invalid memory accesses and leaks:
+
+```bash
+valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes ./app
+```
+
+Sanitizers are faster and usually easier to integrate into development builds. Valgrind is useful when recompiling with sanitizer flags is inconvenient. Both are better than guessing from a crash.
+
+## Common mistakes
+
+- Ignoring a `NULL` return from `fopen` and calling `fread` on it.
+- Using `"w"` when `"a"` was intended, then wondering where the old records went.
+- Controlling a read loop with `feof` instead of the read function's return value.
+- Mixing `scanf` and `fgets` without consuming the newline left behind by `scanf`.
+- Forgetting that `fclose` can fail after a write.
+- Treating a short `fread` or `fwrite` as complete.
+- Assuming raw structs are a portable file format.
+- Reading `errno` after another call has overwritten it.
+
+## Practice
+
+1. Write a program that copies a text file line by line. Report the input path and the system error if either open or close fails.
+2. Write a program that reads integers from a text file with `fgets` and `sscanf`, skips malformed lines with a warning, and prints the sum.
+3. Save an array of integers to a binary file, read it back, and verify that every value matches. Test with a short read and report whether it was end of file or an I/O error.
+4. Trigger a null dereference and a buffer overflow in separate programs. Find both with GDB, then rebuild with sanitizers and compare the reports.
+5. Create a deliberate memory leak and run it under Valgrind. Explain which allocation is still reachable and which function should have freed it.
+6. Make a program return a failure status after a missing file, then check the status from a shell script with `$?`.

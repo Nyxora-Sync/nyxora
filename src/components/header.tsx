@@ -7,7 +7,7 @@ import { usePathname } from 'next/navigation'
 import { useSession, signOut } from 'next-auth/react'
 import { useTheme } from 'next-themes'
 import { AnimatePresence, motion, useReducedMotion, useScroll, useSpring } from 'motion/react'
-import { Menu, X, Sun, Moon, User, LogOut, BookOpen, Trophy, Users, Code2, Rocket, Search } from 'lucide-react'
+import { Menu, X, Sun, Moon, User, LogOut, BookOpen, Trophy, Users, Code2, Rocket, Search, Languages } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils'
 
 const navigation = [
   { name: 'Learn', href: '/learn', icon: BookOpen },
+  { name: 'Languages', href: '/learn/languages', icon: Languages },
   { name: 'Progress', href: '/dashboard', icon: Trophy, auth: true },
   { name: 'Showcase', href: '/community/showcase', icon: Rocket },
   { name: 'Community', href: '/community', icon: Users },
@@ -55,7 +56,7 @@ export function Header() {
     >
       <nav className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8" aria-label="Main navigation">
         <div className="flex items-center gap-8">
-          <Link href="/" className="flex shrink-0 items-center gap-2" aria-label="MERN Learn Home">
+          <Link href="/" className="flex shrink-0 items-center gap-2" aria-label="Nyxora Sync Home">
             <Image
               src="/site-mark.webp"
               alt=""
@@ -64,7 +65,7 @@ export function Header() {
               className="h-9 w-9 rounded-lg object-cover transition-transform duration-300 hover:scale-[1.03]"
               priority
             />
-            <span className="whitespace-nowrap font-bold text-xl font-sans">MERN Learn</span>
+            <span className="whitespace-nowrap font-bold text-xl font-sans">Nyxora Sync</span>
           </Link>
 
           <div className="hidden lg:flex lg:items-center lg:gap-6">

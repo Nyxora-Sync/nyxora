@@ -5,7 +5,7 @@ import { ProfileClient } from '@/components/community/profile-client'
 
 export const metadata: Metadata = {
   title: 'Learner Profile',
-  description: 'A MERN Learn community profile: shared projects, discussions, and learning progress.',
+  description: 'A Nyxora Sync community profile: shared projects, discussions, and learning progress.',
   robots: { index: false, follow: true },
 }
 

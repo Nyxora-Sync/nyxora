@@ -27,7 +27,7 @@ export const faqSections: FaqSection[] = [
     items: [
       {
         slug: 'is-it-free',
-        question: 'Is MERN Learn really free?',
+        question: 'Is Nyxora Sync really free?',
         answer:
           'Yes. Every written lesson, the resource directory, the playground, progress tracking, and the community features are free to use. There is no paywall, trial, or required purchase.',
         related: { label: 'Start with the beginner track', href: '/learn/beginner' },
@@ -43,14 +43,14 @@ export const faqSections: FaqSection[] = [
         slug: 'which-track',
         question: 'Which track should I start with?',
         answer:
-          'Choose the beginner track if HTML, CSS, and JavaScript are new to you. Choose the developer track if you are already comfortable with JavaScript and want to move through Node, Express, MongoDB, React, and the advanced material faster. The shared MERN modules are the same in both tracks. After either core, the specializations track goes deeper into Next.js, cloud DevOps, scalable systems, or React Native.',
-        related: { label: 'Compare the tracks', href: '/learn' },
+          'Choose the beginner track if HTML, CSS, and JavaScript are new to you. Choose the developer track if you are already comfortable with JavaScript and want to move through Node, Express, MongoDB, React, and the advanced material faster. If you want a language path, start with Python for the gentlest on-ramp, C to understand memory, C++ for performance-sensitive systems, or C# for the .NET ecosystem. The shared MERN modules are the same in both web tracks.',
+        related: { label: 'Compare the paths', href: '/learn' },
       },
       {
         slug: 'certificates',
         question: 'Do I get a certificate or credential?',
         answer:
-          'No. MERN Learn does not issue certificates, diplomas, or accredited credentials. The lessons and projects are built to help you understand the stack and produce work you can show, not to replace a formal program.',
+          'No. Nyxora Sync does not issue certificates, diplomas, or accredited credentials. The lessons and projects are built to help you understand the stack and produce work you can show, not to replace a formal program.',
         related: { label: 'Build something for the showcase', href: '/community/showcase' },
       },
       {

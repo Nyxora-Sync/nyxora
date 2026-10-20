@@ -145,7 +145,7 @@ export function isNewsletterAdmin(email: string | null | undefined): boolean {
 }
 
 function fromAddress(): string {
-  return process.env.EMAIL_FROM || 'MERN Learn <noreply@localhost>'
+  return process.env.EMAIL_FROM || 'Nyxora Sync <noreply@localhost>'
 }
 
 function createTransport(pool = false) {
@@ -204,7 +204,7 @@ function emailShell({
     <div style="max-width:600px;margin:0 auto;padding:32px 16px;">
       <div style="background:#ffffff;border:1px solid #e4e4e7;border-radius:16px;overflow:hidden;">
         <div style="background:linear-gradient(135deg,#064e3b,#4c1d95);padding:22px 28px;">
-          <div style="font-size:18px;font-weight:700;color:#ffffff;letter-spacing:-0.02em;">MERN Learn</div>
+          <div style="font-size:18px;font-weight:700;color:#ffffff;letter-spacing:-0.02em;">Nyxora Sync</div>
         </div>
         <div style="padding:30px 28px;">
           <h1 style="margin:0 0 18px;font-size:24px;line-height:1.3;color:#18181b;">${escapeHtml(heading)}</h1>
@@ -238,9 +238,9 @@ export async function sendNewsletterConfirmation({
     await transport.sendMail({
       from: fromAddress(),
       to: email,
-      subject: 'Confirm your MERN Learn newsletter subscription',
+      subject: 'Confirm your Nyxora Sync newsletter subscription',
       text: [
-        'Confirm your MERN Learn newsletter subscription',
+        'Confirm your Nyxora Sync newsletter subscription',
         '',
         `Open this link to confirm: ${confirmUrl}`,
         '',
@@ -248,7 +248,7 @@ export async function sendNewsletterConfirmation({
       ].join('\n'),
       html: emailShell({
         heading: 'Confirm your subscription',
-        bodyHtml: `<p style="margin:0 0 16px;font-size:15px;line-height:1.7;color:#3f3f46;">You asked to receive occasional MERN Learn curriculum updates. Confirm your address to join the list.</p>
+        bodyHtml: `<p style="margin:0 0 16px;font-size:15px;line-height:1.7;color:#3f3f46;">You asked to receive occasional Nyxora Sync curriculum updates. Confirm your address to join the list.</p>
           <p style="margin:0 0 24px;"><a href="${escapeHtml(confirmUrl)}" style="display:inline-block;background:#059669;color:#ffffff;text-decoration:none;font-weight:600;padding:12px 20px;border-radius:8px;">Confirm subscription</a></p>
           <p style="margin:0;font-size:13px;line-height:1.6;color:#71717a;">This link expires in 48 hours. If you did not sign up, ignore this email and nothing will be sent to you.</p>`,
         footerHtml: 'You received this because someone entered this address on mern-learn. If that was not you, no action is needed.',
@@ -288,8 +288,8 @@ export async function sendNewsletterBroadcast({
   ) {
     const finalSubject = isTest ? `[TEST] ${subject}` : subject
     const footerText = isTest
-      ? 'This is a test send from the MERN Learn newsletter admin page.'
-      : 'You are receiving this because you confirmed your subscription to MERN Learn updates.'
+      ? 'This is a test send from the Nyxora Sync newsletter admin page.'
+      : 'You are receiving this because you confirmed your subscription to Nyxora Sync updates.'
 
     await transport.sendMail({
       from: fromAddress(),

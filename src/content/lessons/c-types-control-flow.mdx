@@ -1,0 +1,212 @@
+C has fewer types than most modern languages, and every one of them maps closely to what the processor and memory actually support. That directness is useful, but it means you must know the width of a type, whether it can be negative, and which format specifier matches it when reading or printing.
+
+This lesson covers the core data model, then uses it to make decisions, repeat work, and read input without corrupting memory.
+
+## Integer types and their widths
+
+C guarantees only minimum ranges, not exact sizes. On a typical desktop, these are common:
+
+```c
+#include <stdio.h>
+
+int main(void)
+{
+    printf("char      %zu byte\n", sizeof(char));
+    printf("short     %zu bytes\n", sizeof(short));
+    printf("int       %zu bytes\n", sizeof(int));
+    printf("long      %zu bytes\n", sizeof(long));
+    printf("long long %zu bytes\n", sizeof(long long));
+    return 0;
+}
+```
+
+`char` is always one byte, but a C byte is at least eight bits. `int` is at least 16 bits and is usually 32. `long` is 32 bits on 64-bit Windows and 64 bits on 64-bit Linux and macOS. Never assume `int` or `long` has a particular width in portable code.
+
+When the exact width matters, use the fixed-width types from `stdint.h`:
+
+```c
+#include <stdint.h>
+
+int32_t signed_value = -42;
+uint64_t counter = 0;
+uint8_t byte = 255;
+```
+
+`int8_t`, `int16_t`, `int32_t`, and `int64_t` exist only where the platform supports them. `size_t` is the unsigned type used for sizes and array indexes; print it with `%zu`. Use `<limits.h>` for `INT_MAX`, `LONG_MAX`, and related constants.
+
+## Signed and unsigned
+
+Signed integers can be negative. Unsigned integers wrap around on overflow, modulo two to the power of the bit width. Mixing them is dangerous because the signed value is converted to unsigned in comparisons and arithmetic.
+
+```c
+int a = -1;
+unsigned int b = 1;
+
+if (a < b) {
+    puts("unexpected");
+}
+```
+
+On a typical 32-bit `unsigned int` system, `a` becomes a large unsigned value, so the comparison is false. Enable `-Wsign-compare` and keep an eye on the warnings. Prefer signed types for ordinary arithmetic, and unsigned types for sizes, bit patterns, and counters that are conceptually non-negative.
+
+## Characters and floating point
+
+A `char` is a small integer used to store a character code. Its signedness is implementation-defined. For raw bytes and lookup tables, use `unsigned char`. Character literals use single quotes: `'A'`, `'\n'`, `'\0'`.
+
+`float` usually has about six or seven significant decimal digits. `double` usually has about fifteen or sixteen and is the default choice for floating-point work. Never compare two floating-point values with `==` after arithmetic; compare the absolute difference against a small tolerance.
+
+```c
+#include <stdio.h>
+
+int main(void)
+{
+    float ratio = 1.0f / 3.0f;
+    double precise = 1.0 / 3.0;
+    printf("float:  %.9f\n", ratio);
+    printf("double: %.17f\n", precise);
+    return 0;
+}
+```
+
+The `f` suffix makes a floating-point literal `float`. Without it, the literal is `double`.
+
+## Constants and readable code
+
+Use `const` to mark a value that must not be assigned after initialization:
+
+```c
+const int max_attempts = 3;
+const double tax_rate = 0.08;
+```
+
+The compiler enforces the restriction. Prefer constants to magic numbers scattered through the program. In C, `const` does not make a variable a compile-time constant in every context; it is primarily a promise that the code will not modify it.
+
+## Printing with printf
+
+The format string must match the argument types. A mismatch is undefined behavior, even if it happens to print something plausible.
+
+```c
+#include <stdio.h>
+
+int main(void)
+{
+    int count = 3;
+    unsigned int flags = 12u;
+    long total = 900000L;
+    long long big = 1234567890123LL;
+    double price = 19.95;
+    char grade = 'A';
+
+    printf("%d\n", count);
+    printf("%u\n", flags);
+    printf("%ld\n", total);
+    printf("%lld\n", big);
+    printf("%.2f\n", price);
+    printf("%c\n", grade);
+    return 0;
+}
+```
+
+Use `%d` for `int`, `%u` for unsigned int, `%ld` for long, `%lld` for long long, `%zu` for `size_t`, `%x` for hexadecimal unsigned, `%f` for double in `printf`, `%s` for strings, and `%c` for characters. `printf` promotes `float` to `double`, so `%f` is correct for both there.
+
+`scanf` uses slightly different rules: `%f` reads a `float`, `%lf` reads a `double`, `%c` reads one character including whitespace, and `%s` skips leading whitespace and stops at the next whitespace. Always give `%s` a field width, such as `%31s` for a 32-byte buffer, and check the return value.
+
+## Reading input safely
+
+`scanf` returns the number of successful conversions. Always check that value. Never use a bare `%s` into a fixed buffer, because it has no length limit. For line-oriented input, `fgets` followed by `sscanf` is easier to make safe:
+
+```c
+#include <stdio.h>
+
+int main(void)
+{
+    char line[64];
+    int age;
+    char extra;
+
+    printf("Age: ");
+    if (fgets(line, sizeof line, stdin) == NULL) {
+        return 1;
+    }
+
+    if (sscanf(line, "%d %c", &age, &extra) != 1) {
+        puts("Please enter one whole number.");
+        return 1;
+    }
+
+    printf("Next year you will be %d.\n", age + 1);
+    return 0;
+}
+```
+
+The extra `%c` catches trailing garbage such as `42abc`. `fgets` reads at most one less than the buffer size and always terminates the string. If the line was longer than the buffer, input remains in the stream; production code should detect that and discard the rest.
+
+## Decisions and loops
+
+`if`, `else if`, and `else` work as expected. Conditions use `==`, not `=`. `switch` is useful for one integer or character value with several cases; remember `break`, or execution falls through into the next case.
+
+```c
+enum Direction { NORTH, EAST, SOUTH, WEST };
+
+const char *name_for(enum Direction d)
+{
+    switch (d) {
+    case NORTH: return "north";
+    case EAST:  return "east";
+    case SOUTH: return "south";
+    case WEST:  return "west";
+    }
+    return "unknown";
+}
+```
+
+`for` is best when the number of iterations is known. `while` is best when it is not. `do ... while` runs the body at least once.
+
+```c
+for (int i = 0; i < 5; i++) {
+    printf("%d\n", i);
+}
+
+int n = 0;
+while (n < 3) {
+    n++;
+}
+```
+
+Declaration of `i` inside the `for` is standard C99 and later. Compile with `-std=c17` or newer.
+
+## Overflow and undefined behavior
+
+Unsigned arithmetic wraps predictably. Signed overflow is undefined behavior: the compiler is allowed to assume it never happens, so the result may be anything.
+
+```c
+#include <limits.h>
+
+int a = INT_MAX;
+a = a + 1; /* undefined behavior */
+
+unsigned int b = UINT_MAX;
+b = b + 1; /* wraps to 0 */
+```
+
+Check limits before arithmetic that might overflow, or use a wider type. Do not rely on signed wraparound to implement logic.
+
+## Common mistakes
+
+- Using `%d` for a `long`, `size_t`, or `double`.
+- Forgetting `&` in `scanf` arguments for ordinary variables.
+- Reading a string with `%s` and no field width.
+- Comparing signed and unsigned values without thinking about conversion.
+- Assuming `int` is always 32 bits.
+- Writing `if (x = 5)` instead of `if (x == 5)`.
+- Forgetting `break` in a `switch`.
+- Using `==` on floating-point results.
+
+## Practice
+
+1. Write a program that reads a whole number and prints its square, its remainder modulo 7, and its value in hexadecimal.
+2. Read a Celsius temperature as a `double` and print Fahrenheit to two decimal places. Reject input that contains trailing characters.
+3. Print the minimum and maximum values of `int`, `unsigned int`, and `long` using `<limits.h>`. Then print `sizeof` for each type.
+4. Write a menu using `switch` that converts between kilograms and pounds, and quits on `q`. Loop until the user quits.
+5. Demonstrate unsigned wraparound and explain why the equivalent signed operation is not safe. Compile with `-fsanitize=undefined` and see whether the sanitizer reports it.
+6. Write a loop that reads up to ten integers with `fgets` and `sscanf`, stops at end of input, and reports the sum and average. Handle invalid lines without terminating the program.

@@ -1,0 +1,194 @@
+Real programs outgrow a single file quickly. They load configuration, read and write data, call other modules, and fail in ways that must be explained to a user. The tools in this lesson keep those concerns separate: imports for structure, `pathlib` for paths, context managers for cleanup, exceptions for failure, and logging for diagnosis.
+
+## Modules and packages
+
+A module is a `.py` file. A package is a directory of modules with an `__init__.py`. A clean layout looks like this:
+
+```text
+taskman/
+├── pyproject.toml
+└── src/
+    └── taskman/
+        ├── __init__.py
+        ├── storage.py
+        └── cli.py
+```
+
+Inside the package, import other modules by their full package path:
+
+```python
+# src/taskman/cli.py
+from pathlib import Path
+
+from taskman.storage import load_tasks
+
+
+def main() -> None:
+    tasks = load_tasks(Path("tasks.json"))
+    print(f"Loaded {len(tasks)} tasks")
+```
+
+Absolute imports are easier to read and survive file moves. Relative imports such as `from .storage import load_tasks` also work inside a package, but they are best reserved for large packages with a strong internal structure. Avoid `from module import *`; it hides where names come from and can silently overwrite them.
+
+The `__init__.py` file can be empty. Use it to expose a small public API, not to perform expensive work at import time:
+
+```python
+# src/taskman/__init__.py
+"""Command-line task manager."""
+
+__version__ = "0.1.0"
+```
+
+Circular imports are a design signal. If `a.py` imports `b.py` and `b.py` imports `a.py`, move the shared code into a third module or pass the dependency in as an argument. Importing should not read files, start servers, or print banners.
+
+## Paths with pathlib
+
+`pathlib` turns paths into objects instead of fragile strings:
+
+```python
+from pathlib import Path
+
+data_dir = Path("data")
+data_dir.mkdir(parents=True, exist_ok=True)
+
+path = data_dir / "tasks.json"
+print(path.exists())
+print(path.resolve())
+
+for csv_file in sorted(data_dir.glob("*.csv")):
+    print(csv_file.name, csv_file.stat().st_size)
+```
+
+The `/` operator joins path segments portably. `mkdir(parents=True, exist_ok=True)` creates missing parents and does not fail if the directory already exists. `glob` finds files in one directory; `rglob` searches recursively.
+
+Relative paths are resolved against the process's current working directory, not the script's location. That distinction breaks cron jobs and services started from another directory. For files that ship with a package, use `Path(__file__).parent`; for user data, resolve paths from an explicit configuration value.
+
+## Reading and writing files
+
+Always specify an encoding. The default depends on the operating system and locale, which makes bugs environment-specific:
+
+```python
+from pathlib import Path
+
+path = Path("data/notes.txt")
+path.parent.mkdir(parents=True, exist_ok=True)
+
+with path.open("w", encoding="utf-8") as handle:
+    handle.write("first line\n")
+    handle.write("second line\n")
+
+with path.open("r", encoding="utf-8") as handle:
+    for line in handle:
+        print(line.rstrip())
+```
+
+The `with` statement is a context manager. It guarantees the file is closed even if an exception occurs inside the block. For small files, `path.read_text(encoding="utf-8")` and `path.write_text(...)` are convenient; for large files or line-by-line processing, use `with` and iterate.
+
+JSON is the usual format for structured local data:
+
+```python
+import json
+from pathlib import Path
+
+path = Path("data/tasks.json")
+path.parent.mkdir(parents=True, exist_ok=True)
+tasks = [{"id": 1, "title": "Write lesson", "done": False}]
+
+path.write_text(json.dumps(tasks, indent=2) + "\n", encoding="utf-8")
+
+loaded = json.loads(path.read_text(encoding="utf-8"))
+print(loaded[0]["title"])
+```
+
+Writing directly to a file truncates it first. If the process dies while serializing, the old data is gone. For valuable data, write to a temporary file in the same directory and replace the original with `Path.replace`. That operation is atomic on a single filesystem.
+
+## Exceptions and custom errors
+
+Python separates expected failures from bugs using exceptions. Catch only what you can handle:
+
+```python
+from pathlib import Path
+
+
+class ConfigError(Exception):
+    """Raised when configuration is missing or invalid."""
+
+
+def load_threshold(path: Path) -> float:
+    try:
+        raw = path.read_text(encoding="utf-8")
+        value = float(raw.strip())
+    except FileNotFoundError as exc:
+        raise ConfigError(f"Missing config file: {path}") from exc
+    except ValueError as exc:
+        raise ConfigError(f"Config must contain a number: {path}") from exc
+    else:
+        if value <= 0:
+            raise ConfigError("Threshold must be positive")
+        return value
+    finally:
+        print(f"Finished reading {path}")
+```
+
+The `else` block runs only when no exception occurred. The `finally` block always runs, which is useful for cleanup and audit messages. `raise ... from exc` preserves the original cause, so the traceback shows both the low-level failure and your domain-specific explanation.
+
+Define custom exceptions for errors callers should handle differently. Do not wrap every failure in one generic exception, and never write `except Exception: pass`. That discards the information needed to fix the problem. A bare `except:` also catches keyboard interrupts and system exits.
+
+## Logging instead of print
+
+`print` is for program output a user requested. Logging is for operational events: startup, retries, degraded behavior, and failures. Logs go to standard error by default and can be filtered by level without editing every call:
+
+```python
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+def process(path: str) -> None:
+    logger.info("Processing %s", path)
+    try:
+        with open(path, encoding="utf-8") as handle:
+            rows = handle.readlines()
+    except OSError:
+        logger.exception("Could not read %s", path)
+        raise
+    logger.info("Read %d rows", len(rows))
+
+
+if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    process("data/notes.txt")
+```
+
+Use `logger.exception` inside an exception handler; it includes the traceback. Pass values as arguments rather than formatting them into the message, so the logging system can skip formatting when the level is disabled.
+
+## Safe input
+
+`input()` always returns a string. Convert it deliberately and validate the result:
+
+```python
+def ask_port() -> int:
+    while True:
+        raw = input("Port: ").strip()
+        try:
+            port = int(raw)
+        except ValueError:
+            print("Enter a whole number.")
+            continue
+        if 1 <= port <= 65535:
+            return port
+        print("Port must be between 1 and 65535.")
+```
+
+Never pass user input to `eval`. For command-line tools, `argparse` parses and validates arguments, and `pathlib` keeps file handling predictable. Validate before touching the filesystem or database, and fail with a message that tells the user what to change.
+
+## Practice
+
+1. Create a package with `storage.py` and `cli.py`. Expose `load_tasks` and `save_tasks` from `storage.py`, import them absolutely in `cli.py`, and run the package with `python3 -m`.
+2. Write a function that counts non-empty lines in every `.txt` file under a directory. Use `rglob`, `path.open`, and a context manager. Log unreadable files with `logger.exception` and continue.
+3. Store a list of dictionaries as JSON, reload it, and deliberately corrupt one character. Catch `json.JSONDecodeError`, report the file and line number, and exit with a non-zero status.
+4. Define `ValidationError` for a task title that is empty or longer than 120 characters. Raise it from a validator and show the original cause when appropriate.
+5. Write an interactive prompt that accepts a number between 1 and 100, rejects text and out-of-range values, and stops only on valid input.

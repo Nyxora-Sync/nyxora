@@ -25,35 +25,35 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: {
-    default: 'MERN Learn — Master the MERN Stack for Free',
-    template: '%s | MERN Learn',
+    default: 'Nyxora Sync — Learn MERN, C, C++, C#, and Python for Free',
+    template: '%s | Nyxora Sync',
   },
   description: defaultDescription,
   applicationName: siteName,
-  keywords: ['MERN', 'MongoDB', 'Express', 'React', 'Node.js', 'web development', 'full stack', 'learn programming', 'free resources'],
-  authors: [{ name: 'MERN Learn Community' }],
-  creator: 'MERN Learn',
-  publisher: 'MERN Learn',
+  keywords: ['MERN', 'MongoDB', 'Express', 'React', 'Node.js', 'C', 'C++', 'C#', 'Python', 'web development', 'full stack', 'learn programming', 'free resources'],
+  authors: [{ name: 'Nyxora Sync Community' }],
+  creator: 'Nyxora Sync',
+  publisher: 'Nyxora Sync',
   robots: 'index, follow',
   openGraph: {
     type: 'website',
     locale: 'en_US',
     url: absoluteUrl('/'),
     siteName,
-    title: 'MERN Learn — Master the MERN Stack for Free',
+    title: 'Nyxora Sync — Learn MERN, C, C++, C#, and Python for Free',
     description: defaultDescription,
     images: [
       {
         url: '/og-image.jpg',
         width: 1200,
         height: 630,
-        alt: 'MERN Learn - Master the MERN Stack',
+        alt: 'Nyxora Sync — learn web development and programming languages',
       },
     ],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'MERN Learn — Master the MERN Stack for Free',
+    title: 'Nyxora Sync — Learn MERN, C, C++, C#, and Python for Free',
     description: defaultDescription,
     images: ['/og-image.jpg'],
   },
@@ -80,7 +80,7 @@ const siteSchema = [
     url: absoluteUrl('/'),
     logo: absoluteUrl('/icon-512.png'),
     description:
-      'A free, open-source MERN stack curriculum with written lessons, playgrounds, progress tracking, and a project showcase.',
+      'A free, open-source curriculum for the MERN stack, C, C++, C#, and Python, with written lessons, playgrounds, progress tracking, and a project showcase.',
     sameAs: ['https://github.com/Nyxora-Sync/mern-learn'],
   },
   {

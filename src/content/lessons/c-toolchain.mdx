@@ -1,0 +1,164 @@
+C is a small, compiled language that sits close to the machine. It gives you direct control over memory and data layout, and it runs almost everywhere: operating system kernels, embedded firmware, databases, language runtimes, and command-line tools are all built with it. Learning C means learning the toolchain as much as the syntax, because source code does nothing until a compiler turns it into a program.
+
+This lesson takes you from a text file to a running executable, then shows the errors you will meet along the way.
+
+## What C is used for
+
+C is the language of systems software. The Linux kernel is mostly C, as are SQLite, Redis, and the reference implementations of many language runtimes. It is also common in embedded work because a C compiler exists for nearly every processor, and the language does not require a large runtime.
+
+C is not a good first choice for every task. It has no built-in strings, hash maps, or garbage collector. You manage memory yourself, which is precisely why it is useful for learning what higher-level languages do behind the scenes.
+
+## From source to executable
+
+A C build has four conceptual stages:
+
+```text
+hello.c
+  |  preprocessor   expand #include and macros
+  v
+translation unit
+  |  compiler        produce assembly
+  v
+assembly
+  |  assembler       produce an object file
+  v
+hello.o
+  |  linker          combine objects and libraries
+  v
+hello (executable)
+```
+
+The **compiler** checks syntax and types and turns each source file into an object file. The **linker** joins those object files and libraries, resolves references such as `printf`, and produces the final executable. These are separate steps, which is why a missing function definition appears as a linker error, not a syntax error.
+
+## Check your compiler
+
+GCC and Clang are the two dominant C compilers. On Linux, `cc` is usually a link to GCC. On macOS, `cc` is Clang.
+
+```bash
+cc --version
+gcc --version
+clang --version
+```
+
+If your Linux system has no compiler, install a build toolchain. On Debian or Ubuntu:
+
+```bash
+sudo apt update
+sudo apt install build-essential
+```
+
+On macOS, install the command line tools with `xcode-select --install`.
+
+## Your first program
+
+Create a file named `hello.c`:
+
+```c
+#include <stdio.h>
+
+int main(void)
+{
+    printf("Hello, C!\n");
+    return 0;
+}
+```
+
+`#include <stdio.h>` makes the declaration of `printf` visible. `main` is the entry point; execution begins there. The `void` parameter list means the function takes no arguments. `printf` writes formatted text to standard output, and `\n` ends the line. `return 0` tells the operating system that the program succeeded.
+
+`main` can also accept command-line arguments:
+
+```c
+#include <stdio.h>
+
+int main(int argc, char **argv)
+{
+    printf("Program: %s (%d argument(s))\n", argv[0], argc - 1);
+    return 0;
+}
+```
+
+`argc` counts the arguments, including the program name, and `argv` is an array of strings. Keep the simpler `int main(void)` form until you need arguments.
+
+## Compile and run
+
+```bash
+cc -std=c17 -Wall -Wextra -Wpedantic -O2 hello.c -o hello
+./hello
+```
+
+What the flags do:
+
+- `-std=c17` selects the C17 standard.
+- `-Wall` and `-Wextra` enable useful warnings.
+- `-Wpedantic` rejects non-standard extensions.
+- `-O2` enables optimization.
+- `-o hello` names the output file.
+
+The order matters: put the output flag before the source file if you prefer, but the source must be present. To stop after compilation and keep the object file:
+
+```bash
+cc -std=c17 -Wall -Wextra -c hello.c -o hello.o
+cc hello.o -o hello
+```
+
+The second command performs only the link step. If you omit `hello.o` or forget a function definition, the linker reports an undefined reference.
+
+## Exit codes are part of the interface
+
+The value returned from `main` becomes the process exit status, visible to the shell as `$?`. Zero means success. Nonzero means failure.
+
+```bash
+./hello
+echo $?
+```
+
+For portable failure codes, include `stdlib.h` and return `EXIT_SUCCESS` or `EXIT_FAILURE`. Scripts and CI systems depend on these codes, so do not return arbitrary values without a reason.
+
+## Warnings are not noise
+
+A program can compile and still be wrong. Compilers catch many mistakes under warnings. Treat warnings as errors in serious builds:
+
+```bash
+cc -std=c17 -Wall -Wextra -Wpedantic -Werror hello.c -o hello
+```
+
+`-Werror` turns every warning into a build failure. Fix the cause rather than suppressing the warning. If you must suppress one, use a narrow flag such as `-Wno-unused-parameter`, not `-w`, which hides everything.
+
+## A minimal Makefile
+
+A Makefile records the build steps so you do not retype them. This one rebuilds `hello` only when `hello.c` is newer:
+
+```text
+CC := cc
+CFLAGS := -std=c17 -Wall -Wextra -Wpedantic -O2
+
+.PHONY: clean
+
+hello: hello.c
+	$(CC) $(CFLAGS) hello.c -o $@
+
+clean:
+	rm -f hello
+```
+
+The indentation before each recipe line **must be a tab**, not spaces. `$@` expands to the target name, `hello`. `clean` does not produce a file, so it is declared phony. Run `make` to build and `make clean` to remove the executable.
+
+## Common mistakes
+
+- **Missing semicolon**: the compiler points at the next line; check the line above.
+- **Undeclared identifier**: usually a typo or a missing header. `printf` needs `stdio.h`.
+- **Implicit function declaration**: the compiler has not seen a prototype. Include the right header or declare the function before use.
+- **Undefined reference to a function**: the declaration exists, but no object file defines it. Add the source file or library to the link command.
+- **No such file or directory when running**: the build likely failed, so `hello` was never created. Read the first compiler error, not the last line.
+- **Makefile recipe errors**: spaces are not tabs. Many editors can show invisible characters.
+
+Fix the first error first. Later errors are often consequences of the first one.
+
+## Practice
+
+1. Write, compile, and run `hello.c` using `cc`. Then run it through `gcc` and `clang` separately and compare the command lines.
+2. Add a second `printf` call and an unused variable. Compile with `-Wall -Wextra` and read every warning. Remove the warning correctly, then try `-Werror`.
+3. Split the build into compile and link commands. Inspect the generated `hello.o` with `file hello.o`.
+4. Change `main` to return `EXIT_FAILURE`, run the program, and print the shell status with `echo $?`.
+5. Create the Makefile above, run `make`, touch `hello.c`, and run `make` again. Explain why the second build does or does not recompile.
+6. Break the build on purpose: misspell `printf`, omit a semicolon, and call a function that does not exist. Copy each error message and identify whether it came from the compiler or the linker.

@@ -1,0 +1,306 @@
+A command-line task manager is a small enough project to finish in one sitting and complete enough to teach the habits that scale: argument parsing, validation, persistence, filtering, and tests. You will build `taskman`, a tool with four commands — add, list, done, delete — backed by a JSON file.
+
+## Project structure
+
+```text
+taskman/
+├── pyproject.toml
+├── README.md
+├── src/
+│   └── taskman/
+│       ├── __init__.py
+│       ├── __main__.py
+│       ├── cli.py
+│       ├── storage.py
+│       └── tasks.py
+└── tests/
+    ├── test_storage.py
+    └── test_tasks.py
+```
+
+Create a virtual environment, install the package in editable mode, and install pytest:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install -e .
+python3 -m pip install pytest
+```
+
+The separation is deliberate. `tasks.py` owns validation and filtering. `storage.py` owns the JSON file. `cli.py` owns argument parsing and user messages. Tests can import the first two without launching a parser.
+
+A minimal `pyproject.toml` makes the project installable and exposes the console command:
+
+```text
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "taskman"
+version = "0.1.0"
+requires-python = ">=3.12"
+
+[project.scripts]
+taskman = "taskman.cli:main"
+```
+
+```python
+# src/taskman/__main__.py
+from taskman.cli import main
+
+raise SystemExit(main())
+```
+
+The main guard is unnecessary in `__main__.py` because that file is only executed as a module; the return value becomes the process exit status.
+
+## The task record and validation
+
+A task is a plain dictionary. Keep the schema explicit in one place:
+
+```python
+# src/taskman/tasks.py
+from datetime import datetime, timezone
+from typing import Any
+
+
+class TaskError(ValueError):
+    """A user-facing task validation error."""
+
+
+def validate_title(title: str) -> str:
+    cleaned = " ".join(title.split())
+    if not cleaned:
+        raise TaskError("Title cannot be empty")
+    if len(cleaned) > 120:
+        raise TaskError("Title must be 120 characters or fewer")
+    return cleaned
+
+
+def new_task(task_id: int, title: str, tags: list[str] | None = None) -> dict[str, Any]:
+    cleaned_tags = {tag.strip().lower() for tag in tags or [] if tag.strip()}
+    return {
+        "id": task_id,
+        "title": validate_title(title),
+        "done": False,
+        "tags": sorted(cleaned_tags),
+        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+```
+
+Normalizing the title once prevents duplicate spaces and accidental empty strings. Tags are lowercased and deduplicated so `--tag Work` and `--tag work` mean the same thing. The timestamp is timezone-aware; naive local timestamps become ambiguous across daylight-saving changes and server timezones.
+
+`argparse` validates the shape of the command line, but `new_task` remains the authority for domain rules. Keeping validation in the domain layer means a future web handler or import script gets the same checks. Store a schema version if the JSON file must outlive several releases; readers should reject unknown versions instead of guessing at their meaning.
+
+Filtering belongs beside the record logic:
+
+```python
+def filter_tasks(
+    tasks: list[dict[str, Any]],
+    *,
+    status: str = "all",
+    tag: str | None = None,
+) -> list[dict[str, Any]]:
+    if status not in {"all", "open", "done"}:
+        raise TaskError(f"Unknown status: {status}")
+
+    selected = tasks
+    if status != "all":
+        wanted_done = status == "done"
+        selected = [task for task in selected if task["done"] is wanted_done]
+    if tag:
+        normalized = tag.strip().lower()
+        selected = [task for task in selected if normalized in task["tags"]]
+    return selected
+```
+
+## Storage with a safe write
+
+Load missing files as an empty list. Treat malformed JSON as an operational error with context, not a traceback the user cannot act on:
+
+```python
+# src/taskman/storage.py
+import json
+from pathlib import Path
+from typing import Any
+
+
+class StorageError(RuntimeError):
+    """The task file could not be read or written."""
+
+
+def load_tasks(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise StorageError(f"{path} is not valid JSON: {exc}") from exc
+    if not isinstance(data, list):
+        raise StorageError(f"{path} must contain a JSON list")
+    return data
+
+
+def save_tasks(path: Path, tasks: list[dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(
+        json.dumps(tasks, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(path)
+```
+
+Writing to a temporary file and replacing the original prevents a half-written JSON file if the process is interrupted. This is not a full concurrency solution — two `taskman` processes can still overwrite each other — but it protects the most common failure.
+
+## Parsing commands with argparse
+
+`argparse` gives you help text, validation, and error messages for free:
+
+```python
+# src/taskman/cli.py
+import argparse
+import sys
+from pathlib import Path
+
+from taskman.storage import StorageError, load_tasks, save_tasks
+from taskman.tasks import TaskError, filter_tasks, new_task
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="taskman")
+    parser.add_argument("--file", type=Path, default=Path("tasks.json"))
+
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    add = subparsers.add_parser("add", help="Add a task")
+    add.add_argument("title")
+    add.add_argument("--tag", action="append", default=[])
+
+    listing = subparsers.add_parser("list", help="List tasks")
+    listing.add_argument("--status", choices=["all", "open", "done"], default="all")
+    listing.add_argument("--tag")
+
+    done = subparsers.add_parser("done", help="Mark a task complete")
+    done.add_argument("id", type=int)
+
+    delete = subparsers.add_parser("delete", help="Delete a task")
+    delete.add_argument("id", type=int)
+    return parser
+```
+
+`action="append"` lets a user write `--tag work --tag urgent`. The `choices` list makes invalid statuses fail before your code runs. A global `--file` option makes tests and alternate task lists easy.
+
+The command handlers stay small:
+
+```python
+def run(args: argparse.Namespace) -> None:
+    tasks = load_tasks(args.file)
+
+    if args.command == "add":
+        task_id = max((task["id"] for task in tasks), default=0) + 1
+        task = new_task(task_id, args.title, args.tag)
+        tasks.append(task)
+        save_tasks(args.file, tasks)
+        print(f"Added #{task_id}: {task['title']}")
+
+    elif args.command == "list":
+        visible = filter_tasks(tasks, status=args.status, tag=args.tag)
+        if not visible:
+            print("No matching tasks")
+            return
+        for task in visible:
+            marker = "x" if task["done"] else " "
+            tags = f" [{', '.join(task['tags'])}]" if task["tags"] else ""
+            print(f"[{marker}] #{task['id']} {task['title']}{tags}")
+
+    elif args.command in {"done", "delete"}:
+        match = next((task for task in tasks if task["id"] == args.id), None)
+        if match is None:
+            raise TaskError(f"No task with id {args.id}")
+        if args.command == "done":
+            match["done"] = True
+            save_tasks(args.file, tasks)
+            print(f"Completed #{args.id}")
+        else:
+            tasks.remove(match)
+            save_tasks(args.file, tasks)
+            print(f"Deleted #{args.id}")
+```
+
+Finally, `main` converts domain errors into a non-zero exit code instead of a traceback:
+
+```python
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    try:
+        run(args)
+    except (TaskError, StorageError) as exc:
+        print(f"taskman: {exc}", file=sys.stderr)
+        return 1
+    return 0
+```
+
+Call `raise SystemExit(main())` from `__main__.py`.
+
+## Running the command
+
+With the package installed in editable mode, the module entry point is available without a wrapper script:
+
+```bash
+python3 -m taskman add "Write report" --tag work
+python3 -m taskman add "Buy milk"
+python3 -m taskman list --status open
+python3 -m taskman done 1
+python3 -m taskman list --tag work
+```
+
+```text
+Added #1: Write report
+Added #2: Buy milk
+[ ] #1 Write report [work]
+[ ] #2 Buy milk
+Completed #1
+[x] #1 Write report [work]
+```
+
+The file path defaults to `tasks.json` in the current directory. Pass `--file` before the subcommand when you want a different store, for example `python3 -m taskman --file /tmp/demo.json list`. Keeping the option global avoids repeating it on every subcommand.
+
+Every handler follows the same sequence: load the full list, validate and mutate it, then write it back. That is appropriate for a single-user CLI. It is not appropriate for concurrent writers, because two processes can read the same version and the last writer silently wins. A file lock, a database, or a small server would be the next step if multiple users or scheduled jobs need to modify the same tasks.
+
+## Tests
+
+Test the logic directly and use pytest's `tmp_path` for the filesystem:
+
+```python
+import pytest
+
+from taskman.storage import load_tasks, save_tasks
+from taskman.tasks import TaskError, filter_tasks, new_task
+
+
+def test_round_trip(tmp_path):
+    path = tmp_path / "tasks.json"
+    tasks = [new_task(1, "Write report", ["work"]), new_task(2, "Buy milk")]
+    tasks[1]["done"] = True
+
+    save_tasks(path, tasks)
+
+    assert load_tasks(path) == tasks
+    assert [task["id"] for task in filter_tasks(tasks, status="open")] == [1]
+
+
+def test_empty_title_rejected():
+    with pytest.raises(TaskError, match="empty"):
+        new_task(1, "   ")
+```
+
+Also test a missing file, malformed JSON, filtering by tag, and completing an unknown ID. Run `python3 -m pytest -q`. If a test writes to the real `tasks.json`, your storage function is not receiving its path explicitly — fix the design rather than deleting the test.
+
+## Practice
+
+1. Add `edit ID --title` and `--tag` options. Preserve the original ID and creation time.
+2. Add a `--json` flag to `list` that prints machine-readable output. Keep human output as the default.
+3. Sort the list by creation time or by completion status, and add a `stats` command that reports open and completed counts.
+4. Handle malformed task dictionaries during load — missing keys, wrong types — with a clear error naming the offending entry.
+5. Add a `--dry-run` option for delete, then write tests for every command path, including the error exits.

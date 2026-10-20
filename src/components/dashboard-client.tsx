@@ -56,7 +56,11 @@ export function DashboardClient() {
   }
 
   const completedLessons = Object.values(state.lessons).filter((l) => l.completed).length
-  const totalLessons = tracks.reduce((sum, t) => sum + t.modules.reduce((s, m) => s + m.lessons.length, 0), 0)
+  const totalLessons = new Set(
+    tracks.flatMap((track) =>
+      track.modules.flatMap((module) => module.lessons.map((lesson) => lesson.id))
+    )
+  ).size
   const { level, xpForNext, progress: levelProgress } = calculateLevel(xp)
   const earnedBadges = badgeDefinitions.filter((b) => b.check(state))
 

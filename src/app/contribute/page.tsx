@@ -23,9 +23,9 @@ import { pageMetadata } from '@/lib/seo'
 export const metadata = pageMetadata({
   title: 'Contribute',
   description:
-    'Help build MERN Learn: write lessons, add free resources, share projects, report bugs, or translate the curriculum.',
+    'Help build Nyxora Sync: write lessons, add free resources, share projects, report bugs, or translate the curriculum.',
   path: '/contribute',
-  keywords: ['open source education', 'contribute to MERN Learn', 'write coding lessons'],
+  keywords: ['open source education', 'contribute to Nyxora Sync', 'write coding lessons'],
 })
 
 const ways = [
@@ -130,7 +130,7 @@ export default function ContributePage() {
               </span>
             </h1>
             <p className="mt-4 max-w-2xl text-lg text-muted-foreground">
-              MERN Learn is free and open source. Every fix, explanation, resource, and shared
+              Nyxora Sync is free and open source. Every fix, explanation, resource, and shared
               project compounds — someone you will never meet gets unstuck because of it.
             </p>
             <div className="mt-6 flex flex-wrap gap-3">

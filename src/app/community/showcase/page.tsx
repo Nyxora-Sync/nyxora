@@ -9,7 +9,7 @@ import { pageMetadata } from '@/lib/seo'
 export const metadata = pageMetadata({
   title: 'Project Showcase',
   description:
-    'Real projects built by MERN Learn learners. Browse apps, read how they were made, leave feedback, and share your own.',
+    'Real projects built by Nyxora Sync learners. Browse apps, read how they were made, leave feedback, and share your own.',
   path: '/community/showcase',
   keywords: ['developer project showcase', 'MERN projects', 'student portfolio projects'],
 })

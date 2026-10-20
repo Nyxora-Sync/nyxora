@@ -1,0 +1,219 @@
+Automatic variables disappear when their function returns. That is fine for temporary work, but real programs need data whose size is not known until runtime and whose lifetime spans several functions. C provides a heap for exactly this, along with the obligation to manage it yourself.
+
+This lesson covers allocation, ownership, the classic memory bugs, and two data structures built on dynamic memory: a vector and a singly linked list.
+
+## Allocating on the heap
+
+`malloc` reserves a block of bytes and returns a pointer to it, or `NULL` on failure:
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+
+int main(void)
+{
+    size_t count = 5;
+    int *values = malloc(count * sizeof *values);
+    if (values == NULL) {
+        perror("malloc");
+        return 1;
+    }
+
+    for (size_t i = 0; i < count; i++) {
+        values[i] = (int)(i * 10);
+    }
+    printf("%d\n", values[3]);
+
+    free(values);
+    values = NULL;
+    return 0;
+}
+```
+
+`sizeof *values` is the size of one element. This form stays correct if the element type changes. `malloc` returns uninitialized memory; every byte must be written before it is read. The cast on the result is unnecessary in C, and adding it can hide a missing prototype.
+
+Always check for `NULL`. Allocation can fail, and a program that dereferences the result without checking will crash or corrupt memory. The same applies to `calloc` and `realloc`.
+
+## calloc, realloc, and free
+
+`calloc` allocates space for a number of elements and zeroes every byte:
+
+```c
+int *scores = calloc(10, sizeof *scores);
+if (scores == NULL) {
+    perror("calloc");
+    return 1;
+}
+for (size_t i = 0; i < 10; i++) {
+    printf("%d\n", scores[i]); /* every value is zero */
+}
+free(scores);
+```
+
+Zero is not a universal "empty" value for structs containing pointers or floating-point data, but it is useful for arrays of integers and for initializing counts.
+
+`realloc` changes the size of an existing allocation. It may return the same address or move the block. The old pointer must not be used after a successful call:
+
+```c
+size_t new_count = 10;
+int *grown = realloc(values, new_count * sizeof *values);
+if (grown == NULL) {
+    /* values is still valid; do not overwrite it */
+    free(values);
+    return 1;
+}
+values = grown;
+```
+
+Assigning the result directly back to `values` is a bug when reallocation fails, because the original pointer is lost and the allocation leaks. Store the result in a temporary first.
+
+`free` releases a block. Freeing `NULL` does nothing, which makes cleanup paths easier. Freeing any other pointer that did not come from an allocation function, or freeing the same block twice, is undefined behavior. A pointer to a local variable cannot be freed.
+
+## Ownership rules
+
+Every allocation needs a clear owner. The owner is the code responsible for calling `free`. Ownership can stay in one function, be returned to a caller, or be transferred through an output parameter. Document the rule in the function name or a comment.
+
+A function that allocates and returns a pointer generally transfers ownership to the caller. A function that merely borrows a pointer must not free it. `const` says nothing about ownership; a `const char *` may point to a string literal, a stack buffer, or a heap block, and only the last may be freed by the right owner.
+
+Keep allocation and cleanup close together. If a function has several failure paths, each one must release everything acquired so far. This is where leaks usually begin.
+
+## Leaks, double frees, and use-after-free
+
+A **leak** is allocated memory that is no longer reachable and was never freed. It is not a crash by itself, but long-running programs can exhaust memory.
+
+```c
+void leak_example(void)
+{
+    char *buffer = malloc(128);
+    if (buffer == NULL) {
+        return;
+    }
+    /* no free before returning */
+}
+```
+
+A **double free** happens when two paths release the same block. It can corrupt the allocator's bookkeeping. Set a pointer to `NULL` after freeing it if it might be reused, and ensure cleanup paths do not both own the same block.
+
+A **use-after-free** reads or writes through a pointer whose block has already been released. The memory may still contain the old bytes, so the bug can appear to work until another allocation reuses the space. AddressSanitizer is excellent at catching these mistakes.
+
+```c
+int *value = malloc(sizeof *value);
+if (value != NULL) {
+    *value = 42;
+    free(value);
+    /* *value = 7;  invalid: use after free */
+}
+```
+
+## Growing an array
+
+A dynamic array keeps three pieces of state: a pointer to the elements, the number currently used, and the number allocated. When the used count reaches capacity, allocate a larger block, copy the old contents, and release the old block. `realloc` does the copy for you when it moves the allocation.
+
+Doubling the capacity keeps the total copying work reasonable over many appends. Always check multiplication overflow before passing a byte count to an allocator.
+
+## A dynamic vector
+
+```c
+#include <stdint.h>
+#include <stdlib.h>
+
+typedef struct {
+    int *data;
+    size_t length;
+    size_t capacity;
+} IntVector;
+
+void vector_free(IntVector *vector)
+{
+    free(vector->data);
+    vector->data = NULL;
+    vector->length = 0;
+    vector->capacity = 0;
+}
+
+int vector_push(IntVector *vector, int value)
+{
+    if (vector->length == vector->capacity) {
+        size_t new_capacity = vector->capacity == 0
+            ? 4
+            : vector->capacity * 2;
+
+        if (new_capacity < vector->capacity
+            || new_capacity > SIZE_MAX / sizeof *vector->data) {
+            return 0;
+        }
+
+        int *grown = realloc(vector->data,
+                             new_capacity * sizeof *vector->data);
+        if (grown == NULL) {
+            return 0;
+        }
+        vector->data = grown;
+        vector->capacity = new_capacity;
+    }
+
+    vector->data[vector->length] = value;
+    vector->length++;
+    return 1;
+}
+```
+
+Zero-initialize the vector before its first use. After `vector_free`, its pointer is `NULL` and its counts are zero, so freeing it again is safe. `vector_push` returns 0 on allocation failure, and the existing contents remain valid.
+
+## A singly linked list
+
+A linked list allocates one node at a time. Each node owns its data fields and has a pointer to the next node, but it does not automatically own the next node in a way that `free` understands. You must walk and free each one:
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+
+typedef struct Node {
+    int value;
+    struct Node *next;
+} Node;
+
+int list_push_front(Node **head, int value)
+{
+    Node *node = malloc(sizeof *node);
+    if (node == NULL) {
+        return 0;
+    }
+    node->value = value;
+    node->next = *head;
+    *head = node;
+    return 1;
+}
+
+void list_free(Node **head)
+{
+    Node *current = *head;
+    while (current != NULL) {
+        Node *next = current->next;
+        free(current);
+        current = next;
+    }
+    *head = NULL;
+}
+```
+
+Save `current->next` before freeing `current`. After the loop, the head pointer is set to `NULL`, so the empty list is unambiguous. To remove a node from the middle, you need a pointer to the previous node and careful updates to the links; freeing the node before saving the next link is a use-after-free.
+
+## Common mistakes
+
+- Allocating `strlen(source)` bytes and forgetting the null terminator.
+- Assigning `realloc` directly to the only pointer and losing the original on failure.
+- Freeing a stack address, a string literal, or a pointer already freed.
+- Returning early without freeing allocations made earlier in the function.
+- Using a pointer after `free` because the old bytes still look valid.
+- Forgetting to multiply by the element size, or failing to check that multiplication for overflow.
+- Assuming `calloc` makes every possible struct value safe to use.
+
+## Practice
+
+1. Write `char *copy_string(const char *source)` that allocates exactly enough bytes, copies the terminator, and returns the new block. Free it in the caller.
+2. Add `vector_pop`, `vector_get`, and `vector_reserve` to the vector. Decide what each returns on an empty vector or an invalid index.
+3. Build a list with five nodes, print it, remove the middle node, and free the rest. Draw the links before and after the removal.
+4. Write a function that appends a value to a list using a tail pointer, then explain what extra bookkeeping is required when the list becomes empty.
+5. Run one program with AddressSanitizer and one with Valgrind. Introduce a leak, a double free, and a use-after-free in separate builds and compare the reports.
+6. Write a function that reads an unknown number of integers with `fgets` into a vector, stopping at end of input. Free the vector on every exit path.

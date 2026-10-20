@@ -1,0 +1,179 @@
+Async Python is not “faster Python.” It is a way to keep one thread busy while many network operations are waiting. A synchronous program spends most of its time blocked on sockets; an async program registers what to do when data arrives and moves on. For an API client that makes dozens of independent requests, that difference is large. For a script that makes one request, it is mostly extra complexity.
+
+## The event loop
+
+An event loop runs coroutines and switches between them at `await` points. A coroutine is declared with `async def` and only runs when awaited or scheduled:
+
+```python
+import asyncio
+
+
+async def fetch_status(name: str) -> str:
+    await asyncio.sleep(0.1)  # stands in for network I/O
+    return f"{name}: ok"
+
+
+async def main() -> None:
+    status = await fetch_status("api")
+    print(status)
+
+
+asyncio.run(main())
+```
+
+`asyncio.run` creates the loop, runs the top-level coroutine, and closes the loop. Call it once per program. Never call it from inside an already running loop; use `await` there instead.
+
+The critical rule: do not block the loop. `time.sleep`, synchronous file reads, CPU-heavy loops, and libraries built on blocking sockets stop every other coroutine. Use async libraries, or move unavoidable blocking work to a thread with `await asyncio.to_thread(blocking_function, arg)`.
+
+## Concurrency and timeouts
+
+Awaiting calls one after another is still sequential. To overlap independent requests, schedule them together:
+
+```python
+import asyncio
+
+import httpx
+
+
+async def fetch_user(client: httpx.AsyncClient, user_id: int) -> dict:
+    response = await client.get(f"/users/{user_id}")
+    response.raise_for_status()
+    return response.json()
+
+
+async def main() -> None:
+    async with httpx.AsyncClient(
+        base_url="https://api.example.com",
+        timeout=httpx.Timeout(10.0, connect=3.0),
+        headers={"User-Agent": "lesson-client/1.0"},
+    ) as client:
+        users = await asyncio.gather(
+            *(fetch_user(client, user_id) for user_id in range(1, 6))
+        )
+    print(len(users))
+
+
+asyncio.run(main())
+```
+
+`asyncio.gather` returns results in input order. If one coroutine raises, the exception propagates, but the other tasks are not automatically cancelled. Python 3.11 added `asyncio.TaskGroup`, which gives structured concurrency: if one task fails, the group cancels the rest and raises an `ExceptionGroup`.
+
+```python
+async def fetch_all(ids: list[int]) -> list[dict]:
+    async with httpx.AsyncClient(base_url="https://api.example.com") as client:
+        async with asyncio.TaskGroup() as group:
+            tasks = [group.create_task(fetch_user(client, user_id)) for user_id in ids]
+    return [task.result() for task in tasks]
+```
+
+Wrap the whole operation in a timeout so a stalled server cannot hang the process:
+
+```python
+async def fetch_with_deadline(url: str) -> dict:
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        async with asyncio.timeout(15.0):
+            response = await client.get(url)
+            response.raise_for_status()
+            return response.json()
+```
+
+`asyncio.timeout` raises `TimeoutError` when the block exceeds its budget. `httpx.Timeout` controls individual connection, read, write, and pool waits; use both when a request has several phases.
+
+## A structured API client
+
+Do not scatter URLs, headers, and error handling across the codebase. Wrap one API in a class that owns a single `AsyncClient`:
+
+```python
+class ApiError(RuntimeError):
+    def __init__(self, status: int, message: str) -> None:
+        super().__init__(message)
+        self.status = status
+
+
+class UserClient:
+    def __init__(self, client: httpx.AsyncClient) -> None:
+        self._client = client
+
+    async def get_user(self, user_id: int) -> dict:
+        response = await self._client.get(f"/users/{user_id}")
+        if response.status_code == 404:
+            raise ApiError(404, f"User {user_id} does not exist")
+        if response.is_error:
+            raise ApiError(response.status_code, response.text[:200])
+        return response.json()
+```
+
+Reuse the client for the lifetime of the application. Creating a client per request throws away connection pooling and adds TLS handshakes. The client is also where you set authentication, a base URL, a user agent, and timeouts consistently.
+
+## Retries and backoff
+
+Retry only failures that can succeed on a later attempt: connection errors, timeouts, HTTP 429, and most 5xx responses. Do not retry a 400, 401, or 404 — the request is wrong and will stay wrong. Cap attempts, use exponential backoff with jitter, and honor a numeric `Retry-After` when the server sends it:
+
+```python
+import asyncio
+import random
+
+import httpx
+
+RETRYABLE = {429, 500, 502, 503, 504}
+
+
+async def get_with_retry(
+    client: httpx.AsyncClient,
+    url: str,
+    attempts: int = 4,
+) -> httpx.Response:
+    for attempt in range(attempts):
+        try:
+            response = await client.get(url)
+        except httpx.TransportError:
+            if attempt == attempts - 1:
+                raise
+        else:
+            if response.status_code not in RETRYABLE:
+                response.raise_for_status()
+                return response
+            if attempt == attempts - 1:
+                response.raise_for_status()
+
+            retry_after = response.headers.get("Retry-After", "")
+            if retry_after.isdigit():
+                await asyncio.sleep(float(retry_after))
+                continue
+
+        delay = min(2**attempt + random.uniform(0, 0.5), 10.0)
+        await asyncio.sleep(delay)
+
+    raise AssertionError("retry loop exhausted")
+```
+
+Jitter prevents a fleet of clients from retrying at the same instant. For anything important, use a battle-tested library such as Tenacity rather than growing this loop. Retried requests should be idempotent, or carry an idempotency key so the server can recognize a duplicate.
+
+## Rate limits
+
+A rate limit is a contract, not an obstacle. Two mechanisms keep you inside it. A semaphore caps concurrency:
+
+```python
+semaphore = asyncio.Semaphore(5)
+
+
+async def limited_fetch(client: httpx.AsyncClient, user_id: int) -> dict:
+    async with semaphore:
+        return await fetch_user(client, user_id)
+```
+
+A pacer caps request rate over time. If an API allows 10 requests per second, sleeping between starts is simpler and more honest than launching 5,000 tasks and hoping the pool saves you. Watch for `429` responses and `Retry-After`; back off globally, not just for the one request that failed.
+
+## When async is not worth it
+
+Use async when you have many independent I/O operations and an async stack that supports them. Skip it for a one-shot script, a CLI that makes one HTTP call, CPU-bound work, or a codebase whose database and SDKs are synchronous. Threads often solve modest I/O concurrency with far less disruption. `asyncio.to_thread` is the escape hatch for the occasional blocking call inside an async service.
+
+Common mistakes: forgetting `await` and receiving a coroutine object; calling `requests` or `time.sleep` inside an async function; allowing unbounded `gather`; catching `asyncio.CancelledError` and swallowing it; and omitting timeouts. Also remember that an async function does nothing until it is awaited or scheduled — creating the coroutine is not the same as running it.
+
+## Practice
+
+1. Fetch five independent URLs concurrently with `httpx.AsyncClient` and `asyncio.gather`. Measure sequential versus concurrent elapsed time with `time.perf_counter`.
+2. Rewrite the same example with `asyncio.TaskGroup`. Make one URL fail and observe how the other tasks are cancelled.
+3. Add a semaphore that limits concurrency to three and verify with timestamps that no more than three requests start together.
+4. Implement a retry helper that retries 429 and 503, backs off exponentially, respects a numeric `Retry-After`, and gives up after four attempts.
+5. Build a `UserClient` with typed methods for listing and fetching users. Add a pagination loop that stops when the response has no next cursor, and test it against a fake transport.

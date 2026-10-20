@@ -1,0 +1,430 @@
+The capstone is a support-ticket API called **Deskly**. It combines the pieces from the advanced module: EF Core with PostgreSQL, layered boundaries, JWT authorization, request validation, pagination, background notifications, tests, structured logs, health checks, and a container deployment. The goal is not a large feature set; it is a complete shape you can defend in a code review.
+
+## Scope and layout
+
+Deskly supports opening tickets, listing them with filters and pagination, reading one ticket, closing a ticket as an admin, and sending a notification when a ticket is created. Agents can read and create; admins can close.
+
+```text
+Deskly.sln
+src/Deskly.Api/
+  Program.cs
+  Domain/Ticket.cs
+  Application/ITicketNotifier.cs
+  Infrastructure/DesklyDb.cs
+  Infrastructure/NotificationWorker.cs
+  Contracts/TicketContracts.cs
+  Endpoints/TicketEndpoints.cs
+tests/Deskly.Tests/
+  DomainTests.cs
+  TicketApiTests.cs
+  TestAuthHandler.cs
+```
+
+The API depends on the application interface for notifications. Infrastructure implements storage and delivery. The domain has no HTTP, EF Core, or mail types.
+
+## Domain invariants
+
+```csharp
+public enum TicketStatus { Open, Pending, Closed }
+
+public sealed class Ticket
+{
+    public Guid Id { get; private set; }
+    public string Subject { get; private set; } = "";
+    public string Body { get; private set; } = "";
+    public string RequesterEmail { get; private set; } = "";
+    public TicketStatus Status { get; private set; }
+    public DateTimeOffset CreatedAt { get; private set; }
+
+    private Ticket() { }
+
+    public static Ticket Open(string subject, string body, string email, DateTimeOffset now)
+    {
+        if (string.IsNullOrWhiteSpace(subject))
+            throw new ArgumentException("Subject is required.", nameof(subject));
+        if (subject.Length > 200)
+            throw new ArgumentException("Subject is too long.", nameof(subject));
+        if (string.IsNullOrWhiteSpace(email) || !email.Contains('@'))
+            throw new ArgumentException("A valid requester email is required.", nameof(email));
+
+        return new Ticket
+        {
+            Id = Guid.NewGuid(),
+            Subject = subject.Trim(),
+            Body = body.Trim(),
+            RequesterEmail = email.Trim(),
+            Status = TicketStatus.Open,
+            CreatedAt = now
+        };
+    }
+
+    public void Close()
+    {
+        if (Status == TicketStatus.Closed)
+            throw new InvalidOperationException("Ticket is already closed.");
+        Status = TicketStatus.Closed;
+    }
+}
+```
+
+`Subject`, `Status`, and `CreatedAt` have private setters, so only the entity can change them. The factory is the only supported creation path. The private parameterless constructor exists for EF Core materialization and for no one else.
+
+## Persistence and contracts
+
+```csharp
+public sealed class DesklyDb(DbContextOptions<DesklyDb> options) : DbContext(options)
+{
+    public DbSet<Ticket> Tickets => Set<Ticket>();
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Ticket>(ticket =>
+        {
+            ticket.Property(t => t.Subject).HasMaxLength(200).IsRequired();
+            ticket.Property(t => t.RequesterEmail).HasMaxLength(320).IsRequired();
+            ticket.Property(t => t.Body).HasMaxLength(4000);
+            ticket.HasIndex(t => new { t.Status, t.CreatedAt });
+        });
+    }
+}
+```
+
+```csharp
+public sealed record CreateTicketRequest(string Subject, string Body, string RequesterEmail);
+public sealed record TicketDto(Guid Id, string Subject, TicketStatus Status, DateTimeOffset CreatedAt);
+public sealed record PagedResult<T>(IReadOnlyList<T> Items, int Page, int PageSize, int TotalCount);
+```
+
+The list index matches the query: filter by status, order by creation time. Project directly into `TicketDto`; never serialize the entity.
+
+## Endpoints and authorization
+
+```csharp
+public static class TicketEndpoints
+{
+    public static RouteGroupBuilder MapTickets(this IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup("/api/tickets")
+            .WithTags("Tickets")
+            .RequireAuthorization("agent");
+
+        group.MapGet("/", GetTickets);
+        group.MapPost("/", CreateTicket);
+        group.MapPost("/{id:guid}/close", CloseTicket)
+            .RequireAuthorization("admin");
+
+        return group;
+    }
+
+    private static async Task<Ok<PagedResult<TicketDto>>> GetTickets(
+        DesklyDb db, int page = 1, int pageSize = 20,
+        TicketStatus? status = null, CancellationToken ct = default)
+    {
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 100);
+
+        var query = db.Tickets.AsNoTracking();
+        if (status is not null)
+            query = query.Where(t => t.Status == status);
+
+        var total = await query.CountAsync(ct);
+        var items = await query
+            .OrderByDescending(t => t.CreatedAt)
+            .ThenBy(t => t.Id)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(t => new TicketDto(t.Id, t.Subject, t.Status, t.CreatedAt))
+            .ToListAsync(ct);
+
+        return TypedResults.Ok(new PagedResult<TicketDto>(items, page, pageSize, total));
+    }
+
+    private static async Task<Results<Created<TicketDto>, ValidationProblem>> CreateTicket(
+        CreateTicketRequest request,
+        DesklyDb db,
+        ITicketNotifier notifier,
+        TimeProvider clock,
+        CancellationToken ct)
+    {
+        Ticket ticket;
+        try
+        {
+            ticket = Ticket.Open(
+                request.Subject, request.Body, request.RequesterEmail, clock.GetUtcNow());
+        }
+        catch (ArgumentException ex)
+        {
+            return TypedResults.ValidationProblem(
+                new Dictionary<string, string[]> { ["request"] = [ex.Message] });
+        }
+
+        db.Tickets.Add(ticket);
+        await db.SaveChangesAsync(ct);
+
+        await notifier.EnqueueAsync(
+            new TicketCreated(ticket.Id, ticket.RequesterEmail), ct);
+
+        var dto = new TicketDto(ticket.Id, ticket.Subject, ticket.Status, ticket.CreatedAt);
+        return TypedResults.Created($"/api/tickets/{ticket.Id}", dto);
+    }
+
+    private static async Task<IResult> CloseTicket(
+        Guid id, DesklyDb db, CancellationToken ct)
+    {
+        var ticket = await db.Tickets.FindAsync([id], ct);
+        if (ticket is null)
+            return Results.NotFound();
+
+        try
+        {
+            ticket.Close();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.Conflict(new { error = ex.Message });
+        }
+
+        await db.SaveChangesAsync(ct);
+        return Results.NoContent();
+    }
+}
+```
+
+Validation at the HTTP boundary checks shape and required fields. The domain enforces its own invariants regardless of who calls it. Both layers return useful errors instead of throwing into the exception handler.
+
+## Background notifications
+
+The request should not wait for SMTP. A bounded channel and a hosted worker decouple them:
+
+```csharp
+public sealed record TicketCreated(Guid TicketId, string RequesterEmail);
+
+public interface ITicketNotifier
+{
+    ValueTask EnqueueAsync(TicketCreated notification, CancellationToken ct);
+}
+
+public sealed class ChannelTicketNotifier(Channel<TicketCreated> channel) : ITicketNotifier
+{
+    public ValueTask EnqueueAsync(TicketCreated notification, CancellationToken ct) =>
+        channel.Writer.WriteAsync(notification, ct);
+}
+```
+
+```csharp
+public sealed class NotificationWorker(
+    Channel<TicketCreated> channel,
+    IServiceScopeFactory scopeFactory,
+    ILogger<NotificationWorker> logger) : BackgroundService
+{
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        await foreach (var notification in channel.Reader.ReadAllAsync(stoppingToken))
+        {
+            try
+            {
+                using var scope = scopeFactory.CreateScope();
+                var sender = scope.ServiceProvider.GetRequiredService<IEmailSender>();
+                await sender.SendTicketCreatedAsync(notification, stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Notification failed for ticket {TicketId}", notification.TicketId);
+            }
+        }
+    }
+}
+```
+
+This is **best-effort** delivery. A crash after `SaveChanges` but before the channel write loses the notification; a crash with items still buffered loses those too. For contractual notifications, persist an outbox row in the same transaction as the ticket and have the worker poll it, or publish to a durable broker. State the guarantee you provide, and test it.
+
+## Wiring
+
+```csharp
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddDbContext<DesklyDb>(options =>
+    options.UseNpgsql(builder.Configuration.GetConnectionString("Deskly")));
+
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddProblemDetails();
+builder.Services.AddOpenApi();
+
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.Authority = builder.Configuration["Auth:Authority"];
+        options.Audience = builder.Configuration["Auth:Audience"];
+    });
+
+builder.Services.AddAuthorizationBuilder()
+    .AddPolicy("agent", policy => policy.RequireClaim("role", "agent", "admin"))
+    .AddPolicy("admin", policy => policy.RequireClaim("role", "admin"));
+
+builder.Services.AddSingleton(
+    Channel.CreateBounded<TicketCreated>(
+        new BoundedChannelOptions(500) { FullMode = BoundedChannelFullMode.Wait }));
+
+builder.Services.AddSingleton<ITicketNotifier, ChannelTicketNotifier>();
+builder.Services.AddHostedService<NotificationWorker>();
+
+builder.Services.AddHealthChecks()
+    .AddDbContextCheck<DesklyDb>("database")
+    .AddCheck("self", () => HealthCheckResult.Healthy());
+
+var app = builder.Build();
+
+app.UseExceptionHandler();
+app.UseAuthentication();
+app.UseAuthorization();
+
+app.MapOpenApi();
+app.MapTickets();
+app.MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => false })
+    .AllowAnonymous();
+app.MapHealthChecks("/health/ready").AllowAnonymous();
+
+app.Run();
+```
+
+Register `TimeProvider` explicitly so ticket timestamps can be controlled in tests. The JWT handler validates signature, issuer, audience, and expiry; never replace it with hand-written token parsing.
+
+## Tests
+
+Domain tests need no host:
+
+```csharp
+[Fact]
+public void Rejects_blank_subject()
+{
+    Assert.Throws<ArgumentException>(() =>
+        Ticket.Open(" ", "body", "user@example.com", DateTimeOffset.UtcNow));
+}
+```
+
+Integration tests use `WebApplicationFactory` and a test authentication handler that supplies a role claim:
+
+```csharp
+public sealed class TestAuthHandler(
+    IOptionsMonitor<AuthenticationSchemeOptions> options,
+    ILoggerFactory logger,
+    UrlEncoder encoder)
+    : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
+{
+    protected override Task<AuthenticateResult> HandleAuthenticateAsync()
+    {
+        var claims = new[]
+        {
+            new Claim(ClaimTypes.Name, "test-agent"),
+            new Claim("role", "agent")
+        };
+        var identity = new ClaimsIdentity(claims, "Test");
+        var ticket = new AuthenticationTicket(new ClaimsPrincipal(identity), "Test");
+        return Task.FromResult(AuthenticateResult.Success(ticket));
+    }
+}
+```
+
+Override the default scheme in the factory, then test 201, 400, 401, 403, 404, and pagination bounds. Use SQLite in-memory for fast endpoint tests and Testcontainers with PostgreSQL for migrations, indexes, and constraint behavior.
+
+## Observability
+
+Use `ILogger<T>` with structured properties (`TicketId`, `Status`, `DurationMs`) and never log the body or requester email. Add OpenTelemetry tracing for ASP.NET Core and `HttpClient`, runtime metrics, and a business counter such as `deskly.tickets.created`. Export to an OTLP endpoint configured by the environment. Alert on error rate, p95 latency, readiness failures, and queue depth, not on CPU alone.
+
+## Container and deployment
+
+```text
+FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
+WORKDIR /src
+COPY Deskly.sln ./
+COPY src/Deskly.Api/Deskly.Api.csproj src/Deskly.Api/
+COPY tests/Deskly.Tests/Deskly.Tests.csproj tests/Deskly.Tests/
+RUN dotnet restore Deskly.sln
+COPY . .
+RUN dotnet publish src/Deskly.Api/Deskly.Api.csproj -c Release -o /app /p:UseAppHost=false
+
+FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS runtime
+WORKDIR /app
+COPY --from=build /app .
+USER $APP_UID
+EXPOSE 8080
+ENTRYPOINT ["dotnet", "Deskly.Api.dll"]
+```
+
+```text
+services:
+  api:
+    build: .
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__Deskly: Host=db;Database=deskly;Username=deskly;Password=${DB_PASSWORD}
+      Auth__Authority: https://identity.example.com
+      Auth__Audience: deskly-api
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: deskly
+      POSTGRES_USER: deskly
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - deskly-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U deskly -d deskly"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+volumes:
+  deskly-data:
+```
+
+Run migrations as a separate release job: `dotnet ef migrations bundle` or a one-shot container, never from every API replica. Take a backup before destructive changes and prefer forward-compatible migrations during rolling deploys.
+
+## Deployment checklist
+
+```text
+[ ] Image built once and promoted by digest
+[ ] Runs as non-root with CPU and memory limits
+[ ] Secrets injected from the platform secret store
+[ ] Connection string, JWT authority/audience set per environment
+[ ] Migrations applied by a release job, backup verified
+[ ] Liveness independent of the database; readiness includes it
+[ ] Graceful shutdown longer than the slowest request
+[ ] TLS terminated at the ingress; CORS restricted to known origins
+[ ] Logs, traces, metrics exported; retention and alerts configured
+[ ] Queue depth and failed notifications monitored
+[ ] Backups and restore tested, rollback or forward-fix plan written
+```
+
+## What still requires environment-specific configuration
+
+The code cannot invent these values. Supply them per environment and document them in the runbook: database host, port, name, user, password, and TLS mode; JWT issuer authority, audience, and signing configuration; SMTP or email-provider credentials and sender address; public base URL used in links; allowed CORS origins; OTLP collector endpoint and sampling rate; container registry and image tag; ingress host and certificate; replica counts, CPU and memory limits; backup retention and restore procedure; and any feature flags for staged rollout.
+
+## Common mistakes
+
+- Returning entities and leaking private state or navigation cycles.
+- Trusting the client for authorization instead of policies and claims.
+- Writing `async void` background methods or resolving scoped services in a singleton worker.
+- Claiming the in-memory queue is durable.
+- Applying migrations from every replica at startup.
+- Making liveness depend on the database, causing restart loops during an outage.
+- Logging ticket bodies, emails, or tokens.
+- Retrying ticket creation without an idempotency key, producing duplicates.
+
+## Practice
+
+1. Add a comments endpoint. Take the author identity from the authenticated principal, not from the request body, and test the 401 and 403 cases.
+2. Replace the channel with a transactional outbox. Persist the notification in the same `SaveChanges` as the ticket, add a polling worker, and document the delivery guarantee.
+3. Add rate limiting to ticket creation and return 429 with a `Retry-After` header.
+4. Add an OpenTelemetry counter and histogram for ticket creation and notification latency. Build one alert that would catch a stuck worker.
+5. Add Testcontainers PostgreSQL integration tests for migrations and the unique/index behavior that SQLite cannot prove.
+6. Build the image, run the Compose stack, apply migrations as a one-shot job, and verify liveness, readiness, and a full ticket lifecycle.
+7. Write the staging and production configuration tables. For each value, name its source and who owns it.

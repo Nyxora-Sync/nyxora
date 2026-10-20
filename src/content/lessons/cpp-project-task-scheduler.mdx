@@ -1,0 +1,435 @@
+A scheduler has two jobs that should not be tangled: deciding which task to run next, and talking to the outside world. The decision logic needs containers, ordering rules, and time arithmetic. The I/O layer needs prompts, files, and error messages. Keeping them separate makes the scheduler deterministic in tests and replaceable in a larger application.
+
+This project builds a priority-based task scheduler with a current-time boundary. A task becomes eligible at its due time, and among eligible tasks the highest priority runs first, with earlier due time and then lower id as tie-breakers. The scheduler never sleeps or reads the wall clock itself; the caller advances it. That single design choice makes every behavior testable without waiting for real time to pass.
+
+## The task model
+
+```cpp
+// include/scheduler/task.hpp
+#pragma once
+
+#include <chrono>
+#include <cstdint>
+#include <string>
+
+struct Task {
+    std::uint64_t id{};
+    std::string title;
+    int priority{};
+    std::chrono::sys_seconds due{};
+};
+
+struct TaskOrder {
+    bool operator()(const Task& lhs, const Task& rhs) const noexcept {
+        if (lhs.priority != rhs.priority) {
+            return lhs.priority < rhs.priority;
+        }
+        if (lhs.due != rhs.due) {
+            return lhs.due > rhs.due;
+        }
+        return lhs.id > rhs.id;
+    }
+};
+```
+
+`std::priority_queue` treats its comparator as a "less than" relation and puts the greatest element on top. Returning `lhs.priority < rhs.priority` makes a higher numeric priority greater. For equal priorities, `lhs.due > rhs.due` makes the earlier due time greater, so it reaches the top. The id comparison makes the order deterministic when priority and due time tie, which is also useful for reproducible tests. `std::chrono::sys_seconds` is a system-clock time point with second precision; it compares and serializes cleanly.
+
+## Two containers for two states
+
+A task is either **future** or **ready**. Future tasks are stored in a `std::multimap` keyed by due time, so the earliest task can be found in logarithmic time. Ready tasks are stored in a `std::priority_queue` ordered by `TaskOrder`. When time advances, all tasks whose due time has arrived move from the multimap into the queue.
+
+```cpp
+// include/scheduler/scheduler.hpp
+#pragma once
+
+#include "scheduler/task.hpp"
+
+#include <chrono>
+#include <cstddef>
+#include <iosfwd>
+#include <map>
+#include <optional>
+#include <queue>
+#include <string>
+#include <vector>
+
+class Scheduler {
+public:
+    explicit Scheduler(std::chrono::sys_seconds now);
+
+    void add(Task task);
+    void advance(std::chrono::sys_seconds now);
+    std::optional<Task> popNext();
+    const Task* next() const noexcept;
+
+    std::size_t readyCount() const noexcept;
+    std::size_t futureCount() const noexcept;
+    std::size_t size() const noexcept;
+
+    void save(std::ostream& out) const;
+    bool load(std::istream& in, std::string& error);
+
+private:
+    std::chrono::sys_seconds now_;
+    std::priority_queue<Task, std::vector<Task>, TaskOrder> ready_;
+    std::multimap<std::chrono::sys_seconds, Task> future_;
+};
+```
+
+```cpp
+// src/scheduler.cpp (core scheduling logic)
+#include "scheduler/scheduler.hpp"
+
+#include <algorithm>
+#include <sstream>
+#include <stdexcept>
+#include <unordered_set>
+#include <utility>
+
+Scheduler::Scheduler(std::chrono::sys_seconds now) : now_(now) {}
+
+void Scheduler::add(Task task) {
+    if (task.title.empty()) {
+        throw std::invalid_argument{"task title must not be empty"};
+    }
+    if (task.title.find_first_of("\t\n") != std::string::npos) {
+        throw std::invalid_argument{"task title must not contain tabs or newlines"};
+    }
+    if (task.priority < 0 || task.priority > 100) {
+        throw std::invalid_argument{"priority must be between 0 and 100"};
+    }
+
+    if (task.due <= now_) {
+        ready_.push(std::move(task));
+    } else {
+        future_.emplace(task.due, std::move(task));
+    }
+}
+
+void Scheduler::advance(std::chrono::sys_seconds now) {
+    now_ = now;
+    while (!future_.empty() && future_.begin()->first <= now_) {
+        auto it = future_.begin();
+        ready_.push(std::move(it->second));
+        future_.erase(it);
+    }
+}
+
+std::optional<Task> Scheduler::popNext() {
+    if (ready_.empty()) {
+        return std::nullopt;
+    }
+    Task task = ready_.top();
+    ready_.pop();
+    return task;
+}
+
+const Task* Scheduler::next() const noexcept {
+    return ready_.empty() ? nullptr : &ready_.top();
+}
+```
+
+`advance` is the only place where the current time changes. A future task cannot jump ahead of a ready task just because its priority is higher; it is not a candidate until it becomes eligible. This is the useful distinction between a priority and a release time.
+
+## Persistence
+
+The file format is tab-separated text. `save` gathers both containers, sorts by id so the file is stable, and writes an epoch-second due time. `load` builds new containers and assigns them only after the entire file parses, so a malformed file cannot destroy the scheduler's current state.
+
+```cpp
+#include <fstream>
+#include <limits>
+#include <string>
+
+void Scheduler::save(std::ostream& out) const {
+    std::vector<Task> all;
+
+    auto readyCopy = ready_;
+    while (!readyCopy.empty()) {
+        all.push_back(readyCopy.top());
+        readyCopy.pop();
+    }
+    for (const auto& [due, task] : future_) {
+        all.push_back(task);
+    }
+
+    std::sort(all.begin(), all.end(),
+              [](const Task& lhs, const Task& rhs) {
+                  return lhs.id < rhs.id;
+              });
+
+    out << "# scheduler v1\n";
+    for (const Task& task : all) {
+        out << task.id << '\t'
+            << task.priority << '\t'
+            << task.due.time_since_epoch().count() << '\t'
+            << task.title << '\n';
+    }
+}
+
+bool Scheduler::load(std::istream& in, std::string& error) {
+    std::priority_queue<Task, std::vector<Task>, TaskOrder> ready;
+    std::multimap<std::chrono::sys_seconds, Task> future;
+    std::unordered_set<std::uint64_t> ids;
+
+    std::string line;
+    std::size_t lineNumber = 0;
+
+    while (std::getline(in, line)) {
+        ++lineNumber;
+        if (line.empty() || line.front() == '#') {
+            continue;
+        }
+
+        std::istringstream row{line};
+        std::string idText;
+        std::string priorityText;
+        std::string dueText;
+        std::string title;
+
+        if (!std::getline(row, idText, '\t') ||
+            !std::getline(row, priorityText, '\t') ||
+            !std::getline(row, dueText, '\t') ||
+            !std::getline(row, title)) {
+            error = "line " + std::to_string(lineNumber) +
+                    ": expected four tab-separated fields";
+            return false;
+        }
+
+        try {
+            const std::uint64_t id = std::stoull(idText);
+            const int priority = std::stoi(priorityText);
+            const long long dueCount = std::stoll(dueText);
+
+            Task task{id, title, priority,
+                      std::chrono::sys_seconds{std::chrono::seconds{dueCount}}};
+
+            if (!ids.insert(task.id).second) {
+                error = "line " + std::to_string(lineNumber) +
+                        ": duplicate task id";
+                return false;
+            }
+            if (task.due <= now_) {
+                ready.push(std::move(task));
+            } else {
+                future.emplace(task.due, std::move(task));
+            }
+        } catch (const std::exception& exception) {
+            error = "line " + std::to_string(lineNumber) + ": " + exception.what();
+            return false;
+        }
+    }
+
+    ready_ = std::move(ready);
+    future_ = std::move(future);
+    return true;
+}
+```
+
+The `stoull` and `stoll` calls accept trailing characters unless you check how much they consumed. For a format you control, either check the consumed position or keep the parser deliberately strict with a small helper. The important rule is that every failure reports a line number and leaves the existing scheduler intact.
+
+## Tests define the contract
+
+The tests inject a fixed time and never call `sleep_for`:
+
+```cpp
+#include <gtest/gtest.h>
+
+#include <chrono>
+#include <sstream>
+
+#include "scheduler/scheduler.hpp"
+
+namespace {
+
+std::chrono::sys_seconds at(long long seconds) {
+    return std::chrono::sys_seconds{std::chrono::seconds{seconds}};
+}
+
+TEST(SchedulerTest, HighestPriorityReadyTaskRunsFirst) {
+    Scheduler scheduler{at(1000)};
+    scheduler.add(Task{1, "low", 1, at(900)});
+    scheduler.add(Task{2, "high", 9, at(900)});
+    scheduler.add(Task{3, "medium", 5, at(900)});
+
+    const auto first = scheduler.popNext();
+    ASSERT_TRUE(first.has_value());
+    EXPECT_EQ(first->id, 2);
+}
+
+TEST(SchedulerTest, FutureTaskDoesNotBlockReadyTask) {
+    Scheduler scheduler{at(1000)};
+    scheduler.add(Task{1, "future high", 100, at(2000)});
+    scheduler.add(Task{2, "ready low", 1, at(900)});
+
+    const auto first = scheduler.popNext();
+    ASSERT_TRUE(first.has_value());
+    EXPECT_EQ(first->id, 2);
+    EXPECT_EQ(scheduler.futureCount(), 1U);
+}
+
+TEST(SchedulerTest, AdvanceMakesTasksEligible) {
+    Scheduler scheduler{at(1000)};
+    scheduler.add(Task{1, "later", 5, at(2000)});
+    EXPECT_FALSE(scheduler.popNext().has_value());
+
+    scheduler.advance(at(2000));
+    const auto task = scheduler.popNext();
+    ASSERT_TRUE(task.has_value());
+    EXPECT_EQ(task->title, "later");
+}
+
+TEST(SchedulerTest, SaveAndLoadRoundTrip) {
+    Scheduler original{at(1000)};
+    original.add(Task{1, "ready", 3, at(900)});
+    original.add(Task{2, "future", 7, at(2000)});
+
+    std::ostringstream file;
+    original.save(file);
+
+    Scheduler restored{at(1000)};
+    std::istringstream input{file.str()};
+    std::string error;
+    ASSERT_TRUE(restored.load(input, error)) << error;
+    EXPECT_EQ(restored.size(), 2U);
+    EXPECT_EQ(restored.readyCount(), 1U);
+    EXPECT_EQ(restored.futureCount(), 1U);
+}
+
+} // namespace
+```
+
+A good test asserts behavior, not internals: the scheduler's containers are private, and the test only observes which task comes out and how many tasks remain.
+
+## Build and keep I/O thin
+
+```cmake
+cmake_minimum_required(VERSION 3.24)
+project(task_scheduler LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+add_library(scheduler_core src/scheduler.cpp)
+target_include_directories(scheduler_core PUBLIC include)
+
+add_executable(scheduler src/main.cpp)
+target_link_libraries(scheduler PRIVATE scheduler_core)
+
+enable_testing()
+add_subdirectory(tests)
+```
+
+```cmake
+# tests/CMakeLists.txt
+include(FetchContent)
+
+FetchContent_Declare(
+    googletest
+    URL https://github.com/google/googletest/archive/refs/tags/v1.14.0.tar.gz
+)
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(googletest)
+
+add_executable(scheduler_tests test_scheduler.cpp)
+target_link_libraries(scheduler_tests PRIVATE scheduler_core GTest::gtest_main)
+
+include(GoogleTest)
+gtest_discover_tests(scheduler_tests)
+```
+
+The command-line front end reads a path, loads the scheduler, and runs a loop with commands such as `add`, `next`, `save`, and `quit`. Every iteration calls `scheduler.advance(system_clock::now())` before offering `next`. Prompts and file opening stay in `main.cpp`; they do not leak into `Scheduler`.
+
+```cpp
+// src/main.cpp
+#include "scheduler/scheduler.hpp"
+
+#include <chrono>
+#include <cstdint>
+#include <fstream>
+#include <iostream>
+#include <string>
+#include <string_view>
+
+namespace {
+
+std::string ask(std::string_view prompt) {
+    std::cout << prompt;
+    std::string line;
+    std::getline(std::cin, line);
+    return line;
+}
+
+} // namespace
+
+int main(int argc, char* argv[]) {
+    const std::string path = argc > 1 ? argv[1] : "tasks.tsv";
+    const auto initial = std::chrono::floor<std::chrono::seconds>(
+        std::chrono::system_clock::now());
+    Scheduler scheduler{initial};
+
+    if (std::ifstream input{path}) {
+        std::string error;
+        if (!scheduler.load(input, error)) {
+            std::cerr << "Cannot load " << path << ": " << error << '\n';
+            return 1;
+        }
+    }
+
+    std::string command;
+    while (true) {
+        scheduler.advance(std::chrono::floor<std::chrono::seconds>(
+            std::chrono::system_clock::now()));
+
+        std::cout << "add/next/save/quit> ";
+        if (!std::getline(std::cin, command)) {
+            break;
+        }
+
+        try {
+            if (command == "quit") {
+                break;
+            } else if (command == "next") {
+                if (const auto task = scheduler.popNext()) {
+                    std::cout << task->id << " | " << task->title << '\n';
+                } else {
+                    std::cout << "No ready tasks\n";
+                }
+            } else if (command == "add") {
+                const std::uint64_t id =
+                    static_cast<std::uint64_t>(std::stoull(ask("id: ")));
+                const std::string title = ask("title: ");
+                const int priority = std::stoi(ask("priority: "));
+                const long long dueCount = std::stoll(ask("due epoch seconds: "));
+
+                scheduler.add(Task{id, title, priority,
+                                   std::chrono::sys_seconds{
+                                       std::chrono::seconds{dueCount}}});
+                std::cout << "Added\n";
+            } else if (command == "save") {
+                std::ofstream output{path};
+                if (!output) {
+                    std::cerr << "Cannot write " << path << '\n';
+                    continue;
+                }
+                scheduler.save(output);
+                std::cout << "Saved\n";
+            } else {
+                std::cout << "Unknown command\n";
+            }
+        } catch (const std::exception& exception) {
+            std::cout << "Error: " << exception.what() << '\n';
+        }
+    }
+}
+```
+
+A caller that later uses a real timer, a web API, or a test harness can reuse the same scheduling core. The CLI does not contain priority comparisons, due-time partitioning, or persistence formatting.
+
+## Practice
+
+1. Build the project and run the four tests. Add a test for equal priority and equal due time that verifies the lower id runs first.
+2. Add a `cancel(id)` operation. Remove the task from either the ready queue or the future map, and test both paths.
+3. Change `popNext` to return all tasks due at the same second in priority order. Keep the API small and explain how the caller should drain them.
+4. Make `load` strict about trailing characters and add a test for a line with an extra tab.
+5. Add a `--now` command-line option for a fixed initial time, so an integration test can reproduce a schedule without waiting.

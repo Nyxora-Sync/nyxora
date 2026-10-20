@@ -1,0 +1,207 @@
+Classes and records both hold data and behavior, but they answer different questions. A class is usually an object with identity and a lifecycle; a record is usually a value defined by its contents. Interfaces describe what a caller can do without promising how. Knowing which one a problem calls for prevents most of the over-engineering that makes C# codebases hard to change.
+
+## A class protects its invariants
+
+A well-designed class does not expose its fields and hope callers behave. It keeps its state valid and offers operations that preserve the rules.
+
+```csharp
+public sealed class BankAccount
+{
+    public string Owner { get; }
+    public decimal Balance { get; private set; }
+
+    public BankAccount(string owner, decimal openingBalance = 0m)
+    {
+        if (string.IsNullOrWhiteSpace(owner))
+            throw new ArgumentException("Owner is required.", nameof(owner));
+        if (openingBalance < 0)
+            throw new ArgumentOutOfRangeException(nameof(openingBalance));
+
+        Owner = owner.Trim();
+        Balance = openingBalance;
+    }
+
+    public void Deposit(decimal amount)
+    {
+        if (amount <= 0)
+            throw new ArgumentOutOfRangeException(nameof(amount));
+        Balance += amount;
+    }
+
+    public bool TryWithdraw(decimal amount)
+    {
+        if (amount <= 0 || amount > Balance)
+            return false;
+
+        Balance -= amount;
+        return true;
+    }
+}
+```
+
+`Owner` has a getter only, so it cannot change after construction. `Balance` has a private setter: callers can read it, but only the class can change it. The constructor and methods enforce the rules, which means every `BankAccount` in the system is valid by definition.
+
+Properties are methods in disguise. An auto-property such as `public string Owner { get; }` creates a hidden backing field plus a getter. You can add logic later without changing the public surface:
+
+```csharp
+private string _owner = "";
+public string Owner
+{
+    get => _owner;
+    private set => _owner = value.Trim();
+}
+```
+
+## Access modifiers
+
+Visibility is part of the design, not an afterthought. Use the narrowest scope that still lets callers do their job:
+
+- `public` is visible to every assembly. Reserve it for the actual contract.
+- `private` is visible only inside the declaring type. Class members default to this.
+- `protected` is visible to derived classes, which couples them to the base class.
+- `internal` is visible within the same assembly, useful for implementation details shared by a few types.
+- `protected internal` and `private protected` combine the two, but reach for them rarely.
+
+A top-level class defaults to `internal`. Marking every class `public` because the compiler allows it exposes implementation details and makes future changes harder.
+
+## `required`, `init`, and object initializers
+
+C# 11 added `required` members, which force callers to set a property during initialization. Combined with `init`, this gives concise immutable data objects:
+
+```csharp
+public sealed class Customer
+{
+    public required string Name { get; init; }
+    public string? Email { get; init; }
+}
+
+var customer = new Customer { Name = "Aki", Email = "aki@example.com" };
+// customer.Name = "Mina"; // compile error: init-only
+```
+
+`required` is checked by the compiler at the call site. `init` means the value can be assigned during object construction or in an object initializer, then not again. Neither makes nested objects immutable.
+
+Primary constructors (C# 12) remove boilerplate for small classes:
+
+```csharp
+public sealed class Money(decimal amount, string currency)
+{
+    public decimal Amount { get; } = amount >= 0
+        ? amount
+        : throw new ArgumentOutOfRangeException(nameof(amount));
+    public string Currency { get; } = currency;
+}
+```
+
+Primary constructor parameters are captured, not automatically public properties. For validation-heavy types, an explicit constructor is often clearer.
+
+## Inheritance and polymorphism
+
+Inheritance expresses an **is-a** relationship. An abstract base class can define shared behavior and force derived types to supply the rest:
+
+```csharp
+public abstract class Shape
+{
+    public abstract double Area { get; }
+
+    public virtual string Describe() =>
+        $"{GetType().Name} with area {Area:F2}";
+}
+
+public sealed class Circle(double radius) : Shape
+{
+    public override double Area => Math.PI * radius * radius;
+}
+
+public sealed class Rectangle(double width, double height) : Shape
+{
+    public override double Area => width * height;
+}
+
+var shapes = new List<Shape> { new Circle(2), new Rectangle(3, 4) };
+foreach (var shape in shapes)
+    Console.WriteLine(shape.Describe());
+```
+
+The loop calls `Describe` polymorphically: each object uses its runtime type. `virtual` supplies an overridable default; `abstract` requires an implementation. `sealed` on the derived classes prevents further inheritance when extension is not part of the design.
+
+## Interfaces define contracts
+
+An interface says what must be possible, not how. It keeps high-level code independent of databases, HTTP, and vendors:
+
+```csharp
+public interface IOrderRepository
+{
+    Task<Order?> FindAsync(Guid id, CancellationToken ct);
+    Task SaveAsync(Order order, CancellationToken ct);
+}
+```
+
+Application code can depend on `IOrderRepository`, while the infrastructure layer supplies an EF Core or in-memory implementation. Tests can use a fake without a database. Keep interfaces small and named from the caller's perspective; a fifteen-method repository interface is usually several responsibilities wearing one coat.
+
+## Records are values
+
+A record gives you a constructor, public init-only properties, value equality, `ToString`, deconstruction, and non-destructive mutation with `with`:
+
+```csharp
+public record Money(decimal Amount, string Currency)
+{
+    public Money Add(Money other)
+    {
+        if (Currency != other.Currency)
+            throw new InvalidOperationException("Currency mismatch.");
+        return this with { Amount = Amount + other.Amount };
+    }
+}
+
+var price = new Money(19.99m, "EUR");
+var discounted = price with { Amount = 17.99m };
+
+Console.WriteLine(price == new Money(19.99m, "EUR")); // True
+```
+
+Two records are equal when their types match and every field is equal. `with` copies the record and changes the listed properties, leaving the original untouched. Use `record struct` for small values where allocation matters, but remember that a struct's default value bypasses your constructor and can violate invariants.
+
+Records are only shallowly immutable. A record containing a `List<Line>` still exposes a mutable list, and equality compares the list reference, not its contents. Prefer `IReadOnlyList<Line>` and copy incoming collections.
+
+## Composition over inheritance
+
+Inheritance couples a derived class to every protected detail of its base. Composition asks a class to hold a collaborator instead:
+
+```csharp
+public interface IDiscountPolicy
+{
+    decimal Apply(decimal subtotal);
+}
+
+public sealed class PercentageDiscount(decimal percent) : IDiscountPolicy
+{
+    public decimal Apply(decimal subtotal) => subtotal * (1 - percent / 100m);
+}
+
+public sealed class Order(IDiscountPolicy discount)
+{
+    public decimal Total(decimal subtotal) => discount.Apply(subtotal);
+}
+```
+
+A new discount rule is a new implementation, not a new subclass. The order does not care how the discount is calculated, and the policy can be tested alone. Use inheritance when the subtype genuinely substitutes for the base type and shares its invariants; use composition for behavior that varies.
+
+## Common mistakes
+
+- Public setters on every property, which turn a class into a loose bag of fields and let invalid states spread.
+- Inheritance used only to reuse code. If the relationship is not “is a”, composition is usually safer.
+- Using records for entities that have identity and a changing lifecycle. Two `Customer` records with the same fields are not necessarily the same customer.
+- Expecting record equality to compare nested collections by value. It does not.
+- Writing interfaces with no second implementation and no test seam. An interface is a boundary, not decoration.
+
+## Practice
+
+Build a small library lending model in a console project.
+
+1. Create `Book`, a record with `Isbn`, `Title`, and `Author`.
+2. Create `Member`, a class with an ID, a name, and a private list of borrowed ISBNs exposed as `IReadOnlyCollection<string>`.
+3. Add `Borrow(Book book)` and `Return(string isbn)` methods that enforce a five-book limit and reject duplicate loans.
+4. Define `ILoanPolicy` with a method that decides whether a member may borrow a given book. Implement a standard policy and a staff policy with a higher limit.
+5. Create a `LoanService` that takes `ILoanPolicy` through its constructor and returns a result object instead of throwing for an expected rejection.
+6. Demonstrate that two `Book` records with the same ISBN and title are equal, but two `Member` objects with the same name are not. Then use `with` to produce a corrected `Book` without mutating the original.

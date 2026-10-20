@@ -1,0 +1,143 @@
+C# looks heavier than JavaScript at first: solutions, projects, target frameworks, package references. In practice, a single command-line tool creates, builds, runs, and publishes everything, and the files it generates are small enough to read in a minute. This lesson sets up that toolchain and explains each piece rather than asking you to accept it on faith.
+
+## The SDK and the runtime are different
+
+The **.NET runtime** executes a compiled application. The **.NET SDK** contains the runtime plus the C# compiler, the `dotnet` CLI, project templates, and the build engine. Install the SDK for development; servers that only run published apps need the runtime, and ASP.NET Core apps need the ASP.NET Core runtime specifically.
+
+```bash
+dotnet --version
+dotnet --list-sdks
+dotnet --list-runtimes
+```
+
+The examples here target .NET 9; .NET 8 works the same apart from the target framework in the project file. Prefer an LTS release for production and keep the SDK version in a `global.json` when a team needs reproducible builds:
+
+```text
+{
+  "sdk": {
+    "version": "9.0.100",
+    "rollForward": "latestFeature"
+  }
+}
+```
+
+## Create and run a project
+
+```bash
+dotnet new console -n HelloCsharp
+cd HelloCsharp
+dotnet run
+```
+
+The template creates a folder with a `.csproj` file and `Program.cs`. The first run prints `Hello, World!`. `dotnet new list` shows every installed template, including `webapi`, `classlib`, `xunit`, and `gitignore`. A solution file is optional for a single project but useful once you have several:
+
+```bash
+dotnet new sln -n HelloCsharp
+dotnet sln add HelloCsharp.csproj
+```
+
+## What `Program.cs` is doing
+
+Replace the generated file with this:
+
+```csharp
+Console.Write("Your name: ");
+string? name = Console.ReadLine();
+
+var greeting = string.IsNullOrWhiteSpace(name)
+    ? "Hello, stranger!"
+    : $"Hello, {name.Trim()}!";
+
+Console.WriteLine(greeting);
+```
+
+There is no visible `Main` method. **Top-level statements** let the compiler generate the entry point, and `await` is allowed directly in them. The rules are simple: only one file in the project may use top-level statements, and any type declarations in that file must come after the statements.
+
+`Console` lives in the `System` namespace. The SDK enables **implicit usings**, so common namespaces such as `System`, `System.IO`, and `System.Linq` are imported automatically. `string?` is a nullable reference type: `ReadLine` can return `null` at end of input, and the compiler makes you handle that when nullable checking is on.
+
+## The project file
+
+```xml
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+</Project>
+```
+
+`OutputType` is `Exe` for a runnable program and `Library` for a class library. `TargetFramework` selects the runtime APIs and language defaults. `Nullable` turns nullable reference type analysis on; leave it on. The SDK-style project includes all `.cs` files under the folder by default, so there is no file list to maintain.
+
+Namespaces organize types and prevent name collisions. Modern C# uses file-scoped namespaces, which save an indentation level:
+
+```csharp
+namespace HelloCsharp.Greeting;
+
+public static class Greeter
+{
+    public static string For(string name) => $"Hello, {name}!";
+}
+```
+
+Call it from `Program.cs` by adding `using HelloCsharp.Greeting;` at the top.
+
+## Build, run, and publish
+
+```bash
+dotnet build                 # compile to bin/Debug/net9.0
+dotnet run                   # build and execute
+dotnet run -- Aki            # pass arguments after --
+dotnet build -c Release      # optimized build
+dotnet publish -c Release -o ./publish
+```
+
+`dotnet run` is for development. `dotnet publish` produces the files you deploy. By default it creates a **framework-dependent** deployment: small output that requires the matching runtime on the target machine. A **self-contained** publish bundles the runtime and is tied to a platform:
+
+```bash
+dotnet publish -c Release -r linux-x64 --self-contained true -o ./publish
+```
+
+Single-file publishing (`-p:PublishSingleFile=true`) is convenient but not automatically faster, and trimming (`-p:PublishTrimmed=true`) can break reflection-heavy libraries. Test the published artifact, not just `dotnet run`.
+
+## Debug versus Release
+
+Debug builds define the `DEBUG` constant, emit full symbols, and disable most optimizations so the debugger can step accurately. Release builds optimize code, omit `DEBUG`, and still emit portable symbols by default. `Debug.Assert` calls disappear from Release, so never use them for input validation. Benchmark and profile Release builds only; Debug numbers are meaningless.
+
+## Packages with NuGet
+
+NuGet is the package registry and restore tool. Add a package with:
+
+```bash
+dotnet add package Humanizer
+dotnet list package --outdated
+```
+
+The reference is recorded in the project file:
+
+```xml
+<ItemGroup>
+  <PackageReference Include="Humanizer" Version="2.14.1" />
+</ItemGroup>
+```
+
+`dotnet restore` downloads packages and writes `obj/project.assets.json`; build and run restore implicitly. Commit the project file and, for applications, consider a lock file (`RestorePackagesWithLockFile`) so CI restores exactly the tested versions. Central package management moves versions into `Directory.Packages.props`, which prevents projects in a solution from drifting apart. Only add packages you understand, and check that they support your target framework.
+
+## Common mistakes
+
+- Installing only the runtime on a development machine. You need the SDK to compile.
+- Editing files under `bin` or `obj`. They are generated; change source instead.
+- Running `dotnet` from the wrong folder and wondering why it picks up another project.
+- Ignoring nullable warnings. They usually describe a real null path.
+- Parsing user input with the current culture and persisting the result. Use `CultureInfo.InvariantCulture` for storage and protocols, and format for display separately.
+- Publishing a Debug build, then comparing its performance to someone else's Release build.
+
+## Practice
+
+1. Create `TipCalculator` with `dotnet new console`, read a bill and tip percentage from `Console.ReadLine`, and print the tip and total to two decimal places.
+2. Parse the numbers with `decimal.TryParse` and `CultureInfo.InvariantCulture`. Reprint a clear error instead of crashing when input is invalid.
+3. Add a `Calculator` class in its own file with a file-scoped namespace, and call it from `Program.cs`.
+4. Add a NuGet package of your choice, inspect the change in the `.csproj`, then run `dotnet list package`.
+5. Build in Release, publish framework-dependent, and run the published binary from a different directory. Confirm it does not depend on the source folder.
+6. Add a `global.json` pinning your SDK feature band, delete `bin` and `obj`, and verify the project still restores and builds.

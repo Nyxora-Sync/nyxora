@@ -7,9 +7,9 @@ const configuredUrl =
     : 'http://localhost:3000')
 
 export const siteUrl = configuredUrl.replace(/\/+$/, '')
-export const siteName = 'MERN Learn'
+export const siteName = 'Nyxora Sync'
 export const defaultDescription =
-  'Learn the MERN stack (MongoDB, Express, React, Node.js) from beginner to mastery with free written lessons, playgrounds, progress tracking, and a community.'
+  'Learn web development and programming languages for free. MERN, C, C++, C#, and Python paths from beginner to mastery, with written lessons, projects, playgrounds, and progress tracking.'
 export const defaultOgImage = '/og-image.jpg'
 
 // Modules shared by the beginner and developer tracks render the same lessons.
@@ -79,7 +79,7 @@ export function pageMetadata({
           url: defaultOgImage,
           width: 1200,
           height: 630,
-          alt: `${siteName} — free MERN stack curriculum`,
+          alt: `${siteName} — free web development and programming curriculum`,
         },
       ],
     },

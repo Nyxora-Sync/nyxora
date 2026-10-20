@@ -1,0 +1,530 @@
+A multithreaded HTTP server is a useful capstone because every layer is visible: sockets, an accept loop, a bounded queue, worker threads, request parsing, routing, response construction, and shutdown. The version here is deliberately small enough to read in one sitting. It is a teaching server, not a production edge service, and the final section is explicit about the difference.
+
+The server supports HTTP/1.1 over TCP, handles one request per connection, and closes the connection after the response. That constraint removes keep-alive, pipelining, and chunked transfer encoding from the design, which keeps the correctness argument tractable.
+
+## Socket setup and RAII
+
+POSIX sockets are file descriptors. Wrap the descriptor so every early return closes it:
+
+```cpp
+#include <sys/socket.h>
+#include <unistd.h>
+
+#include <utility>
+
+class UniqueFd {
+public:
+    explicit UniqueFd(int fd = -1) noexcept : fd_(fd) {}
+    ~UniqueFd() { reset(); }
+
+    UniqueFd(const UniqueFd&) = delete;
+    UniqueFd& operator=(const UniqueFd&) = delete;
+
+    UniqueFd(UniqueFd&& other) noexcept
+        : fd_(std::exchange(other.fd_, -1)) {}
+
+    UniqueFd& operator=(UniqueFd&& other) noexcept {
+        if (this != &other) {
+            reset(std::exchange(other.fd_, -1));
+        }
+        return *this;
+    }
+
+    int get() const noexcept { return fd_; }
+    explicit operator bool() const noexcept { return fd_ >= 0; }
+
+    void reset(int fd = -1) noexcept {
+        if (fd_ >= 0) {
+            ::close(fd_);
+        }
+        fd_ = fd;
+    }
+
+private:
+    int fd_;
+};
+```
+
+The listening socket uses `SO_REUSEADDR` so a restart does not fail while old connections linger in `TIME_WAIT`. `SOCK_CLOEXEC` prevents the descriptor from leaking into child processes.
+
+```cpp
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+
+#include <cerrno>
+#include <cstring>
+#include <stdexcept>
+
+UniqueFd createListener(std::uint16_t port) {
+    UniqueFd socket{::socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0)};
+    if (!socket) {
+        throw std::runtime_error{std::strerror(errno)};
+    }
+
+    int reuse = 1;
+    if (::setsockopt(socket.get(), SOL_SOCKET, SO_REUSEADDR,
+                     &reuse, sizeof reuse) < 0) {
+        throw std::runtime_error{std::strerror(errno)};
+    }
+
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_ANY);
+    address.sin_port = htons(port);
+
+    if (::bind(socket.get(), reinterpret_cast<sockaddr*>(&address),
+               sizeof address) < 0) {
+        throw std::runtime_error{std::strerror(errno)};
+    }
+    if (::listen(socket.get(), SOMAXCONN) < 0) {
+        throw std::runtime_error{std::strerror(errno)};
+    }
+    return socket;
+}
+```
+
+## Acceptor loop and bounded handoff
+
+The acceptor never creates a thread per connection. It accepts a descriptor, tries to place it in a bounded queue, and moves on. If the queue is full, the server closes the connection immediately; that is a simple form of backpressure. A production server would send a `503` with a short write timeout, but dropping the connection keeps the acceptor responsive.
+
+```cpp
+#include <condition_variable>
+#include <cstddef>
+#include <deque>
+#include <mutex>
+
+class ConnectionQueue {
+public:
+    explicit ConnectionQueue(std::size_t capacity) : capacity_(capacity) {}
+
+    bool tryPush(int fd) {
+        std::scoped_lock lock{mutex_};
+        if (stopping_ || connections_.size() >= capacity_) {
+            return false;
+        }
+        connections_.push_back(fd);
+        notEmpty_.notify_one();
+        return true;
+    }
+
+    int pop() {
+        std::unique_lock lock{mutex_};
+        notEmpty_.wait(lock, [this] {
+            return stopping_ || !connections_.empty();
+        });
+
+        if (connections_.empty()) {
+            return -1;
+        }
+
+        const int fd = connections_.front();
+        connections_.pop_front();
+        return fd;
+    }
+
+    void stop() {
+        {
+            std::scoped_lock lock{mutex_};
+            stopping_ = true;
+        }
+        notEmpty_.notify_all();
+    }
+
+private:
+    std::mutex mutex_;
+    std::condition_variable notEmpty_;
+    std::deque<int> connections_;
+    std::size_t capacity_;
+    bool stopping_{};
+};
+```
+
+The accept loop uses `poll` with a timeout so a stop request is noticed even when no connection arrives:
+
+```cpp
+#include <poll.h>
+
+#include <csignal>
+#include <iostream>
+
+volatile std::sig_atomic_t g_stop = 0;
+
+extern "C" void handleSignal(int) {
+    g_stop = 1;
+}
+
+void acceptLoop(int listener, ConnectionQueue& queue) {
+    while (!g_stop) {
+        pollfd descriptor{listener, POLLIN, 0};
+        const int ready = ::poll(&descriptor, 1, 200);
+
+        if (ready < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            std::cerr << "poll: " << std::strerror(errno) << '\n';
+            return;
+        }
+        if (ready == 0) {
+            continue;
+        }
+        if ((descriptor.revents & POLLIN) == 0) {
+            if ((descriptor.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) {
+                return;
+            }
+            continue;
+        }
+
+        sockaddr_in client{};
+        socklen_t length = sizeof client;
+        const int fd = ::accept(
+            listener, reinterpret_cast<sockaddr*>(&client), &length);
+
+        if (fd < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            std::cerr << "accept: " << std::strerror(errno) << '\n';
+            continue;
+        }
+
+        if (!queue.tryPush(fd)) {
+            ::close(fd); // overload: reject rather than grow without bound
+        }
+    }
+}
+```
+
+## Parsing just enough HTTP
+
+The parser reads until the blank line that ends the headers, caps the header block at 8 KiB, and reads a body only when `Content-Length` is present. It rejects transfer encoding rather than pretending to support chunked requests. Header names are lowercased for case-insensitive lookup.
+
+```cpp
+#include <algorithm>
+#include <cctype>
+#include <charconv>
+#include <optional>
+#include <sstream>
+#include <string>
+#include <string_view>
+#include <system_error>
+#include <unordered_map>
+
+struct Request {
+    std::string method;
+    std::string target;
+    std::unordered_map<std::string, std::string> headers;
+    std::string body;
+};
+
+std::string trim(std::string text) {
+    const auto notSpace = [](unsigned char ch) {
+        return std::isspace(ch) == 0;
+    };
+    const auto begin = std::find_if(text.begin(), text.end(), notSpace);
+    const auto end = std::find_if(text.rbegin(), text.rend(), notSpace).base();
+    if (begin >= end) {
+        return {};
+    }
+    return std::string{begin, end};
+}
+
+std::string lowercase(std::string text) {
+    std::transform(text.begin(), text.end(), text.begin(),
+                   [](unsigned char ch) {
+                       return static_cast<char>(std::tolower(ch));
+                   });
+    return text;
+}
+
+std::optional<Request> parseRequest(int fd) {
+    std::string raw;
+    char chunk[4096];
+
+    while (raw.find("\r\n\r\n") == std::string::npos) {
+        if (raw.size() >= 8192) {
+            return std::nullopt;
+        }
+        const std::size_t room = 8192 - raw.size();
+        const ssize_t received = ::recv(
+            fd, chunk, std::min(sizeof chunk, room), 0);
+
+        if (received == 0) {
+            return std::nullopt;
+        }
+        if (received < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return std::nullopt;
+        }
+        raw.append(chunk, static_cast<std::size_t>(received));
+    }
+
+    const std::size_t separator = raw.find("\r\n\r\n");
+    std::string_view headerBlock{raw.data(), separator};
+    std::istringstream stream{std::string{headerBlock}};
+
+    std::string requestLine;
+    if (!std::getline(stream, requestLine)) {
+        return std::nullopt;
+    }
+    if (!requestLine.empty() && requestLine.back() == '\r') {
+        requestLine.pop_back();
+    }
+
+    Request request;
+    std::string version;
+    std::istringstream line{requestLine};
+    if (!(line >> request.method >> request.target >> version)) {
+        return std::nullopt;
+    }
+    if (version != "HTTP/1.1" && version != "HTTP/1.0") {
+        return std::nullopt;
+    }
+    if (request.method != "GET" && request.method != "POST") {
+        return std::nullopt;
+    }
+
+    std::string headerLine;
+    while (std::getline(stream, headerLine)) {
+        if (!headerLine.empty() && headerLine.back() == '\r') {
+            headerLine.pop_back();
+        }
+        if (headerLine.empty()) {
+            continue;
+        }
+
+        const auto colon = headerLine.find(':');
+        if (colon == std::string::npos) {
+            return std::nullopt;
+        }
+
+        std::string name = lowercase(trim(headerLine.substr(0, colon)));
+        std::string value = trim(headerLine.substr(colon + 1));
+        if (name.empty()) {
+            return std::nullopt;
+        }
+        request.headers.insert_or_assign(std::move(name), std::move(value));
+    }
+
+    if (request.headers.contains("transfer-encoding")) {
+        return std::nullopt; // chunked bodies are deliberately unsupported
+    }
+
+    std::size_t contentLength = 0;
+    if (const auto it = request.headers.find("content-length");
+        it != request.headers.end()) {
+        const auto [ptr, error] = std::from_chars(
+            it->second.data(), it->second.data() + it->second.size(),
+            contentLength);
+        if (error != std::errc{} ||
+            ptr != it->second.data() + it->second.size() ||
+            contentLength > 64 * 1024) {
+            return std::nullopt;
+        }
+    }
+
+    std::string body = raw.substr(separator + 4);
+    while (body.size() < contentLength) {
+        const std::size_t room = contentLength - body.size();
+        const ssize_t received = ::recv(
+            fd, chunk, std::min(sizeof chunk, room), 0);
+        if (received <= 0) {
+            if (received < 0 && errno == EINTR) {
+                continue;
+            }
+            return std::nullopt;
+        }
+        body.append(chunk, static_cast<std::size_t>(received));
+    }
+    body.resize(contentLength);
+
+    request.body = std::move(body);
+    if (request.target.empty() || request.target.front() != '/') {
+        return std::nullopt;
+    }
+    return request;
+}
+```
+
+This parser does not support folded headers, duplicate `Content-Length` validation, URL decoding, or query parameter parsing. Those omissions are intentional and are part of the production gap discussed below.
+
+## Routing and response building
+
+Routing is a pure function from a request to a response, which makes it easy to test without a socket:
+
+```cpp
+struct Response {
+    int status;
+    std::string reason;
+    std::string contentType;
+    std::string body;
+};
+
+Response route(const Request& request) {
+    const std::size_t query = request.target.find('?');
+    const std::string_view path{
+        request.target.data(),
+        query == std::string::npos ? request.target.size() : query};
+
+    if (request.method == "GET" && path == "/") {
+        return {200, "OK", "text/plain; charset=utf-8",
+                "C++ HTTP server\n"};
+    }
+    if (request.method == "GET" && path == "/health") {
+        return {200, "OK", "application/json",
+                R"({"status":"ok"})"};
+    }
+    if (request.method == "POST" && path == "/echo") {
+        return {200, "OK", "text/plain; charset=utf-8", request.body};
+    }
+    if (path == "/" || path == "/health" || path == "/echo") {
+        return {405, "Method Not Allowed", "text/plain; charset=utf-8",
+                "method not allowed\n"};
+    }
+    return {404, "Not Found", "text/plain; charset=utf-8", "not found\n"};
+}
+
+std::string buildResponse(const Response& response) {
+    std::ostringstream out;
+    out << "HTTP/1.1 " << response.status << ' '
+        << response.reason << "\r\n"
+        << "Content-Type: " << response.contentType << "\r\n"
+        << "Content-Length: " << response.body.size() << "\r\n"
+        << "Connection: close\r\n"
+        << "\r\n"
+        << response.body;
+    return out.str();
+}
+```
+
+Writing a response must handle partial sends. `send` may accept fewer bytes than requested:
+
+```cpp
+bool sendAll(int fd, std::string_view data) {
+    while (!data.empty()) {
+        const ssize_t sent = ::send(
+            fd, data.data(), data.size(), MSG_NOSIGNAL);
+        if (sent < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return false;
+        }
+        if (sent == 0) {
+            return false;
+        }
+        data.remove_prefix(static_cast<std::size_t>(sent));
+    }
+    return true;
+}
+
+void workerLoop(ConnectionQueue& queue) {
+    while (true) {
+        const int fd = queue.pop();
+        if (fd < 0) {
+            return;
+        }
+
+        UniqueFd client{fd};
+        timeval timeout{5, 0};
+        ::setsockopt(client.get(), SOL_SOCKET, SO_RCVTIMEO,
+                     &timeout, sizeof timeout);
+        ::setsockopt(client.get(), SOL_SOCKET, SO_SNDTIMEO,
+                     &timeout, sizeof timeout);
+
+        try {
+            const std::optional<Request> request = parseRequest(client.get());
+            const Response response = request
+                ? route(*request)
+                : Response{400, "Bad Request", "text/plain; charset=utf-8",
+                           "bad request\n"};
+            (void)sendAll(client.get(), buildResponse(response));
+        } catch (...) {
+            // One bad connection must not terminate the worker.
+        }
+    }
+}
+```
+
+## Startup and graceful shutdown
+
+```cpp
+#include <cstdint>
+#include <thread>
+#include <vector>
+
+std::uint16_t parsePort(int argc, char* argv[]) {
+    if (argc < 2) {
+        return 8080;
+    }
+    unsigned int value = 0;
+    const std::string_view text{argv[1]};
+    const auto [ptr, error] = std::from_chars(
+        text.data(), text.data() + text.size(), value);
+    if (error != std::errc{} || ptr != text.data() + text.size() ||
+        value == 0 || value > 65535) {
+        throw std::invalid_argument{"port must be between 1 and 65535"};
+    }
+    return static_cast<std::uint16_t>(value);
+}
+
+int main(int argc, char* argv[]) {
+    try {
+        const std::uint16_t port = parsePort(argc, argv);
+        std::signal(SIGINT, handleSignal);
+        std::signal(SIGTERM, handleSignal);
+
+        UniqueFd listener = createListener(port);
+        ConnectionQueue queue{128};
+
+        std::vector<std::jthread> workers;
+        workers.reserve(4);
+        try {
+            for (int i = 0; i < 4; ++i) {
+                workers.emplace_back([&queue] {
+                    workerLoop(queue);
+                });
+            }
+        } catch (...) {
+            queue.stop();
+            throw;
+        }
+
+        std::cout << "Listening on port " << port << '\n';
+        acceptLoop(listener.get(), queue);
+
+        queue.stop(); // wake workers; they drain queued connections
+    } catch (const std::exception& exception) {
+        std::cerr << "fatal: " << exception.what() << '\n';
+        return 1;
+    }
+    return 0;
+}
+```
+
+On `Ctrl+C`, the signal handler sets a flag. The poll timeout lets the accept loop notice it within roughly 200 milliseconds. The loop stops accepting, `queue.stop()` wakes the workers, and each worker drains queued connections until the queue is empty. `jthread` destructors request stop and join, so the process does not leave threads running while static objects are destroyed. The receive and send timeouts bound how long one slow client can hold a worker.
+
+## Correctness limits and production needs
+
+This server is educational. It assumes a fixed worker count, one request per connection, and ASCII-ish request lines. It does not implement TLS, HTTP/1.1 keep-alive, pipelining, chunked transfer encoding, compression, range requests, authentication, or a complete URL parser. It maps all parse failures to `400` instead of distinguishing `408`, `413`, `414`, and `431`. It does not validate duplicate or conflicting `Content-Length` headers, and it ignores `Expect: 100-continue`.
+
+A production server would use a proven HTTP parser rather than a hand-rolled one, terminate TLS with a maintained library or a reverse proxy, enforce per-connection and global rate limits, apply header and body size limits consistently, and protect against slowloris with robust timeouts. It would add structured request logging, metrics, tracing, health checks, and bounded graceful draining of in-flight requests. It would fuzz the parser, run under AddressSanitizer and ThreadSanitizer, and test shutdown under load. It would also define whether overload rejects, queues, or sheds work, and would expose that policy as a metric rather than hiding it in a `close` call.
+
+## Practice
+
+1. Build the server with `-std=c++20 -pthread`, run it, and test the routes with `curl`:
+   ```bash
+   curl -i http://localhost:8080/
+   curl -i http://localhost:8080/health
+   curl -i -X POST --data 'hello' http://localhost:8080/echo
+   curl -i http://localhost:8080/missing
+   ```
+2. Send a malformed request with `printf` and `nc`. Confirm that the server returns `400` and remains available for the next connection.
+3. Run the server under AddressSanitizer and ThreadSanitizer with a small load generator. Fix any reported lifetime or race issue before adding features.
+4. Add a `/status` endpoint that reports the number of queued connections and completed requests using atomics. Keep the route function free of direct socket I/O.
+5. Change the overload policy from closing the connection to returning `503` with a short send timeout. Explain the tradeoff between acceptor latency and client feedback.
+6. Write a unit test for `route` that calls it directly with a `Request`, with no server running. Add tests for method mismatch, query strings, and an empty body.
+7. Measure how many connections per second the server handles with one worker versus four. Keep the request size and client count fixed, and explain why more workers eventually stop helping.

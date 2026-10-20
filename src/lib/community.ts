@@ -69,7 +69,10 @@ export const projectSchema = z
     githubUrl: optionalUrl,
     demoUrl: optionalUrl,
     imageUrl: optionalUrl,
-    track: z.enum(['beginner', 'developer']),
+    track: z
+      .string()
+      .trim()
+      .refine((value) => tracks.some((track) => track.key === value), 'Choose a valid track'),
     modules: z.array(z.string().trim().min(1).max(60)).max(12).default([]),
     tags: z.array(z.string().trim().min(1).max(24)).max(8).default([]),
   })

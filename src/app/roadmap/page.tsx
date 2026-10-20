@@ -9,10 +9,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   BookOpen, Code2, Server, Database, Atom, Layers, ArrowRight,
   Globe, GitBranch, Cloud, Boxes, TestTube2, Shield,
-  Rocket, Smartphone, Brain,
+  Rocket, Smartphone, Brain, Braces, FileCode, Hash, Terminal,
+  type LucideIcon,
 } from 'lucide-react'
 import { cn, getAccent } from '@/lib/utils'
-import { getTrack } from '@/lib/curriculum'
+import { getTrack, tracks } from '@/lib/curriculum'
 import { pageMetadata } from '@/lib/seo'
 
 const beginnerRoadmap = [
@@ -105,6 +106,102 @@ const specializationIcons: Record<string, typeof Atom> = {
   Smartphone,
 }
 
+const languageTracks = tracks.filter(
+  (track) => track.category === 'programming-languages'
+)
+
+const languageIcons: Record<string, LucideIcon> = {
+  c: FileCode,
+  cpp: Braces,
+  csharp: Hash,
+  python: Terminal,
+}
+
+function LanguageRoadmap({
+  track,
+  index,
+}: {
+  track: (typeof languageTracks)[number]
+  index: number
+}) {
+  const Icon = languageIcons[track.key] ?? FileCode
+  const lessonCount = track.modules.reduce(
+    (sum, module) => sum + module.lessons.length,
+    0
+  )
+  const hours = track.modules.reduce((sum, module) => sum + module.estimatedHours, 0)
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-start gap-4 rounded-xl border border-border/50 bg-card p-5">
+        <div
+          className={cn(
+            'flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-xl',
+            getAccent(track.color).icon
+          )}
+        >
+          <Icon className="h-6 w-6" aria-hidden="true" />
+        </div>
+        <div className="min-w-0">
+          <h3 className="font-semibold">{track.name}</h3>
+          <p className="mt-1 text-sm text-muted-foreground">{track.description}</p>
+          <p className="mt-2 text-xs text-muted-foreground">
+            {track.modules.length} levels · {lessonCount} lessons · ~{hours} hours
+          </p>
+        </div>
+      </div>
+
+      {track.modules.map((module, moduleIndex) => (
+        <Reveal key={module.id} delay={Math.min((index + moduleIndex) * 0.05, 0.2)}>
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-sm font-semibold">
+                  {moduleIndex + 1}
+                </span>
+                <div>
+                  <h4 className="font-semibold">{module.name}</h4>
+                  <p className="text-xs text-muted-foreground">
+                    {module.lessons.length} lessons · ~{module.estimatedHours} hours
+                  </p>
+                </div>
+              </div>
+              <p className="mt-3 text-sm text-muted-foreground">{module.description}</p>
+              <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                {module.lessons.map((lesson) => (
+                  <Link
+                    key={lesson.id}
+                    href={`/learn/${track.key}/${module.key}/${lesson.id}`}
+                    className="group flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2 text-sm transition-colors hover:bg-muted"
+                  >
+                    <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-background text-[10px] font-semibold text-muted-foreground">
+                      {lesson.order}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate">{lesson.title}</span>
+                    <ArrowRight
+                      className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-foreground"
+                      aria-hidden="true"
+                    />
+                  </Link>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </Reveal>
+      ))}
+
+      <div className="pt-2 text-center">
+        <Button asChild variant="outline" className="gap-2">
+          <Link href={`/learn/${track.key}`}>
+            Start the {track.name} path
+            <ArrowRight className="h-4 w-4" aria-hidden="true" />
+          </Link>
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 function RoadmapPhase({ phase, index, color }: { phase: typeof beginnerRoadmap[0]; index: number; color: string }) {
   const Icon = phase.icon
   return (
@@ -146,10 +243,10 @@ function RoadmapPhase({ phase, index, color }: { phase: typeof beginnerRoadmap[0
 }
 
 export const metadata = pageMetadata({
-  title: 'Full MERN Roadmap',
-  description: 'Complete visual roadmap for learning the MERN stack, from beginner foundations to production mastery and four specializations, with estimated timelines.',
+  title: 'Full Learning Roadmap',
+  description: 'Complete roadmaps for MERN, C, C++, C#, and Python, from beginner foundations to advanced projects, mastery, and specializations, with estimated timelines.',
   path: '/roadmap',
-  keywords: ['MERN roadmap', 'full stack roadmap', 'learn MERN', 'web developer roadmap', 'Next.js roadmap', 'React Native roadmap'],
+  keywords: ['MERN roadmap', 'C roadmap', 'C++ roadmap', 'C# roadmap', 'Python roadmap', 'full stack roadmap', 'learn programming', 'Next.js roadmap', 'React Native roadmap'],
 })
 
 export default function RoadmapPage() {
@@ -162,12 +259,13 @@ export default function RoadmapPage() {
             <Badge variant="outline" className="mb-4">Visual Roadmap</Badge>
             <h1 className="text-3xl font-bold tracking-tight sm:text-4xl lg:text-5xl">
               Your Path to{' '}
-              <span className="bg-gradient-to-r from-emerald-500 to-violet-500 bg-clip-text text-transparent">
-                MERN Mastery
+              <span className="bg-gradient-to-r from-emerald-500 via-violet-500 to-amber-500 bg-clip-text text-transparent">
+                Mastery
               </span>
             </h1>
             <p className="mt-4 max-w-2xl mx-auto text-lg text-muted-foreground">
-              A complete, structured path from absolute beginner to job-ready full stack developer.
+              Complete, structured paths from absolute beginner to job-ready developer — for the web
+              and for the languages behind it.
             </p>
           </div>
         </section>
@@ -228,6 +326,44 @@ export default function RoadmapPage() {
             </Tabs>
           </div>
         </section>
+
+        {/* Programming Languages */}
+        {languageTracks.length > 0 && (
+          <section className="border-y border-border/50 py-12 sm:py-16">
+            <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
+              <div className="mb-10 text-center">
+                <p className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+                  Programming Languages
+                </p>
+                <h2 className="mt-2 text-3xl font-bold tracking-tight">
+                  Choose a language path
+                </h2>
+                <p className="mt-3 mx-auto max-w-2xl text-muted-foreground">
+                  Each path has three levels and twelve written lessons. Every level ends with a
+                  project; every path ends with a capstone.
+                </p>
+              </div>
+              <Tabs defaultValue={languageTracks[0].key}>
+                <TabsList className="mx-auto mb-10 grid w-full max-w-2xl grid-cols-2 sm:grid-cols-4">
+                  {languageTracks.map((track) => {
+                    const Icon = languageIcons[track.key] ?? FileCode
+                    return (
+                      <TabsTrigger key={track.key} value={track.key} className="gap-2">
+                        <Icon className="h-4 w-4" aria-hidden="true" />
+                        {track.name}
+                      </TabsTrigger>
+                    )
+                  })}
+                </TabsList>
+                {languageTracks.map((track, index) => (
+                  <TabsContent key={track.key} value={track.key}>
+                    <LanguageRoadmap track={track} index={index} />
+                  </TabsContent>
+                ))}
+              </Tabs>
+            </div>
+          </section>
+        )}
 
         {/* Specializations */}
         <section className="py-12 sm:py-16 bg-muted/30">

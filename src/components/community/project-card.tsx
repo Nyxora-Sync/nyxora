@@ -9,13 +9,8 @@ import { UserChip } from '@/components/community/user-chip'
 import { UpvoteButton } from '@/components/community/upvote-button'
 import type { ProjectListItem } from '@/lib/community-types'
 import { timeAgo } from '@/lib/time'
-import { cn, getAccent } from '@/lib/utils'
+import { cn, getAccent, getTrackColor } from '@/lib/utils'
 import { GithubIcon } from '@/components/icons/brand'
-
-const trackAccent: Record<string, string> = {
-  beginner: 'emerald',
-  developer: 'violet',
-}
 
 export const ProjectCard = memo(function ProjectCard({ project }: { project: ProjectListItem }) {
   return (
@@ -42,7 +37,7 @@ export const ProjectCard = memo(function ProjectCard({ project }: { project: Pro
 
       <div className="flex flex-1 flex-col p-5">
         <div className="mb-2 flex flex-wrap items-center gap-1.5">
-          <Badge variant="outline" className={cn('text-[10px] capitalize', getAccent(trackAccent[project.track] ?? 'slate').text)}>
+          <Badge variant="outline" className={cn('text-[10px] capitalize', getAccent(getTrackColor(project.track)).text)}>
             {project.track}
           </Badge>
           {project.tags.slice(0, 3).map((tag) => (

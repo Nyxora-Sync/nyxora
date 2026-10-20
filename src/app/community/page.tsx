@@ -172,7 +172,7 @@ export default function CommunityPage() {
                 Ways to Give Back
               </h2>
               <p className="mt-3 text-muted-foreground">
-                MERN Learn is 100% open source and community-driven. Every contribution helps.
+                Nyxora Sync is 100% open source and community-driven. Every contribution helps.
               </p>
             </div>
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

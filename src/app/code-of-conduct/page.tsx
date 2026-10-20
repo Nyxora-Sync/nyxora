@@ -6,7 +6,7 @@ import { pageMetadata } from '@/lib/seo'
 export const metadata = pageMetadata({
   title: 'Code of Conduct',
   description:
-    'The rules for participating in MERN Learn: lesson discussions, the project showcase, profiles, GitHub, and every community space.',
+    'The rules for participating in Nyxora Sync: lesson discussions, the project showcase, profiles, GitHub, and every community space.',
   path: '/code-of-conduct',
 })
 
@@ -19,7 +19,7 @@ export default function CodeOfConductPage() {
       updated="October 20, 2026"
     >
       <p>
-        MERN Learn is a learning space. People arrive with different backgrounds, languages, time
+        Nyxora Sync is a learning space. People arrive with different backgrounds, languages, time
         zones, and confidence levels. The rules below exist so that asking a basic question never
         costs anyone their dignity.
       </p>
@@ -58,7 +58,7 @@ export default function CodeOfConductPage() {
       <p>
         This code applies in lesson discussions, the project showcase, public profiles, GitHub
         issues and pull requests, contact messages{NEWSLETTER_ENABLED && ', the newsletter'}, and
-        any space where you are representing MERN Learn.
+        any space where you are representing Nyxora Sync.
       </p>
 
       <h2>Reporting</h2>

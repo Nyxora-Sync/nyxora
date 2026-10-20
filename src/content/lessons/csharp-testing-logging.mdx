@@ -1,0 +1,226 @@
+Tests, logs, and configuration are how an application stays understandable after it leaves your machine. Tests prove behavior, logs explain what happened in production, and configuration lets the same binary run in different environments without a rebuild. All three are design concerns, not cleanup tasks.
+
+## Unit tests with xUnit or NUnit
+
+A unit test exercises one piece of logic with no network, database, or file system. xUnit is the common default for new .NET projects:
+
+```csharp
+public sealed class DiscountTests
+{
+    [Fact]
+    public void Applies_percentage_discount()
+    {
+        var total = Discount.Apply(100m, 10m);
+        Assert.Equal(90m, total);
+    }
+
+    [Theory]
+    [InlineData(100, 10, 90)]
+    [InlineData(50, 0, 50)]
+    [InlineData(19.99, 25, 14.99)]
+    public void Calculates_expected_total(decimal subtotal, decimal percent, decimal expected)
+    {
+        Assert.Equal(expected, Discount.Apply(subtotal, percent), precision: 2);
+    }
+}
+```
+
+NUnit expresses the same ideas with different attributes:
+
+```csharp
+[TestFixture]
+public sealed class DiscountTests
+{
+    [Test]
+    public void Applies_percentage_discount()
+    {
+        Assert.That(Discount.Apply(100m, 10m), Is.EqualTo(90m));
+    }
+
+    [TestCase(20, 25, 15)]
+    [TestCase(50, 0, 50)]
+    public void Calculates_expected_total(decimal subtotal, decimal percent, decimal expected)
+    {
+        Assert.That(Discount.Apply(subtotal, percent), Is.EqualTo(expected));
+    }
+}
+```
+
+The framework matters less than the habits: one behavior per test, a name that states the rule, arrange-act-assert structure, and no dependence on execution order. A test that passes only when another test ran first is a test that will fail in CI at the worst time.
+
+## Unit versus integration tests
+
+Unit tests are fast and precise. Integration tests prove that routing, dependency injection, serialization, authorization, and the database work together. You need both, but not in equal numbers.
+
+`WebApplicationFactory` starts the real application in memory:
+
+```csharp
+using System.Data.Common;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+
+public sealed class ApiFactory : WebApplicationFactory<Program>
+{
+    private readonly SqliteConnection _connection = new("DataSource=:memory:");
+
+    public ApiFactory() => _connection.Open();
+
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        builder.UseEnvironment("Testing");
+        builder.ConfigureServices(services =>
+        {
+            services.RemoveAll<DbContextOptions<AppDb>>();
+            services.AddSingleton<DbConnection>(_connection);
+            services.AddDbContext<AppDb>((sp, options) =>
+                options.UseSqlite(sp.GetRequiredService<DbConnection>()));
+        });
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        base.Dispose(disposing);
+        if (disposing)
+            _connection.Dispose();
+    }
+}
+```
+
+The open connection keeps the in-memory SQLite database alive for the test host. The test project needs `Microsoft.AspNetCore.Mvc.Testing` and `Microsoft.EntityFrameworkCore.Sqlite`. Create the schema once:
+
+```csharp
+using var scope = factory.Services.CreateScope();
+scope.ServiceProvider.GetRequiredService<AppDb>().Database.EnsureCreated();
+```
+
+For top-level statements, expose the generated entry point at the end of `Program.cs`:
+
+```csharp
+public partial class Program { }
+```
+
+A simple endpoint test:
+
+```csharp
+[Fact]
+public async Task Create_book_returns_created()
+{
+    await using var factory = new ApiFactory();
+    var client = factory.CreateClient();
+
+    var response = await client.PostAsJsonAsync(
+        "/api/books",
+        new CreateBookRequest("Dune", "Frank Herbert", 19.99m));
+
+    Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+    var book = await response.Content.ReadFromJsonAsync<Book>();
+    Assert.NotNull(book);
+    Assert.Equal("Dune", book!.Title);
+}
+```
+
+SQLite is convenient but not PostgreSQL. Constraints, SQL functions, and concurrency behavior differ. Use Testcontainers with the real database provider for migrations, raw SQL, and anything transactional that must be trusted.
+
+## Logging with `ILogger`
+
+Inject `ILogger<T>` and use message templates, not string interpolation:
+
+```csharp
+public sealed class TicketService(ILogger<TicketService> logger)
+{
+    public void Open(Ticket ticket)
+    {
+        logger.LogInformation(
+            "Opened ticket {TicketId} for {Requester} with priority {Priority}",
+            ticket.Id, ticket.Requester, ticket.Priority);
+    }
+}
+```
+
+The named placeholders become structured properties. A log backend can filter or group by `TicketId`; an interpolated string is one opaque message. Pass exceptions as the first argument:
+
+```csharp
+logger.LogError(ex, "Failed to send receipt for order {OrderId}", order.Id);
+```
+
+Use levels deliberately: `Trace` for detailed diagnostics, `Debug` for development, `Information` for business events, `Warning` for recoverable oddities, `Error` for failures needing attention, and `Critical` for the process being unable to continue. Never log passwords, tokens, full card numbers, or unnecessary personal data. Scopes attach context to every log inside a block:
+
+```csharp
+using (logger.BeginScope("Processing order {OrderId}", order.Id))
+{
+    logger.LogInformation("Validated");
+    logger.LogInformation("Charged");
+}
+```
+
+## The options pattern
+
+Read configuration once into a typed object rather than sprinkling string keys through the code:
+
+```csharp
+using System.ComponentModel.DataAnnotations;
+
+public sealed class SmtpOptions
+{
+    public const string SectionName = "Smtp";
+
+    [Required] public string Host { get; init; } = "";
+    [Range(1, 65535)] public int Port { get; init; } = 587;
+    [Required] public string User { get; init; } = "";
+    [Required] public string Password { get; init; } = "";
+}
+
+builder.Services.AddOptions<SmtpOptions>()
+    .Bind(builder.Configuration.GetSection(SmtpOptions.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+```
+
+Inject `IOptions<SmtpOptions>` for values that never change, `IOptionsSnapshot<SmtpOptions>` for a consistent snapshot per request, or `IOptionsMonitor<SmtpOptions>` when a singleton needs change notifications. `ValidateOnStart` turns a missing setting into a startup failure instead of a mysterious error on the first email.
+
+## Configuration sources and secrets
+
+The default order is later-wins:
+
+```text
+appsettings.json
+appsettings.{Environment}.json
+user secrets (Development only)
+environment variables
+command-line arguments
+```
+
+Environment variables use a double underscore for nesting: `Smtp__Host`, `ConnectionStrings__Library`. This is how containers and orchestrators inject configuration without baking it into the image.
+
+For local development, user secrets keep credentials outside the repository:
+
+```bash
+dotnet user-secrets init
+dotnet user-secrets set "Smtp:Password" "local-only-password"
+dotnet user-secrets list
+```
+
+The values live in a per-user file, not in the project. Production should use the platform's secret store or a dedicated secret manager. `appsettings.json` should contain safe defaults and never a real credential. Set `ASPNETCORE_ENVIRONMENT` explicitly in each deployment; do not assume it defaults to Production.
+
+## Common mistakes
+
+- Testing implementation details, so refactoring breaks tests without changing behavior.
+- Sharing one database across tests and depending on leftover rows. Create and clean up per test or per fixture.
+- Using EF Core's in-memory provider for relational behavior. It does not enforce relational constraints.
+- Not awaiting async test methods, so the test passes before the assertion runs.
+- Logging with `$"..."` interpolation, which destroys structured properties.
+- Resolving `IOptionsSnapshot<T>` from a singleton and hitting a scope error.
+- Committing secrets to `appsettings.json` or a Dockerfile.
+- Treating a warning-level log as noise. Warnings are often the earliest signal of a production incident.
+
+## Practice
+
+1. Write xUnit tests for a `Discount.Apply` function covering zero, negative, and greater-than-100 percentages. Decide whether invalid input throws or returns a result, and test that decision.
+2. Create a `WebApplicationFactory` for a minimal API and test create, read, validation failure, and not-found responses.
+3. Configure SQLite in-memory for the factory and keep the connection open. Then explain which behaviors would require a real PostgreSQL container.
+4. Add `SmtpOptions` with validation, bind it from configuration, and prove the application refuses to start when `Smtp:Host` is missing.
+5. Replace one interpolated log message with a structured template and verify the property appears in the console formatter output.
+6. Move a development secret into user secrets, then run the same app in a container with an environment variable. Confirm no secret exists in the repository.

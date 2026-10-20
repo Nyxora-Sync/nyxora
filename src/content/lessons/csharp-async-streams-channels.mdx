@@ -1,0 +1,163 @@
+A web request should return quickly. Long-running work — sending email, generating a report, importing a file — belongs in the background, and background work needs a way to hand items between producers and consumers without blocking the request thread. C# provides two complementary tools: asynchronous streams for pulling data, and channels for pushing it.
+
+## `IAsyncEnumerable<T>`
+
+An async stream is the asynchronous sibling of `yield return`. It lets a consumer process items as they arrive instead of waiting for a full list:
+
+```csharp
+using System.Runtime.CompilerServices;
+
+public static async IAsyncEnumerable<LogEntry> ReadAsync(
+    string path,
+    [EnumeratorCancellation] CancellationToken ct = default)
+{
+    using var reader = new StreamReader(path);
+
+    while (await reader.ReadLineAsync(ct) is { } line)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        if (LogEntry.TryParse(line, out var entry))
+            yield return entry;
+    }
+}
+```
+
+Consume it with `await foreach`:
+
+```csharp
+await foreach (var entry in ReadAsync("app.log").WithCancellation(ct))
+{
+    if (entry.Level == "ERROR")
+        Console.WriteLine(entry.Message);
+}
+```
+
+The `[EnumeratorCancellation]` attribute tells the compiler to route the token supplied by `WithCancellation` into the iterator's `ct` parameter. Without it, callers can pass a token that the iterator never observes.
+
+Async streams are pull-based and lazy. Nothing is read until the consumer asks for the next item, and only one item is in memory at a time. That makes them ideal for files, paginated APIs, and database result sets. They are not a queue: if the consumer is slow, the producer waits.
+
+## Channels: producer and consumer
+
+`System.Threading.Channels` decouples a producer from a consumer. A bounded channel applies backpressure when the consumer falls behind:
+
+```csharp
+using System.Threading.Channels;
+
+var queue = Channel.CreateBounded<EmailJob>(new BoundedChannelOptions(capacity: 500)
+{
+    FullMode = BoundedChannelFullMode.Wait,
+    SingleReader = true,
+    SingleWriter = false
+});
+
+builder.Services.AddSingleton<Channel<EmailJob>>(queue);
+builder.Services.AddHostedService<EmailWorker>();
+```
+
+A producer writes and completes the channel when no more items will arrive:
+
+```csharp
+app.MapPost("/api/emails", async (EmailJob job, Channel<EmailJob> queue, CancellationToken ct) =>
+{
+    await queue.Writer.WriteAsync(job, ct);
+    return Results.Accepted();
+});
+```
+
+For shutdown, the owner of the channel calls `queue.Writer.TryComplete()`. Completion is not cancellation: it tells readers that no more items will be written, so `ReadAllAsync` finishes normally after draining what is already buffered.
+
+A consumer reads until completion or cancellation:
+
+```csharp
+await foreach (var job in queue.Reader.ReadAllAsync(stoppingToken))
+{
+    await SendAsync(job, stoppingToken);
+}
+```
+
+Multiple producers are safe. Multiple consumers are safe when `SingleReader` is `false`; each item is delivered to exactly one reader. The options are hints that let the implementation optimize synchronization, so set them to match reality.
+
+## `BackgroundService`
+
+A hosted service starts with the application and stops with it. `BackgroundService` gives you `ExecuteAsync` and a stopping token:
+
+```csharp
+public sealed class EmailWorker(
+    Channel<EmailJob> queue,
+    IServiceScopeFactory scopeFactory,
+    ILogger<EmailWorker> logger) : BackgroundService
+{
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        await foreach (var job in queue.Reader.ReadAllAsync(stoppingToken))
+        {
+            try
+            {
+                using var scope = scopeFactory.CreateScope();
+                var sender = scope.ServiceProvider.GetRequiredService<IEmailSender>();
+                await sender.SendAsync(job, stoppingToken);
+
+                logger.LogInformation("Sent email job {JobId}", job.Id);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Email job {JobId} failed", job.Id);
+            }
+        }
+    }
+}
+```
+
+The scope is essential: the worker is a singleton, while `IEmailSender` and any `DbContext` it uses are usually scoped. Creating a scope per job gives each job a fresh context and prevents the captive-dependency bug.
+
+One failing job should not kill the worker. Catch, log with the job identifier, and decide whether to retry, park the item, or drop it. An unhandled exception in `ExecuteAsync` stops the host in modern .NET, which is rarely what you want for one bad email.
+
+## Backpressure and bounded capacity
+
+An unbounded channel accepts everything and grows until memory is exhausted. A bounded channel forces a policy:
+
+```text
+Wait        WriteAsync waits; TryWrite returns false when full
+DropWrite   the incoming item is dropped
+DropOldest  the oldest buffered item is dropped
+DropNewest  the newest buffered item is dropped
+```
+
+Use `Wait` for work that must not be lost silently, and let the caller see the delay. Use `DropOldest` only for disposable data such as live metrics, where the newest sample matters more. Whatever you choose, expose queue depth and dropped-item counts; a silent drop policy is an outage waiting to be discovered.
+
+## Cancellation and graceful shutdown
+
+Pass the stopping token into every await inside the worker. A loop that ignores it delays shutdown until the host's timeout expires:
+
+```csharp
+builder.Services.Configure<HostOptions>(options =>
+{
+    options.ShutdownTimeout = TimeSpan.FromSeconds(20);
+});
+```
+
+On shutdown, stop accepting new work, complete the writer, and let the reader drain within the timeout. An in-memory channel still loses buffered jobs if the process crashes or the timeout expires. That is acceptable for best-effort notifications and unacceptable for payments. Critical work belongs in a durable queue or a transactional outbox, with the channel acting only as an in-process dispatch mechanism.
+
+## Common mistakes
+
+- Using `async void` for a worker method. Exceptions escape and completion is unobservable.
+- Forgetting to complete the writer, so `ReadAllAsync` waits forever.
+- Resolving a scoped service directly in a singleton `BackgroundService`.
+- Using an unbounded channel for user-controlled traffic.
+- Swallowing `OperationCanceledException` and continuing to process after shutdown.
+- Starting a long task with `Task.Run` in a request and assuming it will finish.
+- Logging a job failure without an ID, making it impossible to find the affected record.
+
+## Practice
+
+1. Write an `IAsyncEnumerable<Order>` that reads a large CSV asynchronously, skips malformed lines, and honors cancellation. Consume it with `await foreach`.
+2. Build a bounded channel with capacity 100 and two producers. Log when `WriteAsync` has to wait because the queue is full.
+3. Add a `BackgroundService` with one reader that resolves a scoped `DbContext` through `IServiceScopeFactory` and persists each job.
+4. Simulate a failing job and verify the worker logs it and continues with the next item.
+5. Configure a 15-second shutdown timeout, enqueue 200 jobs, stop the app, and observe how many finish. Explain which jobs were lost and why.
+6. Replace the in-memory channel with a durable queue or an outbox table, and describe the delivery guarantee you now have.

@@ -1,0 +1,255 @@
+FastAPI is a small framework with a large payoff: type hints become request validation, response serialization, and interactive documentation. This project builds a typed task API with in-memory storage, proper status codes, dependency injection, and tests. The storage is deliberately simple so the HTTP and validation patterns stay visible; swapping in a database later does not change the routes.
+
+## Setup and layout
+
+```text
+task-api/
+├── pyproject.toml
+├── src/
+│   └── task_api/
+│       ├── __init__.py
+│       ├── main.py
+│       ├── models.py
+│       └── store.py
+└── tests/
+    └── test_api.py
+```
+
+```text
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "task-api"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = ["fastapi[standard]>=0.115,<1"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<9"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/task_api"]
+```
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install -e ".[dev]"
+fastapi dev src/task_api/main.py
+```
+
+`fastapi dev` runs a development server with reload. In production, run Uvicorn directly with an explicit worker configuration; the development server is not a deployment strategy.
+
+## Pydantic models at the boundary
+
+Pydantic models describe the JSON your API accepts and returns. They validate types, apply constraints, and generate the OpenAPI schema:
+
+```python
+# src/task_api/models.py
+from datetime import datetime
+from enum import StrEnum
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+class Status(StrEnum):
+    open = "open"
+    done = "done"
+
+
+class TaskCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    title: str = Field(min_length=1, max_length=120)
+    tags: list[str] = Field(default_factory=list)
+
+    @field_validator("title")
+    @classmethod
+    def title_must_have_content(cls, value: str) -> str:
+        cleaned = " ".join(value.split())
+        if not cleaned:
+            raise ValueError("title cannot be blank")
+        return cleaned
+
+    @field_validator("tags")
+    @classmethod
+    def normalize_tags(cls, values: list[str]) -> list[str]:
+        return sorted({tag.strip().lower() for tag in values if tag.strip()})
+
+
+class Task(TaskCreate):
+    id: int
+    status: Status = Status.open
+    created_at: datetime
+```
+
+`extra="forbid"` rejects unknown fields instead of silently ignoring a client typo. The title validator handles whitespace-only input, which a simple minimum length would accept. Tags are normalized once, on the way in, so every stored task has a predictable shape.
+
+## The store and dependency injection
+
+Keep persistence behind a small object:
+
+```python
+# src/task_api/store.py
+from datetime import datetime, timezone
+
+from task_api.models import Status, Task, TaskCreate
+
+
+class TaskNotFound(Exception):
+    def __init__(self, task_id: int) -> None:
+        self.task_id = task_id
+
+
+class TaskStore:
+    def __init__(self) -> None:
+        self._tasks: dict[int, Task] = {}
+        self._next_id = 1
+
+    def add(self, payload: TaskCreate) -> Task:
+        task = Task(
+            **payload.model_dump(),
+            id=self._next_id,
+            created_at=datetime.now(timezone.utc),
+        )
+        self._tasks[task.id] = task
+        self._next_id += 1
+        return task
+
+    def list(self, status: Status | None = None) -> list[Task]:
+        tasks = list(self._tasks.values())
+        if status is None:
+            return tasks
+        return [task for task in tasks if task.status == status]
+
+    def complete(self, task_id: int) -> Task:
+        task = self._tasks.get(task_id)
+        if task is None:
+            raise TaskNotFound(task_id)
+        updated = task.model_copy(update={"status": Status.done})
+        self._tasks[task_id] = updated
+        return updated
+```
+
+Models live in their own module so the store and the routes can both import them without a circular import. A dependency gives routes a store without constructing one inside every handler:
+
+```python
+# src/task_api/main.py
+from typing import Annotated
+
+from fastapi import Depends, FastAPI, Request
+from fastapi.responses import JSONResponse
+
+from task_api.models import Status, Task, TaskCreate
+from task_api.store import TaskNotFound, TaskStore
+
+app = FastAPI(title="Task API", version="0.1.0")
+app.state.store = TaskStore()
+
+
+def get_store(request: Request) -> TaskStore:
+    return request.app.state.store
+
+
+StoreDep = Annotated[TaskStore, Depends(get_store)]
+```
+
+Tests override `get_store` with a fresh store. Production code can later replace it with a database session without changing route signatures.
+
+## Routes and errors
+
+```python
+@app.post("/tasks", response_model=Task, status_code=201)
+def create_task(payload: TaskCreate, store: StoreDep) -> Task:
+    return store.add(payload)
+
+
+@app.get("/tasks", response_model=list[Task])
+def list_tasks(store: StoreDep, status: Status | None = None) -> list[Task]:
+    return store.list(status)
+
+
+@app.post("/tasks/{task_id}/complete", response_model=Task)
+def complete_task(task_id: int, store: StoreDep) -> Task:
+    return store.complete(task_id)
+
+
+@app.exception_handler(TaskNotFound)
+async def task_not_found(request: Request, exc: TaskNotFound) -> JSONResponse:
+    return JSONResponse(
+        status_code=404,
+        content={"detail": f"Task {exc.task_id} not found"},
+    )
+```
+
+FastAPI reads the annotations and does four things automatically: parses JSON into `TaskCreate`, validates the optional query parameter, serializes `Task` without leaking internal fields, and documents every response in OpenAPI. An invalid body returns `422` with field-level errors before your function runs.
+
+The exception handler keeps HTTP concerns out of the store. The store raises a domain error; the API maps it to `404`. `TaskNotFound` must be raised inside the request path for the handler to see it, which it is.
+
+## Sync or async handlers
+
+The routes above use plain `def` functions. FastAPI runs synchronous handlers in a worker thread, so a blocking database driver will not freeze the event loop. That is a safe default for this in-memory project and for many SQLAlchemy setups.
+
+If you change a handler to `async def`, it runs on the event loop and must not call blocking I/O directly. Use an async database driver, or move the blocking call to a thread with `asyncio.to_thread`. A single blocking query in an async route slows every concurrent request handled by that worker. Choose one style per layer and keep the boundary deliberate.
+
+## Tests
+
+`TestClient` runs the app in-process. Override the dependency so each test gets isolated state:
+
+```python
+import pytest
+from fastapi.testclient import TestClient
+
+from task_api.main import app, get_store
+from task_api.store import TaskStore
+
+
+@pytest.fixture
+def client():
+    app.dependency_overrides[get_store] = lambda: TaskStore()
+    with TestClient(app) as test_client:
+        yield test_client
+    app.dependency_overrides.clear()
+
+
+def test_create_and_list(client: TestClient):
+    created = client.post("/tasks", json={"title": "Write docs", "tags": ["Work"]})
+    assert created.status_code == 201
+    assert created.json()["status"] == "open"
+    assert created.json()["tags"] == ["work"]
+
+    listing = client.get("/tasks", params={"status": "open"})
+    assert listing.status_code == 200
+    assert [task["title"] for task in listing.json()] == ["Write docs"]
+
+
+def test_blank_title_is_rejected(client: TestClient):
+    response = client.post("/tasks", json={"title": "   "})
+    assert response.status_code == 422
+
+
+def test_missing_task_returns_404(client: TestClient):
+    response = client.post("/tasks/999/complete")
+    assert response.status_code == 404
+    assert "999" in response.json()["detail"]
+```
+
+Run `python3 -m pytest -q`. Add tests for unknown fields, the done filter, tag normalization, and the OpenAPI schema at `/openapi.json`. If a test changes global state, the fixture is lying about isolation.
+
+## OpenAPI documentation
+
+Start the server and open `/docs` for Swagger UI, `/redoc` for ReDoc, and `/openapi.json` for the raw schema. Because models and response types are annotated, the docs show request bodies, validation constraints, status codes, and example responses without hand-written documentation. Use the interactive page to exercise the API before writing a client.
+
+## Production hardening
+
+The in-memory store disappears on restart and is not safe across workers. Replace it behind the same dependency with a database repository, add authentication and authorization, configure CORS for known origins, and log requests with correlation IDs. Keep validation at the edge, keep business rules in services, and keep HTTP mapping in routes. Add migrations, health checks, and tests against the real database before calling the service production-ready.
+
+## Practice
+
+1. Add `GET` and `DELETE` routes for a single task ID with `404` handling and response models.
+2. Add pagination with `limit` and `offset` query parameters, with bounds such as `ge=1, le=100`, and return a response model containing items and a total.
+3. Add a `PATCH` route for a single task that updates the title and tags, validating the merged result.
+4. Replace the in-memory store with a SQLite repository behind the same interface. Keep the tests passing by changing only the dependency override.
+5. Add a test that fetches `/openapi.json` and asserts the `TaskCreate` schema contains the title length constraints. Then inspect `/docs` and confirm the constraints appear.

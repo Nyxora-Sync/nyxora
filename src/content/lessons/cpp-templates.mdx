@@ -1,0 +1,206 @@
+Templates let one piece of source code serve many types without giving up static type checking. They are how the standard library provides `std::vector`, `std::sort`, and `std::optional` without a separate implementation for every element type. Written carelessly, they also produce enormous error messages and binary bloat. The skill is learning where a template earns its complexity and how to constrain it so failures stay readable.
+
+## Function templates
+
+A function template describes a family of functions parameterized by one or more types:
+
+```cpp
+#include <iostream>
+
+template <typename T>
+T clampValue(T value, T low, T high) {
+    if (value < low) {
+        return low;
+    }
+    if (value > high) {
+        return high;
+    }
+    return value;
+}
+
+int main() {
+    std::cout << clampValue(12, 0, 10) << '\n';    // int
+    std::cout << clampValue(0.5, 0.0, 1.0) << '\n'; // double
+}
+```
+
+The compiler generates a separate function for each distinct set of template arguments it sees, a process called **instantiation**. `T` is deduced from the call arguments. Both `clampValue(12, 0, 10)` and `clampValue(0.5, 0.0, 1.0)` deduce a consistent `T`. Mixing `int` and `double` in one call fails because deduction cannot choose a single `T`; be explicit with `clampValue<double>(1, 0.0, 2.0)` when conversion is intended.
+
+Template definitions usually belong in headers. The compiler needs the full definition at the point of instantiation, not just a declaration. Putting a template definition in a `.cpp` file and calling it from another translation unit typically produces an undefined reference unless you explicitly instantiate every supported type.
+
+## Class templates
+
+Class templates follow the same model:
+
+```cpp
+#include <string>
+#include <utility>
+
+template <typename T>
+class Box {
+public:
+    explicit Box(T value) : value_(std::move(value)) {}
+
+    const T& get() const noexcept { return value_; }
+    T& get() noexcept { return value_; }
+
+private:
+    T value_;
+};
+
+Box<int> count{3};
+Box<std::string> label{"ready"};
+Box deduced{42}; // Box<int>, class template argument deduction
+```
+
+Class template argument deduction, standardized in C++17, lets the constructor arguments determine `T`. It removes noise from types such as `std::pair` and `std::vector`. Write the type when deduction would be ambiguous or when the type communicates intent.
+
+## Concepts: requirements as code
+
+Before C++20, a template accepted almost anything and failed deep inside its body. Concepts name a requirement and check it at the call site.
+
+```cpp
+#include <concepts>
+#include <cstddef>
+#include <stdexcept>
+#include <vector>
+
+template <typename T>
+concept Numeric = std::integral<T> || std::floating_point<T>;
+
+template <Numeric T>
+T mean(const std::vector<T>& values) {
+    if (values.empty()) {
+        throw std::invalid_argument{"mean of empty vector"};
+    }
+    T total{};
+    for (T value : values) {
+        total += value;
+    }
+    return total / static_cast<T>(values.size());
+}
+```
+
+The `template <Numeric T>` form is shorthand for a `requires` clause. The compiler rejects `mean<std::string>` immediately and reports that `Numeric<std::string>` is not satisfied, instead of printing errors from inside the addition.
+
+The long form makes the requirement explicit:
+
+```cpp
+template <typename T>
+requires Numeric<T>
+T add(T lhs, T rhs) {
+    return lhs + rhs;
+}
+```
+
+Concepts can also describe structural requirements:
+
+```cpp
+template <typename T>
+concept Sized = requires(const T& value) {
+    { value.size() } -> std::convertible_to<std::size_t>;
+};
+
+template <Sized T>
+void printSize(const T& value) {
+    std::cout << value.size() << '\n';
+}
+```
+
+A `requires` expression does not execute anything. It asks whether the expression would compile and whether its result satisfies the stated conversion. This is how the standard library expresses requirements such as "an input range" without depending on a particular container.
+
+Prefer standard concepts from `<ranges>`, `<iterator>`, and `<concepts>` before writing your own. `std::ranges::input_range`, `std::sortable`, and `std::predicate` are already precise and familiar to other C++ programmers.
+
+## Generic algorithms and lambdas
+
+A template can accept a callable and let the caller supply the policy:
+
+```cpp
+#include <iostream>
+#include <ranges>
+
+template <std::ranges::input_range Range, typename Predicate>
+requires std::predicate<Predicate, std::ranges::range_value_t<Range>>
+void printIf(const Range& range, Predicate predicate) {
+    for (const auto& item : range) {
+        if (predicate(item)) {
+            std::cout << item << '\n';
+        }
+    }
+}
+
+std::vector<int> values{1, 2, 3, 4, 5};
+printIf(values, [](int value) { return value % 2 == 0; });
+```
+
+Generic lambdas use the same machinery with less syntax:
+
+```cpp
+auto twice = [](auto value) {
+    return value + value;
+};
+
+std::cout << twice(21) << '\n';
+std::cout << twice(std::string{"ab"}) << '\n';
+```
+
+Use a generic lambda when the operation is genuinely type-independent. If it assumes `+`, `size()`, or comparison, state that assumption with a concept or use a normal function template so the requirement has a name.
+
+## Deduction and overload rules in practice
+
+Function template argument deduction is conservative. It deduces from the argument types and generally does not apply user-defined conversions. A call with an `int` and a `double` does not deduce a common type for a single `T`, while a non-template function with a `double` parameter would happily convert the `int`. This is a feature: template code is explicit about requiring one consistent type.
+
+Return types matter too. Returning `const T&` from a generic function is dangerous when an argument may be a temporary:
+
+```cpp
+template <typename T>
+const T& larger(const T& a, const T& b) {
+    return a < b ? b : a;
+}
+
+const int& value = larger(3, 5); // both arguments are temporaries
+```
+
+Once the full expression ends, the temporaries are gone and `value` dangles. Return by value unless the function's contract explicitly guarantees that one of its arguments outlives the result.
+
+## Compile-time and binary tradeoffs
+
+Templates are instantiated per type. That gives inlining and zero-overhead abstraction, but it also increases compile time and can duplicate code in the binary. A heavily used template over many types increases both.
+
+Templates also expose implementation in headers. Every translation unit that instantiates the template must parse its definition. For a large, stable set of types, an explicit instantiation in one `.cpp` file can centralize code generation, at the cost of supporting only the listed types. For runtime flexibility over an open-ended set of types, virtual functions or `std::function` may be a better fit than a template.
+
+Do not template a function merely because it has one call site with a `double`. A concrete function is easier to debug, and changing it does not trigger recompilation across the project. Templates pay off when the abstraction is real and reused.
+
+## Making errors readable
+
+Error quality is a design concern, not a compiler problem you endure. Constrain templates at the boundary. Put the requirement in a named concept. Use `static_assert` for relationships that cannot be expressed as a concept, and give it a sentence that explains what the caller must change:
+
+```cpp
+#include <type_traits>
+
+template <typename T>
+void store(const T& value) {
+    static_assert(!std::is_pointer_v<T>,
+                  "store takes a value, not a pointer; dereference it first");
+    // ...
+}
+```
+
+When a diagnostic is long, read from the constraint failure near the call site, then follow the "required from here" chain. The first message is usually the cause; the dozens of lines after it are instantiations. Compiling with both GCC and Clang occasionally helps, because their wording differs and one may point more directly at the mistake.
+
+## Common mistakes
+
+- Defining a template in a `.cpp` file and expecting other translation units to instantiate it.
+- Leaving a template unconstrained, so a wrong type fails in the middle of the implementation.
+- Returning references to temporaries from generic functions.
+- Writing a template for a single concrete use, adding compile time without adding reuse.
+- Overloading a function template with a non-template function in a way that makes overload resolution surprising.
+- Assuming a string literal deduces to `std::string`; it deduces to a character pointer or array reference. Use `std::string_view` or an explicit type when that matters.
+
+## Practice
+
+1. Implement `clampValue` with a `Numeric` concept. Instantiate it for `int` and `double`, then call it with a `std::string` and read the constraint failure.
+2. Write a `Pair` class template with two members and a `swap` method. Use class template argument deduction to create a `Pair` from an `int` and a `std::string`.
+3. Implement `printIf` for an input range and a predicate. Test it with a `std::vector<int>` and a `std::vector<std::string>`.
+4. Write a constrained `mean` for floating-point vectors. Explain why an integral version would need a wider accumulator to avoid integer division.
+5. Move one small template definition from a header into a `.cpp` file, call it from `main`, and observe the link error. Restore the header definition and explain what the linker needed.

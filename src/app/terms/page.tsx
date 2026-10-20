@@ -5,7 +5,7 @@ import { pageMetadata } from '@/lib/seo'
 export const metadata = pageMetadata({
   title: 'Terms of Service',
   description:
-    'The plain-language terms for using MERN Learn: accounts, acceptable use, content licenses, moderation, and the limits of a free educational site.',
+    'The plain-language terms for using Nyxora Sync: accounts, acceptable use, content licenses, moderation, and the limits of a free educational site.',
   path: '/terms',
 })
 
@@ -14,12 +14,12 @@ export default function TermsPage() {
     <LegalPage
       badge="Legal"
       title="Terms of Service"
-      intro="These are the rules for using MERN Learn. They are written to be read, not to hide behind."
+      intro="These are the rules for using Nyxora Sync. They are written to be read, not to hide behind."
       updated="October 20, 2026"
     >
       <h2>Using the site</h2>
       <p>
-        By visiting MERN Learn or creating an account, you agree to these terms and the{' '}
+        By visiting Nyxora Sync or creating an account, you agree to these terms and the{' '}
         <Link href="/privacy">privacy policy</Link>. If you do not agree, use the site without an
         account or do not use it. You must be at least 13 years old, or at least 16 where local law
         sets a higher age for digital consent.
@@ -32,7 +32,7 @@ export default function TermsPage() {
           CC BY-SA 4.0
         </a>
         ; the site&apos;s source code is licensed under the MIT License. Those licenses control how
-        you may reuse the material. If you quote or adapt a lesson, credit MERN Learn and keep the
+        you may reuse the material. If you quote or adapt a lesson, credit Nyxora Sync and keep the
         same license.
       </p>
 
@@ -63,7 +63,7 @@ export default function TermsPage() {
       <h2>Your content</h2>
       <p>
         You keep ownership of the comments, projects, profile text, and images you submit. By
-        publishing them, you give MERN Learn a non-exclusive, worldwide, royalty-free license to
+        publishing them, you give Nyxora Sync a non-exclusive, worldwide, royalty-free license to
         host, display, format, and promote that content as part of the site. This license ends when
         you delete the content, except for copies that may remain briefly in backups or in content
         others have already quoted.
@@ -77,7 +77,7 @@ export default function TermsPage() {
       <h2>Our content</h2>
       <p>
         The lessons, design, and code are the result of work by the project and its contributors. The
-        licenses above grant reuse rights; they do not grant permission to use the MERN Learn name or
+        licenses above grant reuse rights; they do not grant permission to use the Nyxora Sync name or
         logo to imply endorsement of a product or service.
       </p>
 
@@ -117,7 +117,7 @@ export default function TermsPage() {
 
       <h2>Limitation of liability</h2>
       <p>
-        To the maximum extent permitted by law, MERN Learn and its contributors are not liable for
+        To the maximum extent permitted by law, Nyxora Sync and its contributors are not liable for
         indirect, incidental, special, consequential, or punitive damages, or for lost data, profits,
         or opportunities arising from your use of the site. Nothing in these terms excludes liability
         that cannot be excluded by law, or limits mandatory consumer rights.

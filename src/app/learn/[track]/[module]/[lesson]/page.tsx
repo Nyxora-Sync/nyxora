@@ -46,7 +46,7 @@ export async function generateMetadata({
 
   return pageMetadata({
     title: lesson.title,
-    description: `${lesson.description} A free ${lesson.difficulty} lesson in the ${mod.name} module of the ${canonicalTrack.name} on MERN Learn.`,
+    description: `${lesson.description} A free ${lesson.difficulty} lesson in the ${mod.name} module of the ${canonicalTrack.name} on Nyxora Sync.`,
     path: canonicalLearnPath(track.key, mod.key, lesson.id),
     type: 'article',
     keywords: [lesson.title, mod.name, track.name, 'MERN lesson', 'free coding lesson'],
@@ -121,7 +121,7 @@ export default async function LessonPage({
     },
     provider: {
       '@type': 'Organization',
-      name: 'MERN Learn',
+      name: 'Nyxora Sync',
       url: absoluteUrl('/'),
     },
   }

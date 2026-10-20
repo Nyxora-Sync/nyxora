@@ -23,7 +23,7 @@ import { pageMetadata } from '@/lib/seo'
 export const metadata: Metadata = pageMetadata({
   title: 'Contact',
   description:
-    'Contact the MERN Learn maintainers: lesson corrections, bugs, privacy requests, code of conduct reports, and security concerns.',
+    'Contact the Nyxora Sync maintainers: lesson corrections, bugs, privacy requests, code of conduct reports, and security concerns.',
   path: '/contact',
 })
 

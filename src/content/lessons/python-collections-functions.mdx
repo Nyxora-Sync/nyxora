@@ -1,0 +1,202 @@
+Most Python programs are built from four containers, a handful of loops, and functions that turn raw values into decisions. Fluency here matters more than knowing every standard-library module: the same patterns appear in web services, data pipelines, and command-line tools.
+
+This lesson covers the collection types you will use daily, the control flow that moves through them, and the function rules that prevent subtle bugs.
+
+## Lists and tuples
+
+A list is an ordered, mutable sequence:
+
+```python
+tasks = ["write", "review", "deploy"]
+tasks.append("monitor")
+tasks[0] = "draft"
+tasks.remove("review")
+last = tasks.pop()
+print(tasks)  # ['draft', 'deploy']
+print(last)   # monitor
+```
+
+Lists are heterogeneous. They can hold strings, numbers, dictionaries, or other lists. Their length changes freely, which makes them the default choice for a collection you will edit.
+
+A tuple is ordered and immutable. It is ideal for a fixed record whose shape should not change:
+
+```python
+point = (4.2, -1.8)
+latitude, longitude = point
+single = (42,)       # the comma makes a tuple
+not_a_tuple = (42)   # this is just an int
+
+print(f"{latitude}, {longitude}")
+```
+
+Immutability is shallow. A tuple cannot be reassigned, but a list inside it can still be mutated. Use a tuple for meaning, not as a guarantee of deep immutability.
+
+## Slicing
+
+Slices read `start:stop:step`, where `start` is inclusive, `stop` is exclusive, and any part may be omitted:
+
+```python
+numbers = [0, 1, 2, 3, 4, 5]
+print(numbers[1:4])    # [1, 2, 3]
+print(numbers[:3])     # [0, 1, 2]
+print(numbers[3:])     # [3, 4, 5]
+print(numbers[-2:])    # [4, 5]
+print(numbers[::2])    # [0, 2, 4]
+print(numbers[::-1])   # [5, 4, 3, 2, 1]
+```
+
+Slicing creates a new list; it does not modify the original. That makes `numbers[:]` a shallow copy. Slice assignment does mutate:
+
+```python
+numbers[1:3] = [10, 11, 12]
+print(numbers)  # [0, 10, 11, 12, 3, 4, 5]
+```
+
+Strings support the same slicing rules, which is why `text[::-1]` reverses a string.
+
+## Dictionaries and sets
+
+A dictionary maps hashable keys to values. Insertion order is preserved, and lookup is constant time on average:
+
+```python
+prices = {"keyboard": 80, "cable": 12}
+prices["monitor"] = 240
+prices["cable"] = 10
+
+print(prices["keyboard"])        # 80
+print(prices.get("mouse", 0))    # 0 — no KeyError
+print("monitor" in prices)       # True
+print(prices.pop("cable"))       # 10
+
+for name, price in prices.items():
+    print(name, price)
+```
+
+Use square brackets when a missing key is a bug. Use `get` when absence is normal. `setdefault` combines lookup and insertion, and the `|` operator merges dictionaries without mutating the originals:
+
+```python
+settings = {"theme": "dark"}
+settings.setdefault("page_size", 20)
+
+defaults = {"page_size": 20, "theme": "light"}
+merged = defaults | settings
+print(merged)  # {'page_size': 20, 'theme': 'dark'}
+```
+
+A set stores unique, hashable values and answers membership questions quickly:
+
+```python
+tags = {"python", "cli", "python"}
+print(sorted(tags))                # ['cli', 'python']
+print("cli" in tags)               # True
+print({"python", "api"} & tags)    # {'python'}
+print(sorted({"python", "api"} | tags))  # ['api', 'cli', 'python']
+```
+
+An empty set must be written `set()`. A pair of empty braces creates a dictionary.
+
+## Comprehensions
+
+Comprehensions build a collection from an iterable in one expression:
+
+```python
+names = ["aki", "mina", "ravi"]
+title_names = [name.title() for name in names]
+long_names = [name for name in names if len(name) > 3]
+
+lengths = {name: len(name) for name in names}
+initials = {name[0].upper() for name in names}
+
+scores = [62, 88, 91, 47]
+passed = [score for score in scores if score >= 70]
+```
+
+The pattern is `expression for item in iterable if condition`. Keep comprehensions to one loop and one condition. If you need two nested loops and a side effect, write a normal loop; clarity beats compactness. Never call `append` inside a list comprehension — the comprehension already builds the list.
+
+## Control flow
+
+`for` iterates over any iterable. `enumerate` gives you the index without maintaining a counter, and `zip` walks two sequences together:
+
+```python
+tasks = ["write", "test", "deploy"]
+
+for position, task in enumerate(tasks, start=1):
+    print(position, task)
+
+owners = ["aki", "mina", "ravi"]
+for task, owner in zip(tasks, owners, strict=True):
+    print(f"{task}: {owner}")
+```
+
+`zip(strict=True)` raises if the sequences have different lengths, which catches data-alignment bugs early. `break` exits the loop; `continue` skips to the next iteration. Use `while` when repetition depends on a condition rather than a collection, and make sure something inside the loop can end it.
+
+## Functions
+
+A function packages a calculation behind a name. Parameters are inputs; `return` produces the output. A function without a return statement returns `None`:
+
+```python
+def line_total(price: float, quantity: int = 1) -> float:
+    """Return the total for one line item."""
+    return price * quantity
+
+
+print(line_total(12.5, 3))  # 37.5
+print(line_total(12.5))     # 12.5
+```
+
+Default values are evaluated once, when the function is defined. That is harmless for numbers and strings, but dangerous for mutable objects:
+
+```python
+def add_task(task: str, tasks: list[str] = []) -> list[str]:  # bug
+    tasks.append(task)
+    return tasks
+
+# Correct: create a fresh list per call
+def add_task_safe(task: str, tasks: list[str] | None = None) -> list[str]:
+    if tasks is None:
+        tasks = []
+    tasks.append(task)
+    return tasks
+```
+
+The broken version shares one list across every call, so tasks leak from one caller to the next.
+
+Use `*args` to collect extra positional arguments as a tuple, and `**kwargs` to collect extra keyword arguments as a dictionary. A bare `*` marks the following parameters as keyword-only:
+
+```python
+def summarize(label: str, *values: float, precision: int = 2) -> str:
+    total = sum(values)
+    return f"{label}: {total:.{precision}f}"
+
+print(summarize("cart", 10, 20, 5, precision=1))
+print(summarize("cart", *[10, 20, 5]))
+```
+
+Reach for these tools when wrapping or forwarding APIs, not as a way to avoid designing a clear signature.
+
+## Scope and mutability traps
+
+Python resolves names locally, then in enclosing functions, then globally, then among built-ins. Assignment inside a function creates a local name unless you declare `global` or `nonlocal`. Prefer passing values in and returning results out; global state makes tests order-dependent.
+
+Mutation is the other trap:
+
+```python
+original = [1, 2, 3]
+alias = original
+alias.append(4)
+print(original)  # [1, 2, 3, 4] — same object
+
+copy = original.copy()
+copy.append(5)
+print(original)  # [1, 2, 3, 4]
+```
+
+Copying is shallow. A list of dictionaries still shares the inner dictionaries; use `copy.deepcopy` only when you genuinely need independent nested data. Functions should either mutate an argument deliberately and say so, or return a new value. Hidden mutation is how bugs travel across module boundaries.
+
+## Practice
+
+1. Given a list of prices, build a new list with a 20 percent tax added, then a set of the prices above 100.
+2. Write `parse_tags(raw)` that accepts a comma-separated string, strips whitespace, drops empty entries, lowercases each tag, and returns a sorted list of unique tags.
+3. Create a dictionary of task names to owners. Print only tasks owned by one person using `items()`, then invert it into a dictionary of owners to lists of tasks.
+4. Write `apply_discount(price, percent=10)` and call it with positional and keyword arguments. Then write a version with a mutable default and demonstrate the leak, followed by the corrected `None` version.
+5. Use `enumerate` and `zip` together to print a numbered table of tasks and owners, then add `strict=True` and test what happens when the lists differ in length.

@@ -55,7 +55,7 @@ export function FloatingActions() {
       {!hideContact && (
         <Link
           href="/contact"
-          aria-label="Contact MERN Learn"
+          aria-label="Contact Nyxora Sync"
           title="Contact"
           className="flex h-12 w-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-[background-color,transform] hover:bg-primary/90 motion-safe:hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 motion-safe:active:scale-95"
         >

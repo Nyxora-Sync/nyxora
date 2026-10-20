@@ -1,0 +1,226 @@
+A pointer stores a memory address. That single sentence explains both their power and their danger: a pointer can refer to a variable, an array element, a struct, or nothing valid at all. C trusts you to know which.
+
+This lesson builds the mental model you need for dynamic data structures, then applies it to structs and linked-list nodes.
+
+## Addresses and dereferencing
+
+Every object in memory has an address. The unary `&` operator obtains it, and unary `*` accesses the object at a pointer:
+
+```c
+#include <stdio.h>
+
+int main(void)
+{
+    int value = 42;
+    int *pointer = &value;
+
+    printf("value: %d\n", value);
+    printf("address: %p\n", (void *)pointer);
+    printf("through pointer: %d\n", *pointer);
+
+    *pointer = 99;
+    printf("after assignment: %d\n", value);
+    return 0;
+}
+```
+
+`int *` means "pointer to int". The type matters because the compiler must know how many bytes to read when you dereference and how far to move during pointer arithmetic. A pointer to one type is not interchangeable with a pointer to another without an explicit conversion, and some conversions are invalid.
+
+A pointer variable holds an address, not a copy of the object. Passing `&value` to a function lets that function modify `value`:
+
+```c
+void swap(int *left, int *right)
+{
+    int temporary = *left;
+    *left = *right;
+    *right = temporary;
+}
+```
+
+## Null and invalid pointers
+
+Initialize pointers before use. A pointer that has never been assigned contains an indeterminate value; dereferencing it is undefined behavior. Use `NULL` to represent "points to nothing":
+
+```c
+#include <stddef.h>
+
+int *pointer = NULL;
+if (pointer != NULL) {
+    printf("%d\n", *pointer);
+}
+```
+
+`NULL` is a null pointer constant, not a guarantee about address zero. Dereferencing it is still invalid, but comparing against it is reliable. After `free`, a pointer becomes dangling; set it to `NULL` if it may be used again, and never dereference it.
+
+## Pointer arithmetic
+
+Adding an integer to a pointer moves by whole elements, not bytes:
+
+```c
+#include <stdio.h>
+
+int main(void)
+{
+    int values[5] = {10, 20, 30, 40, 50};
+    int *cursor = values; /* same as &values[0] */
+
+    for (int i = 0; i < 5; i++) {
+        printf("%d\n", *(cursor + i));
+    }
+    return 0;
+}
+```
+
+If an `int` is four bytes, `cursor + 1` moves four bytes. You may form a pointer to one element past the last array element, which is useful as an end marker, but dereferencing it is invalid. Arithmetic outside the range from the first element to one-past-the-end is undefined behavior.
+
+Subtracting two pointers into the same array yields a `ptrdiff_t`, the number of elements between them:
+
+```c
+#include <stddef.h>
+
+int values[5] = {10, 20, 30, 40, 50};
+int *last = &values[4];
+ptrdiff_t distance = last - values; /* 4 */
+```
+
+## Arrays are not pointers
+
+An array name usually converts to a pointer to its first element. That is why arrays can be passed to functions expecting pointers. But an array is still an array object, and a pointer is still a pointer variable:
+
+```c
+int values[5] = {10, 20, 30, 40, 50};
+int *pointer = values;
+
+size_t array_size = sizeof values;       /* 20 on a four-byte-int system */
+size_t pointer_size = sizeof pointer;   /* size of one pointer */
+```
+
+Inside a function that receives an array parameter, `sizeof` gives the pointer size, not the array size. Pass the element count separately. Also note that `pointer` can be reassigned, while an array name cannot be used as an lvalue.
+
+## const and pointers
+
+`const` placement changes what is protected:
+
+```c
+int x = 1;
+int y = 2;
+
+const int *a = &x;        /* pointer to const int: cannot write through a */
+int *const b = &x;        /* const pointer: cannot make b point elsewhere */
+const int *const c = &x;  /* neither the target nor the pointer may change */
+
+a = &y;                   /* allowed */
+*a = 3;                   /* error */
+*b = 3;                   /* allowed */
+b = &y;                   /* error */
+```
+
+Read declarations from right to left: `b` is a const pointer to int; `a` is a pointer to const int. Use pointers to const for read-only access in function parameters, such as `const char *name`.
+
+## Structs group related data
+
+A struct creates a new type from named members:
+
+```c
+#include <stdio.h>
+
+typedef struct {
+    int x;
+    int y;
+} Point;
+
+void translate(Point *point, int dx, int dy)
+{
+    point->x += dx;
+    point->y += dy;
+}
+
+int main(void)
+{
+    Point origin = {.x = 0, .y = 0};
+    translate(&origin, 3, -2);
+    printf("%d, %d\n", origin.x, origin.y);
+    return 0;
+}
+```
+
+For a struct value, access members with `.`. For a pointer to a struct, use `->`, which combines dereferencing and member access. The expression `point->x` means `(*point).x`.
+
+Structs are copied by value. Passing a large struct by pointer avoids copying and allows modification. Passing it as `const Point *` allows read-only access without a copy. Return small structs by value when that is clearer, and use pointers when ownership or size demands it.
+
+## Linked-list nodes
+
+A linked list is a chain of nodes, each holding data and a pointer to the next node:
+
+```c
+#include <stddef.h>
+#include <stdio.h>
+
+typedef struct Node {
+    int value;
+    struct Node *next;
+} Node;
+
+int main(void)
+{
+    Node third = {30, NULL};
+    Node second = {20, &third};
+    Node first = {10, &second};
+
+    const Node *cursor = &first;
+    while (cursor != NULL) {
+        printf("%d\n", cursor->value);
+        cursor = cursor->next;
+    }
+    return 0;
+}
+```
+
+The self-reference must use `struct Node *`, not the typedef name, because the typedef is not complete until the declaration ends. This stack-allocated example shows the shape; dynamic allocation lets the list grow beyond a fixed set of local variables and survive the function that created it.
+
+## Stack and heap mental model
+
+Automatic locals live in a stack frame for the duration of a function call. The stack grows and shrinks as functions are entered and left. This is fast and automatically reclaimed, but an address of a local variable becomes invalid after the function returns:
+
+```c
+int *bad_pointer(void)
+{
+    int local = 5;
+    return &local; /* dangling after return */
+}
+```
+
+Heap memory comes from `malloc` and friends and remains allocated until explicitly freed. It is not tied to a function's stack frame. Global and static data have program lifetime. A pointer only stores an address; it does not keep the pointed-to object alive.
+
+A useful diagram:
+
+```text
+higher addresses
+    stack   grows downward, automatic locals
+    ...
+    heap    grows upward, dynamic allocations
+    data    globals and statics
+    text    program instructions
+lower addresses
+```
+
+The exact layout is platform-dependent, but the lifetime rules are not.
+
+## Common mistakes
+
+- Declaring a pointer and dereferencing it before initialization.
+- Dereferencing `NULL` after failing to check an allocation or lookup.
+- Returning the address of a local variable.
+- Assuming `sizeof` on a pointer gives the size of the array it points to.
+- Running pointer arithmetic outside an array's valid range.
+- Confusing a struct with a pointer to a struct, or using `.` where `->` is required.
+- Forgetting that `free` does not set the pointer to `NULL`.
+
+## Practice
+
+1. Write a function `void min_max(const int *values, size_t count, int *min, int *max)` that writes through two output pointers. Handle a zero count.
+2. Implement `reverse(int *values, size_t count)` using two moving pointers rather than indexes.
+3. Define a `Rectangle` struct with width and height. Write functions for area, perimeter, and moving it to a new x/y position. Pass by pointer where appropriate.
+4. Build a three-node linked list with mallocs, traverse it, and then free every node. Keep a pointer to the next node before freeing the current one.
+5. Write a program that prints the addresses of an array's elements and confirm that consecutive addresses differ by `sizeof` the element type.
+6. Write a function that returns a pointer to a local variable, observe the compiler warning, and explain why the pointer is unusable even if it seems to print a value.

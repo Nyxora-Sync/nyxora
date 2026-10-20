@@ -11,13 +11,13 @@ import { absoluteUrl, pageMetadata } from '@/lib/seo'
 import { Badge } from '@/components/ui/badge'
 import { TrackProgressClient } from '@/components/track-progress-client'
 import { Reveal } from '@/components/motion/reveal'
-import { BookOpen, Code2, Server, Database, Atom, Layers, FileCode, FlaskConical, ShieldCheck, Container, Network, Gauge, Rocket, Cloud, Boxes, Smartphone, Sparkles, ArrowRight, Clock, Zap, type LucideIcon } from 'lucide-react'
+import { BookOpen, Code2, Server, Database, Atom, Layers, FileCode, FlaskConical, ShieldCheck, Container, Network, Gauge, Rocket, Cloud, Boxes, Smartphone, Sparkles, ArrowRight, Clock, Zap, Braces, Hash, Terminal, type LucideIcon } from 'lucide-react'
 import { cn, getAccent } from '@/lib/utils'
 
 const iconMap: Record<string, LucideIcon> = {
   BookOpen, Code2, Server, Database, Atom, Layers,
   FileCode, FlaskConical, ShieldCheck, Container, Network, Gauge, Rocket,
-  Cloud, Boxes, Smartphone, Sparkles,
+  Cloud, Boxes, Smartphone, Sparkles, Braces, Hash, Terminal,
 }
 
 export function generateStaticParams() {
@@ -40,7 +40,10 @@ export async function generateMetadata({
     title: track.name,
     description: track.description,
     path: `/learn/${track.key}`,
-    keywords: [track.name, 'MERN curriculum', 'learn MERN', 'MongoDB', 'Express', 'React', 'Node.js'],
+    keywords:
+      track.category === 'programming-languages'
+        ? [track.name, 'learn ' + track.name, 'programming', 'beginner to mastery', 'free coding course']
+        : [track.name, 'MERN curriculum', 'learn MERN', 'MongoDB', 'Express', 'React', 'Node.js'],
   })
 }
 
@@ -55,19 +58,26 @@ export default async function TrackPage({ params }: { params: Promise<{ track: s
   const totalHours = Math.round(totalMinutes / 60)
   const totalLessons = track.modules.reduce((sum, m) => sum + m.lessons.length, 0)
   const educationalLevel =
-    track.key === 'beginner' ? 'Beginner' : track.key === 'specializations' ? 'Advanced' : 'Beginner to advanced'
+    track.key === 'beginner'
+      ? 'Beginner'
+      : track.key === 'specializations'
+        ? 'Advanced'
+        : track.category === 'programming-languages'
+          ? 'Beginner to mastery'
+          : 'Beginner to advanced'
   const TrackIcon = iconMap[track.icon] || BookOpen
 
   const trackPath = `/learn/${track.key}`
   const courseSchema = {
     '@context': 'https://schema.org',
     '@type': 'Course',
-    name: `${track.name} — MERN Learn`,
+    name: `${track.name} — Nyxora Sync`,
     description: track.description,
     url: absoluteUrl(trackPath),
     provider: {
       '@type': 'Organization',
-      name: 'MERN Learn',
+      name: 'Nyxora Sync',
+
       url: absoluteUrl('/'),
     },
     isAccessibleForFree: true,

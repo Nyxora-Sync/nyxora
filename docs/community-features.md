@@ -1,6 +1,6 @@
 # Community Features
 
-Community features turn MERN Learn from a course into a place to learn with other people.
+Community features turn Nyxora Sync from a course into a place to learn with other people.
 Everything here is optional: without `DATABASE_URL` the lessons, playground, and local progress
 tracking keep working, and the community routes return a clear `503` instead of crashing.
 

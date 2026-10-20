@@ -1,0 +1,149 @@
+A script that works on your laptop becomes production software when it runs unattended, repeatedly, against real data, and fails in ways someone can diagnose at 3 a.m. The gap is not advanced Python syntax. It is configuration, logging, retries, idempotency, safe process execution, and observability.
+
+These practices are often summarized as twelve-factor thinking: configuration lives in the environment, processes are stateless and disposable, logs are event streams, and development should resemble production. You do not need a platform team to apply them to a scheduled job.
+
+## Configuration from the environment
+
+Hard-coded paths, tokens, and URLs make a program environment-specific. Read configuration once at startup, validate it, and fail with a clear message when something is missing:
+
+```python
+import math
+import os
+from dataclasses import dataclass, field
+
+
+@dataclass(frozen=True)
+class Settings:
+    database_url: str
+    api_token: str = field(repr=False)
+    timeout: float = 10.0
+    dry_run: bool = False
+
+    @classmethod
+    def from_env(cls) -> "Settings":
+        try:
+            database_url = os.environ["DATABASE_URL"]
+            api_token = os.environ["API_TOKEN"]
+        except KeyError as exc:
+            raise RuntimeError(
+                f"Missing required environment variable: {exc.args[0]}"
+            ) from None
+        if not api_token.strip():
+            raise RuntimeError("API_TOKEN must not be empty")
+
+        try:
+            timeout = float(os.environ.get("API_TIMEOUT", "10"))
+        except ValueError as exc:
+            raise RuntimeError("API_TIMEOUT must be a number") from exc
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise RuntimeError("API_TIMEOUT must be positive and finite")
+
+        dry_run = os.environ.get("DRY_RUN", "").lower() in {"1", "true", "yes"}
+        return cls(
+            database_url=database_url,
+            api_token=api_token,
+            timeout=timeout,
+            dry_run=dry_run,
+        )
+```
+
+`field(repr=False)` keeps the token out of accidental debug output. Parse booleans explicitly; any non-empty string is truthy, so `DRY_RUN=false` would otherwise enable dry-run mode. Keep a committed `.env.example` with names and safe defaults, and never commit `.env`.
+
+For larger applications, `pydantic-settings` provides the same pattern with type coercion and nested settings. The principle is unchanged: one settings object, validated at startup, injected into the code that needs it.
+
+## Logging as an event stream
+
+Production logs are read by machines and humans. Use the `logging` module, include context, and emit structured records when a log collector will parse them:
+
+```python
+import json
+import logging
+
+
+class JsonFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        payload = {
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+            "time": self.formatTime(record, "%Y-%m-%dT%H:%M:%S%z"),
+        }
+        if record.exc_info:
+            payload["traceback"] = self.formatException(record.exc_info)
+        if hasattr(record, "source"):
+            payload["source"] = record.source
+        return json.dumps(payload)
+
+
+handler = logging.StreamHandler()
+handler.setFormatter(JsonFormatter())
+logging.basicConfig(level=logging.INFO, handlers=[handler])
+
+logger = logging.getLogger("sync")
+logger.info("starting sync", extra={"source": "crm"})
+```
+
+Logs go to standard error, while program output goes to standard output. Keep them separate: a downstream process may consume the output, and mixing diagnostics into it corrupts the data. Log identifiers, counts, durations, and outcomes — not entire payloads, credentials, or personal data. A correlation ID passed through a job makes it possible to follow one run across systems.
+
+## Retries and idempotency
+
+Retry transient failures: timeouts, connection resets, HTTP 429, and most 5xx responses. Do not retry validation errors or authentication failures. Use bounded exponential backoff with jitter, and log each attempt with the attempt number and final outcome.
+
+The harder question is whether retrying is safe. An operation is idempotent when repeating it has the same effect as doing it once. Reads are naturally idempotent. Upserts are idempotent if the key and values are stable. Sending an email or charging a card is not; those need an idempotency key or a deduplication record.
+
+Design jobs so a crash halfway through can be rerun. Write output atomically, use database transactions, and record a checkpoint only after the work it covers is committed. If a job processes records in batches, mark each batch complete in the same transaction as its data.
+
+## Scheduled jobs and locking
+
+Cron and systemd timers both work. A minimal crontab entry runs at 02:15 every day:
+
+```bash
+15 2 * * * cd /srv/sync && /srv/sync/.venv/bin/python -m sync >> /var/log/sync.log 2>&1
+```
+
+That entry has two problems: a second run can overlap the first, and the log file grows forever. Use a lock to enforce one instance:
+
+```bash
+flock -n /tmp/sync.lock /srv/sync/.venv/bin/python -m sync
+```
+
+`flock -n` exits immediately when another process holds the lock. Prefer a lock path with stable permissions, and make sure the process exits non-zero on failure so cron or systemd can alert. systemd timers add journald logging, restart policy, and dependency ordering; use them when the host already runs systemd.
+
+Store timestamps in UTC, schedule in the timezone the business expects, and decide what happens to missed runs. A daily reconciliation and an hourly incremental sync have different recovery requirements.
+
+## Running subprocesses safely
+
+Prefer Python libraries over shell commands. When you need a subprocess, pass an argument list and leave the shell out of it:
+
+```python
+import subprocess
+
+try:
+    result = subprocess.run(
+        ["git", "status", "--short"],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=30,
+    )
+except subprocess.CalledProcessError as exc:
+    print(f"command failed with {exc.returncode}: {exc.stderr.strip()}")
+else:
+    print(result.stdout)
+```
+
+An argument list avoids shell interpolation and most injection risks. `shell=True` with untrusted input is a command-injection vulnerability. Set a timeout, capture output deliberately, and pass a minimal environment if the child does not need the parent's. Use `shutil.which` to check that a tool exists before relying on it. If an argument may begin with a dash, place `--` before positional values where the tool supports it.
+
+## Secrets and observability
+
+Keep secrets in a secret manager or an environment variable injected by the runtime, not in source, container images, or logs. Restrict file permissions on any local secret file, rotate credentials, and make sure error handlers do not print request headers. A redaction test is cheap insurance.
+
+Observability means you can answer three questions without reading the source: Did the job run? Did it succeed? If not, where did it stop? Emit a start event, a completion event with counts and duration, and a failure event with a traceback and correlation ID. Track success rate, rows processed, and lag. Add a health check for long-running services and an alert for missed schedules. Keep failed records in a dead-letter location rather than dropping them.
+
+## Practice
+
+1. Move every path, URL, token, and timeout in an existing script into a validated settings object. Start it with a missing variable and confirm the error names it.
+2. Add JSON logging with a correlation ID, then run the job with a forced failure and verify the traceback is present exactly once.
+3. Make a file-writing job idempotent by writing atomically and recording completed batches. Run it twice and compare the output.
+4. Schedule the job with a lock. Start two copies manually and prove that the second exits without doing work.
+5. Replace a `shell=True` subprocess call with an argument list, add a timeout, and test the failure path with a command that exits non-zero.

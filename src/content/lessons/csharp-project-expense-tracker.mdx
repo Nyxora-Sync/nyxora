@@ -1,0 +1,313 @@
+A console expense tracker is small enough to finish in an afternoon and broad enough to practice the decisions that matter in larger systems: where validation lives, how data is persisted safely, how reports are separated from input, and how asynchronous file I/O changes the shape of a program. This project builds one in layers and keeps the domain independent of the console.
+
+## Project layout
+
+```text
+ExpenseTracker/
+  ExpenseTracker.csproj
+  Program.cs
+  Domain/Expense.cs
+  Application/ExpenseService.cs
+  Application/IExpenseStore.cs
+  Infrastructure/JsonExpenseStore.cs
+  Reporting/ExpenseReports.cs
+```
+
+Create it with `dotnet new console -n ExpenseTracker` and add the folders. There is no database and no framework; the only package is the JSON support included in the runtime.
+
+## The domain: a record with a factory
+
+Money is `decimal`, never `double`. Dates are `DateOnly`, because an expense belongs to a calendar day, not a moment in time. The factory centralizes the rules:
+
+```csharp
+namespace ExpenseTracker.Domain;
+
+public enum ExpenseCategory { Food, Transport, Housing, Software, Other }
+
+public sealed record Expense(
+    Guid Id,
+    DateOnly Date,
+    string Description,
+    ExpenseCategory Category,
+    decimal Amount)
+{
+    public static Expense Create(
+        DateOnly date,
+        string description,
+        ExpenseCategory category,
+        decimal amount)
+    {
+        if (string.IsNullOrWhiteSpace(description))
+            throw new ArgumentException("Description is required.", nameof(description));
+        if (amount <= 0)
+            throw new ArgumentOutOfRangeException(nameof(amount), "Amount must be positive.");
+
+        return new Expense(
+            Guid.NewGuid(),
+            date,
+            description.Trim(),
+            category,
+            decimal.Round(amount, 2, MidpointRounding.AwayFromZero));
+    }
+}
+```
+
+The record gives value equality and a readable `ToString`. The factory is the supported creation path; deserialization can bypass it, so loaded data must be validated at the boundary as well.
+
+## The storage boundary
+
+The application depends on an interface, not a file:
+
+```csharp
+namespace ExpenseTracker.Application;
+
+public interface IExpenseStore
+{
+    Task<IReadOnlyList<Expense>> LoadAsync(CancellationToken ct = default);
+    Task SaveAsync(IReadOnlyList<Expense> expenses, CancellationToken ct = default);
+}
+```
+
+That boundary lets you test the service with an in-memory fake and swap JSON for SQLite later without touching the domain.
+
+```csharp
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using ExpenseTracker.Domain;
+
+namespace ExpenseTracker.Infrastructure;
+
+public sealed class JsonExpenseStore(string filePath) : IExpenseStore
+{
+    private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web)
+    {
+        WriteIndented = true,
+        Converters = { new JsonStringEnumConverter() }
+    };
+
+    public async Task<IReadOnlyList<Expense>> LoadAsync(CancellationToken ct = default)
+    {
+        if (!File.Exists(filePath))
+            return [];
+
+        await using var stream = File.OpenRead(filePath);
+        var expenses = await JsonSerializer.DeserializeAsync<List<Expense>>(stream, Options, ct);
+        return expenses ?? [];
+    }
+
+    public async Task SaveAsync(IReadOnlyList<Expense> expenses, CancellationToken ct = default)
+    {
+        var directory = Path.GetDirectoryName(Path.GetFullPath(filePath));
+        if (!string.IsNullOrEmpty(directory))
+            Directory.CreateDirectory(directory);
+
+        var tempPath = filePath + ".tmp";
+        await using (var stream = File.Create(tempPath))
+            await JsonSerializer.SerializeAsync(stream, expenses, Options, ct);
+
+        File.Move(tempPath, filePath, overwrite: true);
+    }
+}
+```
+
+Writing to a temporary file and renaming it prevents a crash mid-write from leaving a truncated JSON document. The rename replaces the previous file only after the new content is safely on disk.
+
+## The service: mutate, persist, then swap
+
+```csharp
+using ExpenseTracker.Domain;
+
+namespace ExpenseTracker.Application;
+
+public sealed class ExpenseService(IExpenseStore store)
+{
+    private List<Expense> _expenses = [];
+
+    public IReadOnlyList<Expense> All => _expenses;
+
+    public async Task LoadAsync(CancellationToken ct = default)
+    {
+        var loaded = await store.LoadAsync(ct);
+        if (loaded.Any(e => e.Amount <= 0 || string.IsNullOrWhiteSpace(e.Description)))
+            throw new InvalidDataException("The expense file contains invalid records.");
+
+        _expenses = loaded.ToList();
+    }
+
+    public async Task AddAsync(Expense expense, CancellationToken ct = default)
+    {
+        var next = new List<Expense>(_expenses) { expense };
+        await store.SaveAsync(next, ct);
+        _expenses = next;
+    }
+
+    public async Task<bool> DeleteAsync(Guid id, CancellationToken ct = default)
+    {
+        var next = _expenses.Where(e => e.Id != id).ToList();
+        if (next.Count == _expenses.Count)
+            return false;
+
+        await store.SaveAsync(next, ct);
+        _expenses = next;
+        return true;
+    }
+}
+```
+
+The update is applied to a copy and becomes visible only after persistence succeeds. If `SaveAsync` throws, memory still matches the file. This is the same ordering you will need with a database, where the transaction takes the place of the rename.
+
+## Reports with LINQ
+
+Reporting is a pure function over expenses, which makes it easy to test without the console or file system:
+
+```csharp
+using ExpenseTracker.Domain;
+
+namespace ExpenseTracker.Reporting;
+
+public sealed record CategoryReport(string Category, decimal Total, int Count);
+
+public static class ExpenseReports
+{
+    public static IReadOnlyList<CategoryReport> ByCategory(
+        IEnumerable<Expense> expenses,
+        DateOnly from,
+        DateOnly to) =>
+        expenses
+            .Where(e => e.Date >= from && e.Date <= to)
+            .GroupBy(e => e.Category)
+            .Select(g => new CategoryReport(
+                g.Key.ToString(),
+                g.Sum(e => e.Amount),
+                g.Count()))
+            .OrderByDescending(r => r.Total)
+            .ToList();
+}
+```
+
+The method materializes with `ToList` once, so callers cannot accidentally re-run the query. Add a second report grouped by `new { e.Date.Year, e.Date.Month }` for monthly totals.
+
+## The console adapter
+
+`Program.cs` is the only file that reads the keyboard or prints a menu. Top-level statements support `await` directly:
+
+```csharp
+using System.Globalization;
+using ExpenseTracker.Application;
+using ExpenseTracker.Domain;
+using ExpenseTracker.Infrastructure;
+using ExpenseTracker.Reporting;
+
+var dataDirectory = Path.Combine(
+    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+    "ExpenseTracker");
+var path = Path.Combine(dataDirectory, "expenses.json");
+var service = new ExpenseService(new JsonExpenseStore(path));
+await service.LoadAsync();
+
+while (true)
+{
+    Console.WriteLine("\n1) Add  2) List  3) Report  4) Delete  5) Quit");
+    Console.Write("> ");
+    var choice = Console.ReadLine();
+    if (choice == "5") break;
+
+    switch (choice)
+    {
+        case "1":
+            await AddExpenseAsync(service);
+            break;
+        case "2":
+            foreach (var e in service.All.OrderByDescending(e => e.Date))
+                Console.WriteLine($"{e.Date:yyyy-MM-dd}  {e.Category,-10}  {e.Amount,9:C}  {e.Description}");
+            break;
+        case "3":
+            var rows = ExpenseReports.ByCategory(service.All, DateOnly.MinValue, DateOnly.MaxValue);
+            foreach (var row in rows)
+                Console.WriteLine($"{row.Category,-10} {row.Total,10:C} ({row.Count})");
+            break;
+        case "4":
+            Console.Write("Id: ");
+            if (Guid.TryParse(Console.ReadLine(), out var id))
+                Console.WriteLine(await service.DeleteAsync(id) ? "Deleted." : "Not found.");
+            break;
+        default:
+            Console.WriteLine("Unknown option.");
+            break;
+    }
+}
+
+static async Task AddExpenseAsync(ExpenseService service)
+{
+    Console.Write("Date (yyyy-MM-dd): ");
+    if (!DateOnly.TryParseExact(Console.ReadLine(), "yyyy-MM-dd",
+            CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
+    {
+        Console.WriteLine("Invalid date.");
+        return;
+    }
+
+    Console.Write("Description: ");
+    var description = Console.ReadLine() ?? "";
+
+    Console.Write("Category (Food, Transport, Housing, Software, Other): ");
+    if (!Enum.TryParse<ExpenseCategory>(Console.ReadLine(), ignoreCase: true, out var category))
+    {
+        Console.WriteLine("Invalid category.");
+        return;
+    }
+
+    Console.Write("Amount: ");
+    if (!decimal.TryParse(Console.ReadLine(), NumberStyles.Number,
+            CultureInfo.InvariantCulture, out var amount))
+    {
+        Console.WriteLine("Invalid amount.");
+        return;
+    }
+
+    try
+    {
+        await service.AddAsync(Expense.Create(date, description, category, amount));
+        Console.WriteLine("Saved.");
+    }
+    catch (ArgumentException ex)
+    {
+        Console.WriteLine(ex.Message);
+    }
+}
+```
+
+## Test plan
+
+Before adding features, verify these cases manually or with an xUnit project later:
+
+```text
+Scenario                          Expected
+valid expense                     file written; restart shows the record
+amount zero or negative           rejected; file unchanged
+blank description                 rejected; file unchanged
+invalid date or amount text       message; menu continues
+missing data file                 starts empty; no crash
+corrupt JSON                      clear error; no overwrite
+delete existing / missing id      removed / false, file unchanged on miss
+report date bounds                expenses outside the range excluded
+two app instances                 last writer wins; unsupported, document it
+```
+
+## Common mistakes
+
+- Using `double` for money, which introduces rounding errors before the data is even stored.
+- Saving directly to the real file, then failing halfway through serialization.
+- Trusting JSON just because it deserializes. Validate amounts, dates, and descriptions after loading.
+- Formatting amounts with the current culture before persistence. Store numbers as numbers and format only for display.
+- Putting `Console.ReadLine` calls inside `ExpenseService`, which makes the logic untestable.
+- Treating `DateOnly` as a timestamp. If the business needs a time zone, use `DateTimeOffset` deliberately.
+
+## Practice
+
+1. Add an `EditAsync` command that changes description, category, or amount while preserving the ID and date.
+2. Add a monthly budget per category stored in a separate settings file, and report over-budget categories.
+3. Export a CSV report with invariant formatting and proper quoting for commas in descriptions.
+4. Add command-line arguments: `--report food 2026-01 2026-10` prints a report and exits without the menu.
+5. Replace `JsonExpenseStore` with an in-memory fake and test `ExpenseService` and `ExpenseReports` without touching disk.
+6. Decide what should happen when two instances edit the file at once, then implement either a lock file or a clear refusal to start when the lock is held.

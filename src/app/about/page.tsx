@@ -26,9 +26,9 @@ import { pageMetadata } from '@/lib/seo'
 export const metadata = pageMetadata({
   title: 'About',
   description:
-    'Why MERN Learn exists: a free, complete, written curriculum for the MERN stack, from first HTML tag to production mastery.',
+    'Why Nyxora Sync exists: a free, complete, written curriculum for web development and programming languages, from first program to production mastery.',
   path: '/about',
-  keywords: ['about MERN Learn', 'free MERN curriculum', 'open source coding education'],
+  keywords: ['about Nyxora Sync', 'free programming curriculum', 'open source coding education'],
 })
 
 const moduleKeys = new Set<string>()
@@ -59,7 +59,7 @@ const offers = [
     icon: Compass,
     title: 'A path, not a pile',
     description:
-      'Two core tracks — beginner foundations and the developer MERN core — followed by mastery modules and four specializations in Next.js, cloud DevOps, scalable systems, and React Native.',
+      'Beginner and developer MERN tracks lead into four specializations. Alongside them, complete C, C++, C#, and Python paths move from foundations to mastery without skipping the machine underneath.',
     color: 'blue',
   },
   {
@@ -113,7 +113,7 @@ const stack = [
   { icon: Database, label: 'MongoDB + Mongoose' },
   { icon: Database, label: 'PostgreSQL + Prisma' },
   { icon: ShieldCheck, label: 'NextAuth' },
-  { icon: Gauge, label: 'Vercel' },
+  { icon: Gauge, label: 'Cloudflare Workers' },
 ]
 
 export default function AboutPage() {
@@ -128,15 +128,15 @@ export default function AboutPage() {
               About
             </Badge>
             <h1 className="max-w-4xl text-3xl font-bold tracking-tight sm:text-4xl lg:text-5xl">
-              A complete MERN education,{' '}
+              A complete programming education,{' '}
               <span className="bg-gradient-to-r from-emerald-500 to-violet-500 bg-clip-text text-transparent">
                 free and in writing
               </span>
             </h1>
             <p className="mt-4 max-w-2xl text-lg text-muted-foreground">
-              MERN Learn is a free, open-source curriculum for MongoDB, Express, React, and Node.js.
-              It starts at the first HTML tag and ends with production concerns: tests, auth, security,
-              deployment, and architecture.
+              Nyxora Sync is a free, open-source curriculum for web development and programming
+              languages. Start at the first HTML tag or your first C program, then go as deep as
+              tests, auth, security, deployment, concurrency, and architecture.
             </p>
             <div className="mt-6 flex flex-wrap gap-3">
               <Button asChild className="gap-2">
@@ -186,7 +186,7 @@ export default function AboutPage() {
                     do exist are excellent, but they assume you already know which one to read next.
                   </p>
                   <p>
-                    MERN Learn is the site we wanted: the full explanation in text, a sensible order,
+                    Nyxora Sync is the site we wanted: the full explanation in text, a sensible order,
                     and links to the best free deep dives when you want more. You can read it on a
                     slow connection, copy the code, and come back six months later and search it.
                   </p>

@@ -1,0 +1,461 @@
+A command-line inventory manager is a small enough project to finish, but large enough to practice the parts that matter: a validated domain class, two containers with different jobs, persistence, error handling, and a build that does not depend on the current directory. The goal is not a commercial inventory system. The goal is a program with boundaries you can point to and defend.
+
+## Project layout and data model
+
+```text
+inventory/
+  CMakeLists.txt
+  include/inventory/product.hpp
+  include/inventory/catalog.hpp
+  src/product.cpp
+  src/catalog.cpp
+  src/main.cpp
+```
+
+The domain type is `Product`. It owns its data, rejects invalid state, and knows nothing about files or the terminal.
+
+```cpp
+// include/inventory/product.hpp
+#pragma once
+
+#include <string>
+
+class Product {
+public:
+    Product(std::string sku, std::string name, int quantity, double price);
+
+    const std::string& sku() const noexcept;
+    const std::string& name() const noexcept;
+    int quantity() const noexcept;
+    double price() const noexcept;
+    double totalValue() const noexcept;
+
+    void restock(int amount);
+
+private:
+    std::string sku_;
+    std::string name_;
+    int quantity_;
+    double price_;
+};
+```
+
+The implementation lives in `src/product.cpp`:
+
+```cpp
+#include "inventory/product.hpp"
+
+#include <cmath>
+#include <stdexcept>
+#include <utility>
+
+Product::Product(std::string sku, std::string name, int quantity, double price)
+    : sku_(std::move(sku)),
+      name_(std::move(name)),
+      quantity_(quantity),
+      price_(price) {
+    if (sku_.empty() || name_.empty()) {
+        throw std::invalid_argument{"SKU and name are required"};
+    }
+    if (sku_.find_first_of("\t\n") != std::string::npos ||
+        name_.find_first_of("\t\n") != std::string::npos) {
+        throw std::invalid_argument{"SKU and name must not contain tabs or newlines"};
+    }
+    if (quantity_ < 0) {
+        throw std::invalid_argument{"quantity must be non-negative"};
+    }
+    if (!std::isfinite(price_) || price_ < 0.0) {
+        throw std::invalid_argument{"price must be finite and non-negative"};
+    }
+}
+
+const std::string& Product::sku() const noexcept { return sku_; }
+const std::string& Product::name() const noexcept { return name_; }
+int Product::quantity() const noexcept { return quantity_; }
+double Product::price() const noexcept { return price_; }
+
+double Product::totalValue() const noexcept {
+    return quantity_ * price_;
+}
+
+void Product::restock(int amount) {
+    if (amount <= 0) {
+        throw std::invalid_argument{"restock amount must be positive"};
+    }
+    quantity_ += amount;
+}
+```
+
+## Two containers, two jobs
+
+`Catalog` stores the products in a `std::vector` so iteration is contiguous and ordered by insertion. It also maintains a `std::unordered_map` from SKU to vector index so lookup does not require a linear scan.
+
+```cpp
+// include/inventory/catalog.hpp
+#pragma once
+
+#include "inventory/product.hpp"
+
+#include <cstddef>
+#include <iosfwd>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <vector>
+
+class Catalog {
+public:
+    bool add(Product product);
+    Product* find(std::string_view sku);
+    const Product* find(std::string_view sku) const;
+    bool restock(std::string_view sku, int amount);
+
+    const std::vector<Product>& products() const noexcept;
+    std::size_t size() const noexcept;
+    double totalValue() const noexcept;
+
+    void save(std::ostream& out) const;
+    bool load(std::istream& in, std::string& error);
+
+private:
+    std::vector<Product> products_;
+    std::unordered_map<std::string, std::size_t> index_;
+};
+```
+
+The lookup index is a cache of derived information. Every operation that changes the vector must keep it consistent. That is why `add` checks for a duplicate before touching either container.
+
+```cpp
+// src/catalog.cpp (essential parts)
+#include "inventory/catalog.hpp"
+
+#include <cmath>
+#include <iomanip>
+#include <limits>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <utility>
+
+namespace {
+
+bool parseInt(const std::string& text, int& value) {
+    try {
+        std::size_t used = 0;
+        const long parsed = std::stol(text, &used);
+        if (used != text.size() ||
+            parsed < std::numeric_limits<int>::min() ||
+            parsed > std::numeric_limits<int>::max()) {
+            return false;
+        }
+        value = static_cast<int>(parsed);
+        return true;
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
+bool parseDouble(const std::string& text, double& value) {
+    try {
+        std::size_t used = 0;
+        const double parsed = std::stod(text, &used);
+        if (used != text.size() || !std::isfinite(parsed)) {
+            return false;
+        }
+        value = parsed;
+        return true;
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
+} // namespace
+
+bool Catalog::add(Product product) {
+    if (index_.contains(product.sku())) {
+        return false;
+    }
+
+    const std::size_t position = products_.size();
+    products_.push_back(std::move(product));
+    index_.emplace(products_.back().sku(), position);
+    return true;
+}
+
+Product* Catalog::find(std::string_view sku) {
+    const auto it = index_.find(std::string{sku});
+    return it == index_.end() ? nullptr : &products_[it->second];
+}
+
+const Product* Catalog::find(std::string_view sku) const {
+    const auto it = index_.find(std::string{sku});
+    return it == index_.end() ? nullptr : &products_[it->second];
+}
+
+bool Catalog::restock(std::string_view sku, int amount) {
+    Product* product = find(sku);
+    if (product == nullptr) {
+        return false;
+    }
+    product->restock(amount);
+    return true;
+}
+
+const std::vector<Product>& Catalog::products() const noexcept { return products_; }
+std::size_t Catalog::size() const noexcept { return products_.size(); }
+
+double Catalog::totalValue() const noexcept {
+    double total = 0.0;
+    for (const Product& product : products_) {
+        total += product.totalValue();
+    }
+    return total;
+}
+```
+
+## Persistence and validation
+
+The file format is tab-separated text with a comment header. Validation happens twice: once when parsing text into numbers, and again when constructing a `Product`. That is deliberate. A parser can produce a syntactically valid number that is still a domain error.
+
+```cpp
+void Catalog::save(std::ostream& out) const {
+    out << "# inventory v1\n";
+    out << std::setprecision(std::numeric_limits<double>::max_digits10);
+    for (const Product& product : products_) {
+        out << product.sku() << '\t'
+            << product.name() << '\t'
+            << product.quantity() << '\t'
+            << product.price() << '\n';
+    }
+}
+
+bool Catalog::load(std::istream& in, std::string& error) {
+    Catalog next;
+    std::string line;
+    std::size_t lineNumber = 0;
+
+    while (std::getline(in, line)) {
+        ++lineNumber;
+        if (line.empty() || line.front() == '#') {
+            continue;
+        }
+
+        std::istringstream row{line};
+        std::string sku;
+        std::string name;
+        std::string quantityText;
+        std::string priceText;
+
+        if (!std::getline(row, sku, '\t') ||
+            !std::getline(row, name, '\t') ||
+            !std::getline(row, quantityText, '\t') ||
+            !std::getline(row, priceText)) {
+            error = "line " + std::to_string(lineNumber) +
+                    ": expected four tab-separated fields";
+            return false;
+        }
+
+        std::string extra;
+        if (std::getline(row, extra, '\t')) {
+            error = "line " + std::to_string(lineNumber) + ": too many fields";
+            return false;
+        }
+
+        int quantity = 0;
+        double price = 0.0;
+        if (!parseInt(quantityText, quantity) ||
+            !parseDouble(priceText, price)) {
+            error = "line " + std::to_string(lineNumber) + ": invalid number";
+            return false;
+        }
+
+        try {
+            if (!next.add(Product{sku, name, quantity, price})) {
+                error = "line " + std::to_string(lineNumber) +
+                        ": duplicate SKU " + sku;
+                return false;
+            }
+        } catch (const std::exception& exception) {
+            error = "line " + std::to_string(lineNumber) + ": " + exception.what();
+            return false;
+        }
+    }
+
+    *this = std::move(next);
+    return true;
+}
+```
+
+Loading into a temporary `Catalog` is important. If the file is malformed halfway through, the existing in-memory catalog remains untouched instead of being left half-loaded.
+
+## The CLI
+
+`main.cpp` owns terminal input and output. It does not reimplement catalog rules; it reports their results.
+
+```cpp
+#include "inventory/catalog.hpp"
+
+#include <fstream>
+#include <iostream>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+
+namespace {
+
+std::string ask(std::string_view label) {
+    std::cout << label;
+    std::string line;
+    std::getline(std::cin, line);
+    return line;
+}
+
+int askInt(std::string_view label) {
+    const std::string text = ask(label);
+    std::size_t used = 0;
+    const int value = std::stoi(text, &used);
+    if (used != text.size()) {
+        throw std::invalid_argument{"expected a whole number"};
+    }
+    return value;
+}
+
+double askDouble(std::string_view label) {
+    const std::string text = ask(label);
+    std::size_t used = 0;
+    const double value = std::stod(text, &used);
+    if (used != text.size()) {
+        throw std::invalid_argument{"expected a number"};
+    }
+    return value;
+}
+
+void list(const Catalog& catalog) {
+    if (catalog.size() == 0) {
+        std::cout << "Catalog is empty\n";
+        return;
+    }
+    for (const Product& product : catalog.products()) {
+        std::cout << product.sku() << "  " << product.name()
+                  << "  qty=" << product.quantity()
+                  << "  price=" << product.price() << '\n';
+    }
+    std::cout << "Total value: " << catalog.totalValue() << '\n';
+}
+
+} // namespace
+
+int main(int argc, char* argv[]) {
+    const std::string path = argc > 1 ? argv[1] : "inventory.tsv";
+    Catalog catalog;
+
+    if (std::ifstream input{path}) {
+        std::string error;
+        if (!catalog.load(input, error)) {
+            std::cerr << "Cannot load " << path << ": " << error << '\n';
+            return 1;
+        }
+    }
+
+    std::string command;
+    while (std::cout << "add/list/restock/save/quit> ",
+           std::getline(std::cin, command)) {
+        try {
+            if (command == "quit") {
+                break;
+            } else if (command == "list") {
+                list(catalog);
+            } else if (command == "add") {
+                const std::string sku = ask("SKU: ");
+                const std::string name = ask("Name: ");
+                const int quantity = askInt("Quantity: ");
+                const double price = askDouble("Price: ");
+                if (catalog.add(Product{sku, name, quantity, price})) {
+                    std::cout << "Added " << sku << '\n';
+                } else {
+                    std::cout << "Duplicate SKU\n";
+                }
+            } else if (command == "restock") {
+                const std::string sku = ask("SKU: ");
+                const int amount = askInt("Amount: ");
+                std::cout << (catalog.restock(sku, amount)
+                                  ? "Restocked\n"
+                                  : "Unknown SKU\n");
+            } else if (command == "save") {
+                std::ofstream output{path};
+                if (!output) {
+                    std::cerr << "Cannot write " << path << '\n';
+                    continue;
+                }
+                catalog.save(output);
+                std::cout << "Saved to " << path << '\n';
+            } else {
+                std::cout << "Unknown command\n";
+            }
+        } catch (const std::exception& exception) {
+            std::cout << "Error: " << exception.what() << '\n';
+        }
+    }
+}
+```
+
+## CMake target
+
+```cmake
+cmake_minimum_required(VERSION 3.20)
+project(inventory LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+add_library(inventory_core
+    src/product.cpp
+    src/catalog.cpp
+)
+target_include_directories(inventory_core PUBLIC include)
+
+add_executable(inventory src/main.cpp)
+target_link_libraries(inventory PRIVATE inventory_core)
+
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(inventory_core PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(inventory PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+```
+
+```bash
+cmake -S . -B build
+cmake --build build
+./build/inventory data/inventory.tsv
+```
+
+## Test plan
+
+| Area | Case | Expected |
+| --- | --- | --- |
+| Add | Valid new product | Added and appears in `list` |
+| Add | Duplicate SKU | Rejected, count unchanged |
+| Validation | Empty name, negative quantity, negative price | Error message, no product added |
+| Restock | Known SKU, positive amount | Quantity increases |
+| Restock | Unknown SKU or non-positive amount | Unknown SKU or validation error |
+| Persistence | Save, quit, restart, load | Same products and total value |
+| Persistence | Corrupt line or duplicate SKU in file | Load fails, original in-memory catalog unchanged |
+| Arithmetic | Two products with known values | Total equals the sum of quantity times price |
+
+A scripted smoke test catches the basic path:
+
+```bash
+printf 'add\nA-100\nHex bolt\n10\n0.25\nadd\nA-100\nDuplicate\n1\n1\nlist\nsave\nquit\n' \
+  | ./build/inventory /tmp/inventory-test.tsv
+```
+
+Then start the program again with the same path and run `list`. The duplicate should not have been added, the quantity should be ten, and the total should be `2.5`.
+
+## Practice
+
+1. Build the project exactly as shown and run the scripted smoke test. Confirm the restart round-trip.
+2. Add a `remove` command. Erase from the vector, erase the index entry, and update every index that pointed past the removed element. Test removal of the first, middle, and last product.
+3. Add a `low` command that lists products below a threshold supplied on the command line, using `std::find_if` or a range loop.
+4. Introduce a bug in `load` that adds products directly to `*this` instead of `next`. Write a test file with a valid first line and an invalid second line, and observe why the temporary catalog matters.
+5. Extend the test plan with one case for a name containing spaces and one for a price with many decimal places. Verify that the persisted price round-trips.

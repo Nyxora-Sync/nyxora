@@ -5,7 +5,7 @@ import { pageMetadata } from '@/lib/seo'
 
 export const metadata = pageMetadata({
   title: 'Settings',
-  description: 'Manage your MERN Learn profile, links, and privacy preferences.',
+  description: 'Manage your Nyxora Sync profile, links, and privacy preferences.',
   path: '/settings',
   noIndex: true,
 })

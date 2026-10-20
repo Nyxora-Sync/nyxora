@@ -16,6 +16,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import type { ProjectDetail } from '@/lib/community-types'
+import { tracks } from '@/lib/curriculum'
 
 const emptyForm = {
   title: '',
@@ -190,8 +191,11 @@ function ProjectForm({
             onChange={(event) => update('track', event.target.value)}
             className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
           >
-            <option value="beginner">Beginner</option>
-            <option value="developer">Developer</option>
+            {tracks.map((track) => (
+              <option key={track.key} value={track.key}>
+                {track.name}
+              </option>
+            ))}
           </select>
         </div>
         <div className="space-y-1.5">

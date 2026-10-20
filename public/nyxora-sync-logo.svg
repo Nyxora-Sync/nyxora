@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="240" viewBox="0 0 480 240">
+  <defs>
+    <radialGradient id="bg" cx="18%" cy="20%" r="90%">
+      <stop offset="0%" stop-color="#151528"/>
+      <stop offset="60%" stop-color="#0a0a12"/>
+      <stop offset="100%" stop-color="#07070b"/>
+    </radialGradient>
+    <linearGradient id="brand" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#34d399"/>
+      <stop offset="50%" stop-color="#a78bfa"/>
+      <stop offset="100%" stop-color="#fbbf24"/>
+    </linearGradient>
+    <linearGradient id="mark" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#10b981"/>
+      <stop offset="55%" stop-color="#8b5cf6"/>
+      <stop offset="100%" stop-color="#f59e0b"/>
+    </linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <rect width="480" height="240" fill="url(#bg)"/>
+  <g opacity="0.18" stroke="#71717a" stroke-width="0.5">
+    <path d="M0 60H480M0 120H480M0 180H480"/>
+    <path d="M60 0V240M120 0V240M180 0V240M240 0V240M300 0V240M360 0V240M420 0V240"/>
+  </g>
+
+  <rect x="30" y="74" width="86" height="86" rx="22" fill="#0f0f19" stroke="url(#mark)" stroke-width="2"/>
+  <text x="73" y="136" text-anchor="middle" font-family="Noto Sans, sans-serif" font-size="58" font-weight="700" fill="url(#mark)" filter="url(#glow)">N</text>
+
+  <text x="138" y="112" font-family="Noto Sans, sans-serif" font-size="34" font-weight="700" letter-spacing="1.5" fill="#fafafa">NYXORA</text>
+  <text x="138" y="150" font-family="Noto Sans, sans-serif" font-size="34" font-weight="700" letter-spacing="7" fill="url(#brand)">SYNC</text>
+  <text x="139" y="182" font-family="Noto Sans, sans-serif" font-size="12" font-weight="500" letter-spacing="2.6" fill="#a1a1aa">LEARN · BUILD · SHIP</text>
+</svg>

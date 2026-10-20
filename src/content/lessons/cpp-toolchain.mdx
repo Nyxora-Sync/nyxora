@@ -1,0 +1,139 @@
+C++ does not arrive as a single program. It arrives as a language standard, one or more compilers that implement that standard, a linker that joins the pieces, and a build system that remembers how to repeat the process. Learning to drive that toolchain is the first real skill in C++, because almost every confusing beginner error is a toolchain error wearing a source-code disguise.
+
+This lesson takes one small program from a text file to a running executable, then puts the same program behind a minimal CMake project so the build is reproducible.
+
+## Standards, compilers, and the pieces involved
+
+C++ is standardized by ISO. The standard defines the language and the library, but not the compiler binary or the build system. When this course says C++20, it means the language and library features published in that revision: concepts, ranges, `std::jthread`, and designated initializers, among others.
+
+Three names cover most of the toolchain:
+
+- A **compiler front end** parses source, checks types, and produces object files. GCC and Clang are the two common choices on Linux and macOS; MSVC is the native choice on Windows.
+- The **linker** combines object files and libraries into an executable. It resolves names such as `std::cout` and your own functions.
+- A **build system** such as CMake, Meson, or Bazel records the commands and dependencies so you do not type them by hand.
+
+`g++` and `clang++` are driver programs. They invoke the compiler, assembler, and linker for you.
+
+## The first program
+
+Create `hello.cpp`:
+
+```cpp
+#include <iostream>
+#include <string>
+
+int main() {
+    const std::string name = "world";
+    std::cout << "Hello, " << name << "!\n";
+    return 0;
+}
+```
+
+`#include <iostream>` brings the declarations for the standard input and output streams. `std::cout` is the buffered standard output stream; `<<` sends values into it. `std::string` is the standard owning string type, so this program needs no manual memory management.
+
+`main` is the entry point. It returns an `int`, and returning `0` means success. The return is optional in `main`; the language supplies zero if control reaches the end. Use `"\n"` for a newline unless you specifically need to flush the stream. `std::endl` writes a newline and flushes, which is rarely necessary and can be slow in a loop.
+
+Everything in the standard library lives in the `std` namespace. You can write `using std::cout;` inside a function to shorten a few lines, but avoid `using namespace std;` at global scope, especially in headers. It imports hundreds of names and creates collisions that are difficult to diagnose.
+
+## Compiling and linking by hand
+
+With GCC:
+
+```bash
+g++ -std=c++20 -Wall -Wextra -Wpedantic hello.cpp -o hello
+./hello
+```
+
+With Clang, replace `g++` with `clang++`; the flags are the same. The important parts:
+
+- `-std=c++20` selects the language revision. Recent compilers also accept `-std=c++23`. Without this flag you may get an older default and errors about features the compiler supports but is not enabling.
+- `-Wall -Wextra -Wpedantic` enable a useful warning set. Warnings are not noise; fix them before they become runtime bugs. Add `-Werror` in continuous integration if you want warnings to fail the build.
+- `-o hello` names the output.
+- `-g` adds debug information. `-O2` enables optimization. Use both in a release-with-symbols build if you need to profile.
+
+The driver performs two stages you should know by name. Compilation translates `hello.cpp` into an object file. Linking combines object files and libraries into an executable. You can see the stages separately:
+
+```bash
+g++ -std=c++20 -Wall -Wextra -c hello.cpp -o hello.o
+g++ hello.o -o hello
+```
+
+This separation explains the two major error families. A **compile error** means a single translation unit does not make sense: a missing semicolon, unknown type, or missing include. A **link error** means the pieces do not add up, usually an undefined reference to a function that was declared but never defined, or a definition that was never included in the link command.
+
+## A minimal CMake project
+
+Typing compiler flags works for one file. A project needs a build description. CMake is the most common choice in C++ and is well supported by editors and CI systems.
+
+```text
+hello/
+  CMakeLists.txt
+  src/main.cpp
+```
+
+```cmake
+cmake_minimum_required(VERSION 3.20)
+project(hello LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+add_executable(hello src/main.cpp)
+
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  target_compile_options(hello PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+```
+
+Configure once, then build:
+
+```bash
+cmake -S . -B build
+cmake --build build
+./build/hello
+```
+
+`-S .` names the source directory, `-B build` names the build directory. Keeping generated files out of the source tree prevents stale objects and editor confusion. `CMAKE_CXX_EXTENSIONS OFF` asks for standard C++ rather than compiler-specific extensions such as GNU statement expressions.
+
+When the project grows, each `.cpp` file becomes a translation unit and each shared declaration moves into a header. CMake tracks the dependencies and recompiles only what changed. That is the payoff for the extra file.
+
+## Reading failures without panic
+
+Start with the first error, not the last. Later errors are often consequences of the first one. A missing semicolon can produce a page of complaints about types and braces that disappear after one character is fixed.
+
+```text
+main.cpp:6:5: error: expected ';' before 'return'
+```
+
+That message is precise: at line 6, the parser expected a semicolon. A link error looks different:
+
+```text
+undefined reference to `total_price(Product const&)'
+```
+
+This means the call was compiled, but no definition reached the linker. Check that the source file containing `total_price` is part of the target, that its name is spelled correctly, and that the declaration in the header matches the definition exactly.
+
+For runtime bugs, rebuild with sanitizers during development:
+
+```bash
+g++ -std=c++20 -g -fsanitize=address,undefined main.cpp -o app
+```
+
+AddressSanitizer catches use-after-free and buffer overflows; UndefinedBehaviorSanitizer catches operations the standard does not define. They are not a substitute for tests, but they turn silent corruption into a stack trace.
+
+## Common mistakes
+
+- Compiling without selecting the standard, then blaming the compiler for rejecting a C++20 feature.
+- Ignoring warnings until they hide a real type conversion or unused variable.
+- Putting `using namespace std;` in a header, poisoning every file that includes it.
+- Adding a declaration to a header but forgetting the matching definition in a `.cpp` file.
+- Running an old executable after a failed build. Check the build's exit status before drawing conclusions from the output.
+- Mixing debug and release object files in one directory, which produces confusing link and runtime behavior.
+
+## Practice
+
+1. Save the hello program, compile it with both `g++` and `clang++` using the flags above, and confirm the output.
+2. Remove the semicolon after the `const std::string` line. Read the first diagnostic, restore it, and notice how many later errors vanish.
+3. Split the program into `main.cpp` and a `greeting.cpp` that defines `std::string greeting(std::string_view name)`, with the declaration in `greeting.hpp`. Build both files by hand, then convert the project to CMake.
+4. Add `-Wconversion` and assign a `double` to an `int`. Decide whether the warning is a bug or an intentional narrowing, and make the intent explicit.
+5. Run the program under `-fsanitize=address,undefined` and confirm the toolchain reports no errors for a correct program.

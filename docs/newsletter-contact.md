@@ -118,14 +118,14 @@ EMAIL_SERVER_HOST=...
 EMAIL_SERVER_PORT=587
 EMAIL_SERVER_USER=...
 EMAIL_SERVER_PASSWORD=...
-EMAIL_FROM="MERN Learn <newsletter@your-domain>"
+EMAIL_FROM="Nyxora Sync <newsletter@your-domain>"
 ```
 
 or the legacy URL form:
 
 ```bash
 EMAIL_SERVER="smtp://user:pass@host:587"
-EMAIL_FROM="MERN Learn <newsletter@your-domain>"
+EMAIL_FROM="Nyxora Sync <newsletter@your-domain>"
 ```
 
 `EMAIL_FROM` is required. Without usable SMTP, signup returns a friendly `503`

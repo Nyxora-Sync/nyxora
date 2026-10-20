@@ -5,6 +5,7 @@ import { Separator } from '@/components/ui/separator'
 import { BookOpen, Code2, ArrowRight, CheckCircle, Clock, Users, Trophy, Code2 as Code2Icon, Sparkles } from 'lucide-react'
 import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
+import { LanguagePaths } from '@/components/language-paths'
 import { SpecializationsBanner } from '@/components/specializations-banner'
 import { Reveal } from '@/components/motion/reveal'
 import { cn, getAccent } from '@/lib/utils'
@@ -24,6 +25,7 @@ const tracks = curriculumTracks.map((track) => {
     key: track.key,
     name: track.name,
     description: track.description,
+    category: track.category,
     duration: `~${Math.round(totalHours / 10)} wks`,
     modules: track.modules.length,
     lessons,
@@ -38,7 +40,9 @@ const tracks = curriculumTracks.map((track) => {
   }
 })
 
-const coreTracks = tracks.filter((track) => track.key !== 'specializations')
+const coreTracks = tracks.filter(
+  (track) => track.category === 'web-development' && track.key !== 'specializations'
+)
 
 const uniqueLessonCount = new Set(
   curriculumTracks.flatMap((track) =>
@@ -47,10 +51,10 @@ const uniqueLessonCount = new Set(
 ).size
 
 export const metadata = pageMetadata({
-  title: 'Learn the MERN Stack',
-  description: `Choose a beginner foundations track or go straight to the MERN core. ${uniqueLessonCount} free written lessons, four specializations, playgrounds, and a path to production mastery.`,
+  title: 'Explore Learning Paths',
+  description: `Choose a web development path or learn a programming language. ${uniqueLessonCount} free written lessons across MERN, C, C++, C#, Python, specializations, and playgrounds.`,
   path: '/learn',
-  keywords: ['learn MERN', 'MERN roadmap', 'beginner web development', 'MongoDB Express React Node', 'Next.js', 'React Native'],
+  keywords: ['learn MERN', 'learn Python', 'learn C', 'learn C++', 'learn C#', 'programming roadmap', 'beginner web development', 'MongoDB Express React Node'],
 })
 
 export default function LearnPage() {
@@ -68,7 +72,8 @@ export default function LearnPage() {
               </span>
             </h1>
             <p className="mt-4 max-w-2xl mx-auto text-lg text-muted-foreground">
-              Start with a core track based on your experience level, then specialize when you are ready. Switch anytime.
+              Start with web development or go deep on a programming language. Every path is free,
+              written, and organized from beginner to mastery.
             </p>
           </div>
         </section>
@@ -76,6 +81,18 @@ export default function LearnPage() {
         {/* Track Cards */}
         <section className="py-16 sm:py-20">
           <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <div className="mb-10 max-w-2xl">
+              <p className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+                Web Development
+              </p>
+              <h2 className="mt-2 text-2xl font-bold tracking-tight sm:text-3xl">
+                Build and operate modern web applications
+              </h2>
+              <p className="mt-3 text-muted-foreground">
+                Start from zero or bring your JavaScript experience. Both MERN paths lead to the same
+                production foundations.
+              </p>
+            </div>
             <div className="grid gap-8 lg:grid-cols-2">
               {coreTracks.map((track) => (
                 <Link key={track.key} href={`/learn/${track.key}`} className="group">
@@ -133,13 +150,40 @@ export default function LearnPage() {
           <SpecializationsBanner className="mt-8" />
         </section>
 
-        {/* Why MERN Learn */}
-        <section className="py-16 sm:py-20 bg-muted/30">
+        {/* Programming Languages */}
+        <section id="languages" className="py-16 sm:py-20 bg-muted/30 scroll-mt-20">
+          <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <div className="mb-10 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+              <div className="max-w-2xl">
+                <p className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+                  Programming Languages
+                </p>
+                <h2 className="mt-2 text-2xl font-bold tracking-tight sm:text-3xl">
+                  Go deeper than the framework
+                </h2>
+                <p className="mt-3 text-muted-foreground">
+                  Four complete beginner-to-mastery paths. Each level ends with a project, and each
+                  path ends with a capstone.
+                </p>
+              </div>
+              <Button asChild variant="outline" className="gap-2 self-start sm:self-auto">
+                <Link href="/learn/languages">
+                  Explore all language paths
+                  <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                </Link>
+              </Button>
+            </div>
+            <LanguagePaths />
+          </Reveal>
+        </section>
+
+        {/* Why Nyxora Sync */}
+        <section className="py-16 sm:py-20">
           <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <div className="text-center max-w-3xl mx-auto mb-16">
-              <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">Why Learn with MERN Learn?</h2>
+              <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">Why learn with Nyxora Sync?</h2>
               <p className="mt-4 text-lg text-muted-foreground">
-                We aren&apos;t just another tutorial site. We&apos;re a complete learning platform.
+                We aren&apos;t just another tutorial site. We&apos;re a complete, free learning platform.
               </p>
             </div>
             <div className="grid gap-6 md:grid-cols-3">
@@ -149,7 +193,7 @@ export default function LearnPage() {
                 { icon: Trophy, title: 'Real Projects', desc: 'Build a portfolio site, blog, e-commerce app, and a multi-tenant SaaS capstone.', color: 'amber' },
                 { icon: Code2, title: 'Interactive Playgrounds', desc: 'Run HTML, CSS, JavaScript, React, Node, and Express examples in your browser. Zero setup required.', color: 'rose' },
                 { icon: Users, title: 'Community', desc: 'Lesson discussions, a project showcase, and public learner profiles.', color: 'blue' },
-                { icon: BookOpen, title: 'Curated Resources', desc: 'Hand-picked from freeCodeCamp, Net Ninja, official docs, and top educators.', color: 'indigo' },
+                { icon: BookOpen, title: 'Curated Resources', desc: 'Hand-picked from freeCodeCamp, official documentation, and trusted educators across every path.', color: 'indigo' },
               ].map((feature) => (
                 <Card key={feature.title} className="group transition-all motion-safe:hover:-translate-y-0.5 hover:shadow-lg">
                   <CardContent className="pt-6">
@@ -172,7 +216,7 @@ export default function LearnPage() {
               <CardContent className="relative py-12 sm:py-16 text-center">
                 <div className="mx-auto max-w-2xl">
                   <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">
-                    Ready to become a MERN master?
+                    Ready to choose your next skill?
                   </h2>
                   <p className="mt-4 text-lg text-muted-foreground">
                     Every path is free, written, and self-paced. Start where you are.
@@ -180,12 +224,12 @@ export default function LearnPage() {
                   <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
                     <Button size="lg" asChild className="gap-2 w-full sm:w-auto">
                       <Link href="/learn/beginner">
-                        Start Beginner Track
+                        Start the Beginner Track
                         <ArrowRight className="h-5 w-5" aria-hidden="true" />
                       </Link>
                     </Button>
                     <Button size="lg" variant="outline" asChild className="gap-2 w-full sm:w-auto">
-                      <Link href="/learn/developer">Start Developer Track</Link>
+                      <Link href="/learn/languages">Explore Language Paths</Link>
                     </Button>
                   </div>
                   <p className="mt-6 text-sm text-muted-foreground">

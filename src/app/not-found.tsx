@@ -20,7 +20,7 @@ import { Input } from '@/components/ui/input'
 
 export const metadata: Metadata = {
   title: 'Page not found',
-  description: 'The page you requested does not exist. Search MERN Learn lessons, resources, and answers instead.',
+  description: 'The page you requested does not exist. Search Nyxora Sync lessons, resources, and answers instead.',
   robots: { index: false, follow: false },
 }
 

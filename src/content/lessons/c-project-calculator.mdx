@@ -1,0 +1,326 @@
+This project turns the language basics into a small, structured program: a menu-driven calculator split across multiple source files. It reads numbers safely, performs one of four arithmetic operations, refuses division by zero, and reports the result without mixing input parsing with arithmetic.
+
+The goal is not the calculator itself. The goal is the shape of the code: a clear interface between modules, a Makefile that builds every object file, and tests that exercise failures rather than only happy paths.
+
+## Design and file layout
+
+The calculator has four modules:
+
+```text
+calc.h    public calculation interface
+calc.c    arithmetic implementation
+io.h      public input interface
+io.c      safe line, integer, and double readers
+main.c    menu, control flow, and output
+Makefile  build rules
+```
+
+`main` handles presentation. `io` handles reading and validation. `calc` knows nothing about the terminal. That separation makes the calculation easy to test in isolation and prevents a menu bug from being hidden inside an arithmetic function.
+
+## The calculation interface
+
+Define an operation type and one function that performs it. The function returns success or failure and writes its answer through a pointer:
+
+```c
+/* calc.h */
+#ifndef CALC_H
+#define CALC_H
+
+typedef enum {
+    OP_ADD,
+    OP_SUB,
+    OP_MUL,
+    OP_DIV
+} Operation;
+
+int calculate(Operation op, double left, double right, double *result);
+
+#endif
+```
+
+```c
+/* calc.c */
+#include "calc.h"
+
+int calculate(Operation op, double left, double right, double *result)
+{
+    switch (op) {
+    case OP_ADD:
+        *result = left + right;
+        return 1;
+    case OP_SUB:
+        *result = left - right;
+        return 1;
+    case OP_MUL:
+        *result = left * right;
+        return 1;
+    case OP_DIV:
+        if (right == 0.0) {
+            return 0;
+        }
+        *result = left / right;
+        return 1;
+    }
+    return 0;
+}
+```
+
+Division by zero is a property of the calculation, so it is checked here, not in the menu. The caller still decides how to explain the failure to the user.
+
+## A safe input layer
+
+Using `scanf` directly makes it difficult to detect trailing garbage and to recover from a bad line. The module below reads a whole line with `fgets`, parses it with `strtol` or `strtod`, and rejects anything left over.
+
+```c
+/* io.h */
+#ifndef IO_H
+#define IO_H
+
+#include <stddef.h>
+
+typedef enum {
+    IO_EOF = -1,
+    IO_INVALID = 0,
+    IO_OK = 1
+} IoStatus;
+
+int read_line(const char *prompt, char *buffer, size_t size);
+IoStatus read_int(const char *prompt, int *value);
+IoStatus read_double(const char *prompt, double *value);
+
+#endif
+```
+
+```c
+/* io.c */
+#include "io.h"
+
+#include <ctype.h>
+#include <errno.h>
+#include <limits.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+int read_line(const char *prompt, char *buffer, size_t size)
+{
+    if (size == 0) {
+        return 0;
+    }
+    if (prompt != NULL) {
+        fputs(prompt, stdout);
+        fflush(stdout);
+    }
+    if (fgets(buffer, (int)size, stdin) == NULL) {
+        return 0;
+    }
+
+    size_t length = strlen(buffer);
+    if (length > 0 && buffer[length - 1] == '\n') {
+        buffer[length - 1] = '\0';
+        return 1;
+    }
+
+    int ch = getchar();
+    if (ch == '\n' || ch == EOF) {
+        return 1;
+    }
+    while ((ch = getchar()) != '\n' && ch != EOF) {
+        /* discard the rest of an oversized line */
+    }
+    return -1;
+}
+
+IoStatus read_int(const char *prompt, int *value)
+{
+    char line[64];
+    char *end;
+    long parsed;
+
+    int status = read_line(prompt, line, sizeof line);
+    if (status == 0) {
+        return IO_EOF;
+    }
+    if (status < 0) {
+        return IO_INVALID;
+    }
+
+    errno = 0;
+    parsed = strtol(line, &end, 10);
+    while (isspace((unsigned char)*end)) {
+        end++;
+    }
+    if (end == line || *end != '\0' || errno == ERANGE
+        || parsed < INT_MIN || parsed > INT_MAX) {
+        return IO_INVALID;
+    }
+
+    *value = (int)parsed;
+    return IO_OK;
+}
+
+IoStatus read_double(const char *prompt, double *value)
+{
+    char line[128];
+    char *end;
+    double parsed;
+
+    int status = read_line(prompt, line, sizeof line);
+    if (status == 0) {
+        return IO_EOF;
+    }
+    if (status < 0) {
+        return IO_INVALID;
+    }
+
+    errno = 0;
+    parsed = strtod(line, &end);
+    while (isspace((unsigned char)*end)) {
+        end++;
+    }
+    if (end == line || *end != '\0' || errno == ERANGE) {
+        return IO_INVALID;
+    }
+
+    *value = parsed;
+    return IO_OK;
+}
+```
+
+The trailing whitespace loop allows a line such as `42   ` while still rejecting `42abc`. `errno` detects range overflow. `read_line` returns 1 for a complete line, 0 at end of input, and -1 after discarding an overlong line; the numeric readers turn that last case into `IO_INVALID`. The distinction matters: `IO_EOF` lets the menu exit cleanly when input ends, while `IO_INVALID` lets it ask again.
+
+## The menu and output
+
+`main` maps the numeric choice to an `Operation`, keeps asking on invalid input, and prints exactly one result per successful calculation:
+
+```c
+/* main.c */
+#include "calc.h"
+#include "io.h"
+
+#include <stdio.h>
+
+static void print_menu(void)
+{
+    puts("\n1. Add");
+    puts("2. Subtract");
+    puts("3. Multiply");
+    puts("4. Divide");
+    puts("5. Quit");
+}
+
+static int operation_for_choice(int choice, Operation *op)
+{
+    switch (choice) {
+    case 1: *op = OP_ADD; return 1;
+    case 2: *op = OP_SUB; return 1;
+    case 3: *op = OP_MUL; return 1;
+    case 4: *op = OP_DIV; return 1;
+    default: return 0;
+    }
+}
+
+int main(void)
+{
+    int choice;
+
+    print_menu();
+
+    for (;;) {
+        IoStatus status = read_int("Choice: ", &choice);
+        if (status == IO_EOF) {
+            puts("\nGoodbye.");
+            return 0;
+        }
+        if (status == IO_INVALID) {
+            puts("Enter a whole number from 1 to 5.");
+            continue;
+        }
+        if (choice == 5) {
+            puts("Goodbye.");
+            return 0;
+        }
+
+        Operation op;
+        if (!operation_for_choice(choice, &op)) {
+            puts("Choose 1 through 5.");
+            continue;
+        }
+
+        double left;
+        double right;
+        double result;
+        if (read_double("First number: ", &left) != IO_OK
+            || read_double("Second number: ", &right) != IO_OK) {
+            puts("Both values must be valid numbers.");
+            continue;
+        }
+
+        if (!calculate(op, left, right, &result)) {
+            puts("Division by zero is not allowed.");
+            continue;
+        }
+
+        printf("Result: %.10g\n", result);
+        print_menu();
+    }
+}
+```
+
+`%.10g` prints up to ten significant digits without trailing zeros, which suits a general calculator. If you need fixed money formatting, use `%.2f` and handle currency separately.
+
+## Build with a Makefile
+
+```text
+CC := cc
+CFLAGS := -std=c17 -Wall -Wextra -Wpedantic -O2
+OBJ := main.o io.o calc.o
+TARGET := calc
+
+all: $(TARGET)
+
+$(TARGET): $(OBJ)
+	$(CC) $(CFLAGS) $(OBJ) -o $@
+
+%.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+main.o: main.c calc.h io.h
+io.o: io.c io.h
+calc.o: calc.c calc.h
+
+.PHONY: clean
+clean:
+	rm -f $(OBJ) $(TARGET)
+```
+
+The header dependencies are deliberate. If `calc.h` changes, `main.o` and `calc.o` must be rebuilt. A pattern rule alone does not know that.
+
+## Test the edge cases
+
+```bash
+make
+printf '4\n8\n0\n3\n2.5\n4\n5\n' | ./calc
+printf '9\n1\nabc\n2\n-3.5\n2\n5\n' | ./calc
+```
+
+The first run should report division by zero, then calculate `2.5 * 4` as 10. The second should reject choice 9, reject `abc`, then calculate `-3.5 - 2` as -5.5. Also test an empty line, a very large number such as `1e309`, a negative divisor, and end of input. All should leave the program responsive or exit cleanly.
+
+## Common mistakes
+
+- Calling `scanf` and ignoring its return value, then using an uninitialized number.
+- Reading a number with `fgets` and never checking for leftover characters.
+- Dividing without checking for zero, or checking only in the menu.
+- Printing an error and then using the invalid result anyway.
+- Forgetting to add `calc.c` or `io.c` to the link step, which produces undefined references.
+- Changing a header without rebuilding dependent object files.
+- Using floating-point equality for anything other than an exact zero check.
+
+## Practice
+
+1. Add exponentiation using `pow` from the math library. Update the Makefile to link with `-lm`, and reject undefined cases such as zero to a negative power.
+2. Add a memory feature: after a calculation, allow the user to reuse the previous result as the first operand. Keep the stored value in `main`, not in a global.
+3. Write a separate test program that calls `calculate` directly with every operation, division by zero, negative values, and very small nonzero values. Build it with the same `calc.o`.
+4. Improve recovery when `fgets` truncates an overlong line: return a distinct status for "line too long" and make the menu print a precise message.
+5. Add a decimal-precision setting for the output and test it with values that round, such as 2.675.
+6. Replace the numeric menu with a command parser that accepts `add`, `sub`, `mul`, `div`, and `quit`. Keep the calculation module unchanged, which is the point of the separation.

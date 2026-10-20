@@ -1,0 +1,161 @@
+Copying is the safe default in C++, but copying a large buffer when the source is about to disappear is wasteful. Move semantics let an object transfer its resources instead of duplicating them. Smart pointers then apply the same ownership discipline to dynamically allocated objects, so you can express who owns what in the type system rather than in comments.
+
+## Lvalues, rvalues, and what `std::move` actually does
+
+A named object is an lvalue: it has an address and a lifetime beyond the current expression. A temporary produced by a function or a literal is an rvalue. Move construction is selected when the source is an rvalue, because the compiler can assume nobody else needs its contents.
+
+```cpp
+#include <string>
+#include <utility>
+
+std::string source = "a fairly long label";
+std::string destination = std::move(source);
+```
+
+`std::move` does not move anything. It is a cast that produces an rvalue reference, telling overload resolution, "you may treat this object as expendable." The actual transfer happens in the move constructor or move assignment operator. For an `int`, moving and copying are identical. For a `std::string` with a heap buffer, moving can steal the pointer.
+
+After a move, the source is in a **valid but unspecified state**. You may destroy it, assign to it, or call operations with no preconditions. You may not assume it is empty, and you should not read it unless its documentation gives a stronger guarantee. `std::string` is typically empty after a move, but that is an implementation detail, not a contract.
+
+Returning a local by value is already efficient. The compiler performs copy elision or treats the local as an rvalue automatically. Writing `return std::move(local);` can prevent the optimization and is a common mistake.
+
+## Move constructor and move assignment
+
+A type that owns a resource directly must define how ownership transfers. This move-only file wrapper shows the shape:
+
+```cpp
+#include <cstdio>
+#include <stdexcept>
+#include <utility>
+
+class File {
+public:
+    explicit File(const char* path)
+        : handle_(std::fopen(path, "r")) {
+        if (handle_ == nullptr) {
+            throw std::runtime_error{"could not open file"};
+        }
+    }
+
+    ~File() {
+        if (handle_ != nullptr) {
+            std::fclose(handle_);
+        }
+    }
+
+    File(const File&) = delete;
+    File& operator=(const File&) = delete;
+
+    File(File&& other) noexcept
+        : handle_(std::exchange(other.handle_, nullptr)) {}
+
+    File& operator=(File&& other) noexcept {
+        if (this != &other) {
+            if (handle_ != nullptr) {
+                std::fclose(handle_);
+            }
+            handle_ = std::exchange(other.handle_, nullptr);
+        }
+        return *this;
+    }
+
+private:
+    std::FILE* handle_;
+};
+```
+
+The move constructor steals the handle and sets the source to `nullptr`, so the destructor of the moved-from object has nothing to release. Move assignment first releases the destination's existing resource, then steals. The self-assignment check prevents an object from closing its own handle.
+
+Mark moves `noexcept` whenever possible. Standard containers can use move operations during reallocation only when they know the move will not throw; otherwise they may fall back to copying to preserve their exception guarantees. For a move-only type, a throwing move can still be used, but it weakens those guarantees.
+
+## The rule of zero and the rule of five
+
+The **rule of five** says that if a class needs any one of these, it usually needs to consider all five: destructor, copy constructor, copy assignment, move constructor, and move assignment. Declaring a destructor suppresses implicit move generation, which is why hand-written resource wrappers often end up copying when the author expected a move.
+
+The **rule of zero** is the better default: design classes so their members already manage resources. A class holding a `std::string`, `std::vector`, and `std::unique_ptr` needs no destructor and no copy or move operations; the compiler-generated ones do the right thing. Write the five special members only when you are wrapping a raw resource yourself, and then write or delete all of them deliberately.
+
+Use `= default` for operations that should be generated, and `= delete` for operations that must not exist. Deleting copying makes ownership exclusive and moves the error to compile time.
+
+## `std::unique_ptr`: exclusive ownership
+
+`std::unique_ptr<T>` owns one object. It cannot be copied, only moved. It has no reference-counting overhead, and `std::make_unique` allocates and constructs in one expression with exception safety.
+
+```cpp
+#include <memory>
+
+struct Widget {
+    int id;
+    void run() const;
+};
+
+auto widget = std::make_unique<Widget>(Widget{7});
+widget->run();
+
+std::unique_ptr<Widget> transferred = std::move(widget);
+if (!widget) {
+    // ownership moved away
+}
+
+void consume(std::unique_ptr<Widget> owned); // takes ownership
+```
+
+Pass a `unique_ptr` by value only when the function should take ownership. If a function merely uses the object, take `Widget&` or `const Widget&`; taking `const std::unique_ptr<Widget>&` couples the caller to a particular ownership model and is usually unnecessary. Return `unique_ptr` from factories by value; move semantics and elision make that efficient.
+
+A custom deleter is useful for C APIs:
+
+```cpp
+struct FileCloser {
+    void operator()(std::FILE* file) const noexcept {
+        if (file != nullptr) {
+            std::fclose(file);
+        }
+    }
+};
+
+using FilePtr = std::unique_ptr<std::FILE, FileCloser>;
+```
+
+Now a `FilePtr` can be returned, stored, and moved without a hand-written destructor.
+
+## `std::shared_ptr` and `std::weak_ptr`: shared ownership
+
+`std::shared_ptr<T>` shares ownership through a reference count. The object is destroyed when the last owner goes away. Copying a `shared_ptr` increments the count; destroying or resetting one decrements it. Prefer `std::make_shared<T>` because it commonly combines the object and control block in one allocation.
+
+```cpp
+#include <memory>
+
+auto session = std::make_shared<Session>();
+auto second_owner = session; // count is now two
+
+std::weak_ptr<Session> observer = session;
+if (auto locked = observer.lock()) {
+    locked->use();
+} else {
+    // the session has already been destroyed
+}
+```
+
+`weak_ptr` observes without owning. `lock()` returns a `shared_ptr` if the object still exists and an empty one otherwise. This is the standard way to avoid reference cycles: if a parent owns children with `shared_ptr`, children should point back with `weak_ptr`. Two objects holding `shared_ptr` to each other will never reach a count of zero.
+
+The reference count is thread-safe, but the pointed-to object is not. Two threads reading and writing the same `Session` still need synchronization; `shared_ptr` protects its own bookkeeping, not your data.
+
+## Choosing an ownership model
+
+Start with values and `unique_ptr`. Use `shared_ptr` only when lifetime is genuinely shared and no single component can be the owner. Use references and raw pointers for non-owning observation, and document how long the observer may live. A function that borrows an object should accept a reference; a function that transfers responsibility should accept a `unique_ptr` by value.
+
+## Common mistakes
+
+- Thinking `std::move` performs the move; it only enables overload resolution to choose a move.
+- Moving from a `const` object, which typically selects the copy constructor instead.
+- Using a moved-from object as though it still held its old value.
+- Writing `return std::move(local);` and blocking copy elision.
+- Creating two `shared_ptr` instances from the same raw pointer, producing two independent counts and a double delete.
+- Forgetting to break a `shared_ptr` cycle with `weak_ptr`.
+- Letting a destructor throw, especially during stack unwinding.
+
+## Practice
+
+1. Compile the `File` class and create a `std::vector<File>` by pushing temporary `File` objects. Confirm that reallocation moves them rather than attempting to copy.
+2. Rewrite a class that owns a `std::vector<int>` by hand so it uses the rule of zero. Remove the destructor, copy operations, and move operations, and verify that copying and moving still work.
+3. Write a factory returning `std::unique_ptr<Widget>` and a function that takes ownership by value. Call it with `std::move`, then check that the original pointer is empty.
+4. Build a parent-child tree with `shared_ptr` children and `weak_ptr` parent links. Create a cycle by changing the parent link to `shared_ptr`, observe the leak with a destructor print, then fix it.
+5. Explain why a `shared_ptr` copy is more expensive than a `unique_ptr` move, and why that cost is sometimes justified.

@@ -1,0 +1,180 @@
+The standard library already contains most of the loops you were about to write. Choosing the right algorithm makes intent visible, reduces off-by-one errors, and often produces better code because the implementation is tuned and tested. Ranges add projections and lazy pipelines on top of that foundation, but they also make it easier to write clever code that nobody wants to debug. The goal is precise, boring, measurable code.
+
+## Start with the operation you mean
+
+Name the operation before reaching for a loop:
+
+| Intent | Algorithm |
+| --- | --- |
+| Is any element true? | `std::ranges::any_of` |
+| Are all elements true? | `std::ranges::all_of` |
+| Find the first match | `std::ranges::find_if` |
+| Count matches | `std::ranges::count_if` |
+| Transform every element | `std::ranges::transform` |
+| Keep matching elements | `std::ranges::copy_if` |
+| Sum or fold | `std::accumulate` |
+| Order elements | `std::ranges::sort` |
+| Find in sorted data | `std::ranges::lower_bound` |
+| Remove matching elements | `std::erase_if` |
+
+A raw loop is still the right tool for a state machine, an early exit that depends on several pieces of state, or an algorithm that does not map cleanly to a standard one. The mistake is writing a manual loop for a well-known operation and hiding the intent in indices.
+
+## Lambdas and capture
+
+Algorithms are parameterized by predicates and projections. A lambda creates a closure object at the point of use:
+
+```cpp
+#include <algorithm>
+#include <iostream>
+#include <vector>
+
+std::vector<int> values{4, 8, 15, 16, 23, 42};
+const int threshold = 10;
+
+const auto above = [threshold](int value) {
+    return value > threshold;
+};
+
+std::cout << std::ranges::count_if(values, above) << '\n';
+```
+
+`threshold` is captured by value when the lambda is created. A reference capture, written with `&`, observes the original variable and can dangle if the lambda outlives it. Capture only what the lambda needs, and prefer value capture for small objects. Initialized captures are useful when a computed value should be stored once:
+
+```cpp
+const auto limit = values.size() / 2;
+const auto inFirstHalf = [limit](std::size_t index) {
+    return index < limit;
+};
+```
+
+A lambda is not a special kind of function pointer. It is an object with an `operator()`, which is why it can carry state and why passing it to an algorithm typically allows inlining.
+
+## Projections make the element's shape explicit
+
+Consider records rather than bare integers:
+
+```cpp
+#include <functional>
+#include <string>
+#include <vector>
+
+struct Employee {
+    std::string name;
+    int age{};
+    double salary{};
+};
+
+std::vector<Employee> staff{
+    {"Ada", 36, 95000.0},
+    {"Grace", 45, 120000.0},
+    {"Linus", 28, 70000.0},
+};
+
+std::ranges::sort(staff, std::less{}, &Employee::name);
+auto found = std::ranges::find(staff, std::string{"Ada"}, &Employee::name);
+```
+
+The projection `&Employee::name` tells the algorithm which part of each element to compare. This replaces a verbose comparator and makes the sorting key obvious. Projections also work with computed lambdas:
+
+```cpp
+std::ranges::sort(staff, std::greater{}, [](const Employee& employee) {
+    return employee.salary;
+});
+```
+
+The comparator receives the projected values, not the original elements. That distinction matters when the projection returns a reference: the algorithm compares the referenced data, not a temporary copy.
+
+## Compose views, but respect lifetimes
+
+Views are lightweight, lazy adaptors over a range. They do not copy the underlying elements, and they do not perform work until iteration:
+
+```cpp
+#include <ranges>
+#include <string>
+
+auto names = staff
+    | std::views::filter([](const Employee& employee) {
+          return employee.salary >= 80000.0;
+      })
+    | std::views::transform([](const Employee& employee) -> const std::string& {
+          return employee.name;
+      })
+    | std::views::take(5);
+
+for (const std::string& name : names) {
+    std::cout << name << '\n';
+}
+```
+
+Each stage describes an operation; the loop pulls values through the pipeline. `filter` keeps elements, `transform` maps them, and `take` stops early. The projection returns a reference because the names live in `staff`, which is still alive. If the view outlives `staff`, the references dangle.
+
+The same danger appears with a temporary container:
+
+```cpp
+auto names = makeStaff() | std::views::transform([](const Employee& e) {
+    return e.name;
+}); // makeStaff() has already been destroyed
+```
+
+The view stores a reference to a temporary that no longer exists. Materialize the data when ownership must change:
+
+```cpp
+std::vector<std::string> owned;
+for (const std::string& name : names) {
+    owned.push_back(name);
+}
+```
+
+C++23 adds `std::ranges::to` for materializing views in some standard libraries, but a loop is portable and perfectly clear. Do not chain so many adaptors that a reader has to simulate the pipeline in their head.
+
+## Complexity is part of the interface
+
+Choose an algorithm with the data structure in mind:
+
+- `std::ranges::find` is linear. Repeated searches in a large vector are often a sign that a set, map, or sorted representation would be better.
+- `std::ranges::sort` is linearithmic in comparisons. Sorting once before many binary searches can beat repeated linear scans; sorting once for a single lookup usually cannot.
+- `std::map` lookup is logarithmic and preserves order. `std::unordered_map` is average constant time but has hashing costs, worst-case behavior, and no useful iteration order.
+- `std::map` and `std::list` allocate per element and have poor locality; a sorted `std::vector` is frequently faster for read-mostly data even though its algorithmic complexity looks similar.
+- `std::erase_if` on a vector is linear and shifts the remaining elements. Erasing one element in a loop with the naive `erase` pattern is quadratic.
+
+`std::sort` is not stable. Use `std::stable_sort` when equal elements must preserve their original relative order, and pay its extra time and memory. `std::partial_sort` and `std::nth_element` solve selection problems without fully ordering the range.
+
+`std::accumulate` folds left to right. Watch the initial value and the accumulator type: summing `int` values into `int` can overflow, and summing integers into an integer can silently truncate a fractional result. Pass a wider or floating-point initial value when that is the intended arithmetic.
+
+## Avoid premature cleverness
+
+Ranges are expressive, but a pipeline is not automatically better than a loop. Views add debugger complexity, their element types can be surprising, and a chain of adaptors may obscure a simple operation. A direct loop with a well-named variable is often easier to review and just as fast.
+
+Measure before optimizing. A benchmark needs a release build, a realistic data size, repeated runs, and a guard against the optimizer deleting the work. Google Benchmark is the standard tool for microbenchmarks; a simple timing harness is acceptable for a first question, but treat its numbers as a hint, not a verdict:
+
+```cpp
+#include <chrono>
+
+template <typename Function>
+double milliseconds(Function&& function) {
+    const auto start = std::chrono::steady_clock::now();
+    function();
+    const auto end = std::chrono::steady_clock::now();
+    return std::chrono::duration<double, std::milli>(end - start).count();
+}
+```
+
+Run the measured operation enough times to dominate clock resolution, and ensure its result is observable. Compare algorithms on the data you actually have. A theoretically better complexity can lose to a contiguous linear scan at small sizes.
+
+## Common mistakes
+
+- Capturing a local by reference in a lambda that outlives the local.
+- Returning a view that refers to a destroyed container.
+- Using `std::remove_if` without erasing the removed tail.
+- Erasing from a `vector` inside a range-based loop.
+- Sorting with a comparator that is not a strict weak ordering, such as one that uses `<=` instead of `<`.
+- Assuming a view owns its elements or can be iterated after the source changes.
+- Replacing readable loops with pipelines that are clever but harder to debug.
+
+## Practice
+
+1. Given a `std::vector<int>`, use `count_if`, `any_of`, and `find_if` to answer three questions. Then replace one with a raw loop and explain which version communicates intent better.
+2. Sort a vector of employee records by salary descending using a projection, then find the first employee whose name matches a target.
+3. Build a pipeline that filters employees by age, extracts their names, and takes the first three. Materialize the names into a vector and verify the result.
+4. Create a view over a temporary vector, iterate it, and observe the dangling-reference bug under AddressSanitizer. Fix it by storing the vector or materializing the result.
+5. Benchmark `std::ranges::find` against `std::ranges::lower_bound` on a sorted vector of one million integers. Report the data size, build flags, and measurement method, not just the final number.

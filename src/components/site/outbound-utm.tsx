@@ -3,7 +3,7 @@
 import { useEffect } from 'react'
 
 const UTM_PARAMS = {
-  utm_source: 'mern-learn',
+  utm_source: 'nyxora-sync',
   utm_medium: 'referral',
   utm_campaign: 'outbound',
 } as const

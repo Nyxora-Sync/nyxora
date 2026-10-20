@@ -1,0 +1,145 @@
+Performance work starts with a measurement, not a rewrite. Most slow Python programs are slow because of an avoidable algorithmic cost, an unnecessary network round trip, or work repeated in a loop — not because the interpreter needs a clever trick. Profile first, change one thing, and measure again with realistic data.
+
+## Profile before optimizing
+
+`timeit` answers a narrow question: how long does this expression take? `cProfile` shows where a program spends its time.
+
+```bash
+python3 -m timeit -s "items = list(range(10_000))" "sum(items)"
+python3 -m cProfile -s cumulative -m taskman list
+```
+
+For a focused measurement inside code, use the profiler directly:
+
+```python
+import cProfile
+import pstats
+
+from taskman.pipeline import run_pipeline
+
+
+profiler = cProfile.Profile()
+profiler.enable()
+run_pipeline()
+profiler.disable()
+
+pstats.Stats(profiler).sort_stats("cumulative").print_stats(20)
+```
+
+Read the cumulative time column first: it includes work done by called functions. Then look at internal time to find functions that are expensive on their own. A profiler adds overhead and can distort very short calls, so profile a realistic workload. For production-shaped investigations, a sampling profiler such as pyinstrument is often easier to read.
+
+## Algorithmic costs dominate
+
+A list membership check scans until it finds a match. A set or dictionary lookup uses hashing and is constant time on average. Changing the container can matter more than any micro-optimization:
+
+```python
+import time
+
+items = list(range(100_000))
+needles = range(0, 200_000, 2)
+
+start = time.perf_counter()
+missing_from_list = [n for n in needles if n not in items]
+list_seconds = time.perf_counter() - start
+
+item_set = set(items)
+start = time.perf_counter()
+missing_from_set = [n for n in needles if n not in item_set]
+set_seconds = time.perf_counter() - start
+
+print(list_seconds, set_seconds)
+print(missing_from_list == missing_from_set)
+```
+
+The absolute numbers depend on the machine; the shape does not. Other common costs:
+
+- Repeated string concatenation in a loop is quadratic in the worst case. Collect parts in a list and use `"".join(parts)`.
+- Nested loops over the same data are often a sign that a dictionary index would turn a scan into a lookup.
+- Sorting inside a loop is usually unnecessary; sort once, then iterate.
+- Recomputing a pure function with the same arguments can be avoided with `functools.cache` or `lru_cache`, at the cost of memory.
+
+Caching only helps pure, expensive functions with repeatable inputs. An unbounded cache in a long-running service is a memory leak with good intentions; use `lru_cache(maxsize=...)` unless the key space is known to be small.
+
+## The GIL and the three concurrency models
+
+The standard CPython build has a Global Interpreter Lock. Only one thread executes Python bytecode at a time. Threads still help when the work waits on I/O, because the GIL is released during network and file operations. They do not make pure-Python CPU work faster. Free-threaded CPython builds exist, but the standard build remains the safe assumption for libraries and deployments.
+
+Choose the model based on the bottleneck:
+
+- **asyncio** for many concurrent network operations with async libraries. Lowest overhead per task, but every blocking call in the path must be removed or moved to a thread.
+- **Threads** for blocking I/O, legacy synchronous clients, and moderate concurrency. Shared memory is convenient but requires synchronization.
+- **Processes** for CPU-bound work. Each process has its own interpreter and GIL, so parallel CPU work is real; startup and data transfer are the cost.
+
+## Thread and process pools
+
+`concurrent.futures` gives both models the same interface:
+
+```python
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+
+def fetch(url: str) -> bytes:
+    with urllib.request.urlopen(url, timeout=10) as response:
+        return response.read()
+
+
+def download_all(urls: list[str]) -> dict[str, bytes]:
+    results: dict[str, bytes] = {}
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = {pool.submit(fetch, url): url for url in urls}
+        for future in as_completed(futures):
+            url = futures[future]
+            try:
+                results[url] = future.result()
+            except Exception as exc:
+                print(f"failed {url}: {exc}")
+    return results
+```
+
+`as_completed` yields results in completion order. Exceptions surface when you call `future.result()`, so handle them per task if one failure should not abort the batch. `pool.map` yields results in input order; it submits the whole iterable and raises when a failing result is consumed.
+
+CPU-bound work uses a process pool:
+
+```python
+from concurrent.futures import ProcessPoolExecutor
+from pathlib import Path
+
+
+def count_words(path: Path) -> int:
+    return len(path.read_text(encoding="utf-8").split())
+
+
+def main() -> None:
+    paths = list(Path("documents").glob("*.txt"))
+    with ProcessPoolExecutor() as pool:
+        totals = list(pool.map(count_words, paths))
+    print(sum(totals))
+
+
+if __name__ == "__main__":
+    main()
+```
+
+The main guard matters on platforms that start processes with `spawn`. Arguments and return values must be picklable, and each process imports your module. Process pools are a poor fit for tiny tasks: the overhead of starting workers and shipping data can exceed the work itself.
+
+## Measure the whole system
+
+Benchmark end to end with data sizes and concurrency levels that resemble production. Warm up caches, run several repetitions, and report a distribution rather than one lucky number. Measure memory separately with `tracemalloc`; a faster program that holds everything in RAM is not an improvement. In services, measure latency percentiles and queue depth, not just average CPU time.
+
+Avoid these traps:
+
+- Optimizing the function that looks complicated instead of the one the profiler identifies.
+- Comparing implementations with different input sizes or cache states.
+- Adding threads to CPU-bound code and wondering why nothing improves.
+- Sharing mutable state across threads without locks.
+- Launching one process per item instead of using a pool with chunks.
+- Blocking the event loop with `time.sleep`, synchronous database drivers, or CPU-heavy parsing.
+
+## Practice
+
+1. Profile a script that processes a large text file. Identify the top three functions by cumulative time, then by internal time.
+2. Replace a list membership check with a set and measure the difference at 1,000 and 100,000 items. Explain why the gap grows.
+3. Download 20 URLs with a thread pool capped at 5 workers, then with 20 workers. Record elapsed time and failures. Do not assume more concurrency is better.
+4. Write a CPU-bound word-count program and run it with `ThreadPoolExecutor` and `ProcessPoolExecutor`. Compare results on at least four files and explain the difference.
+5. Add `functools.lru_cache` to an expensive pure function, measure the hit rate and memory growth, then set a bounded cache size and justify it.

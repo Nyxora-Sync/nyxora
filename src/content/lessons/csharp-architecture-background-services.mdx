@@ -1,0 +1,181 @@
+A production service is more than working endpoints. It has boundaries that keep business rules out of HTTP handlers, dependency lifetimes that do not leak state between requests, health signals an orchestrator can trust, and resilience around the network calls it does not control. This lesson covers the decisions that determine whether the application survives its first real incident.
+
+## Dependency injection lifetimes
+
+ASP.NET Core registers services in one of three lifetimes:
+
+```text
+Singleton   one instance for the process lifetime
+Scoped      one instance per request or per explicitly created scope
+Transient   a new instance every time it is resolved
+```
+
+```csharp
+builder.Services.AddSingleton<IClock, SystemClock>();
+builder.Services.AddScoped<IOrderRepository, EfOrderRepository>();
+builder.Services.AddScoped<OrderService>();
+builder.Services.AddTransient<INotificationSender, SmtpNotificationSender>();
+```
+
+The rule that causes the most bugs: **a singleton must not depend on a scoped service**. A singleton is created once, so it captures the first scoped instance forever. This is a captive dependency. It usually appears as a `DbContext` shared across requests, producing stale data, threading errors, and runaway change tracking.
+
+```csharp
+// Wrong: ReportService is a singleton, LibraryDb is scoped.
+builder.Services.AddSingleton<ReportService>();
+```
+
+Validate the container at startup instead of discovering this in production:
+
+```csharp
+builder.Host.UseDefaultServiceProvider(options =>
+{
+    options.ValidateScopes = true;
+    options.ValidateOnBuild = true;
+});
+```
+
+`ValidateOnBuild` resolves the entire registration graph and fails fast on missing services. `ValidateScopes` rejects resolving a scoped service from the root provider. Both are enabled by default in Development; turn them on explicitly in every environment.
+
+Use a scope factory when a singleton genuinely needs scoped work, such as a background worker:
+
+```csharp
+using var scope = scopeFactory.CreateScope();
+var repository = scope.ServiceProvider.GetRequiredService<IOrderRepository>();
+```
+
+## Clean boundaries
+
+A useful default is four layers with dependencies pointing inward:
+
+```text
+Api             HTTP, DTOs, auth, validation, composition root
+Application     use cases, interfaces, transaction boundaries
+Domain          entities, value objects, invariants
+Infrastructure  EF Core, email, storage, external APIs
+```
+
+The domain knows nothing about HTTP or SQL. The application layer depends on interfaces it owns; infrastructure implements them. The API wires everything together.
+
+```csharp
+public interface IOrderRepository
+{
+    Task<Order?> FindAsync(Guid id, CancellationToken ct);
+    Task SaveAsync(Order order, CancellationToken ct);
+}
+
+public sealed class OrderService(IOrderRepository orders, IClock clock)
+{
+    public async Task<Order> PlaceAsync(
+        Guid customerId,
+        IReadOnlyList<OrderLine> lines,
+        CancellationToken ct)
+    {
+        var order = Order.Place(customerId, lines, clock.UtcNow);
+        await orders.SaveAsync(order, ct);
+        return order;
+    }
+}
+```
+
+`OrderService` has no `DbContext`, no `HttpContext`, and no JSON. It can be tested with a fake repository and a fixed clock. That is the point of the boundary: the hard dependencies live at the edges.
+
+Do not create an interface for every class. Introduce one when there is a real seam — a database, an external service, a clock, a policy that varies, or a test boundary. An interface with one implementation and no test use is mostly noise.
+
+## Configuration and options in production
+
+Bind configuration to validated options and inject the options interface:
+
+```csharp
+builder.Services.AddOptions<RedisOptions>()
+    .Bind(builder.Configuration.GetSection("Redis"))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+```
+
+`IOptions<T>` is a singleton for values fixed at startup. `IOptionsSnapshot<T>` is scoped and re-reads per request. `IOptionsMonitor<T>` is a singleton that receives change notifications. Choose based on whether a value may change without a restart.
+
+Configuration precedence ends with environment variables and command-line arguments, which is what containers use. Secrets belong in the platform's secret store, injected at runtime. They must never be baked into an image, committed to `appsettings.json`, or printed in logs.
+
+## Health checks
+
+Liveness and readiness answer different questions. Liveness asks whether the process should be restarted. Readiness asks whether it should receive traffic. A database outage should fail readiness, not liveness; otherwise the orchestrator restarts healthy processes while the database is down.
+
+```csharp
+builder.Services.AddHealthChecks()
+    .AddDbContextCheck<LibraryDb>("database")
+    .AddCheck("self", () => HealthCheckResult.Healthy());
+
+app.MapHealthChecks("/health/live", new HealthCheckOptions
+{
+    Predicate = _ => false
+});
+
+app.MapHealthChecks("/health/ready");
+```
+
+The liveness endpoint runs no checks and returns 200 while the process is alive. The readiness endpoint runs the database check. Keep health endpoints cheap and unauthenticated, and do not include sensitive details in the response. The EF Core health check comes from the `Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore` package.
+
+## Resilience for outbound calls
+
+Every network call needs a timeout. Retries help with transient failures, but they amplify load and can duplicate writes. Use the standard resilience handler for `HttpClient`:
+
+```csharp
+builder.Services.AddHttpClient<InventoryClient>(client =>
+{
+    client.BaseAddress = new Uri("https://inventory.internal");
+    client.Timeout = TimeSpan.FromSeconds(30);
+})
+.AddStandardResilienceHandler(options =>
+{
+    options.Retry.MaxRetryAttempts = 3;
+    options.Retry.UseJitter = true;
+    options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(5);
+    options.TotalRequestTimeout.Timeout = TimeSpan.FromSeconds(20);
+});
+```
+
+The handler adds retries with exponential backoff and jitter, a circuit breaker, and timeouts. Retry only idempotent operations, or make writes idempotent with a request key. A `POST` that charges a card must not be retried blindly. Add a timeout to every client, set a budget below the caller's timeout, and test the failure path with a stub that returns 503 or hangs. The standard handler is provided by the `Microsoft.Extensions.Http.Resilience` package.
+
+## Observability
+
+Logs tell you what happened to one request; metrics tell you whether the system is healthy; traces show where time went across services. OpenTelemetry is the vendor-neutral plumbing:
+
+```csharp
+builder.Services.AddOpenTelemetry()
+    .WithTracing(tracing => tracing
+        .AddAspNetCoreInstrumentation()
+        .AddHttpClientInstrumentation()
+        .AddOtlpExporter())
+    .WithMetrics(metrics => metrics
+        .AddAspNetCoreInstrumentation()
+        .AddRuntimeInstrumentation()
+        .AddOtlpExporter());
+```
+
+Instrument custom operations with an `ActivitySource` and business counters with a `Meter`, but keep cardinals low. A metric tagged by user ID or raw URL will explode the time-series database. Logs should include a trace ID and a request ID, never passwords, tokens, or full personal records. Add the OpenTelemetry hosting, ASP.NET Core instrumentation, HTTP instrumentation, runtime instrumentation, and OTLP exporter packages to the project.
+
+## Deployment concerns
+
+Build the image once, promote the same digest through environments, and inject configuration at runtime. Run migrations as a separate release step with a backup and a rollback plan. Make schema changes forward-compatible during rolling deploys: add a nullable column, deploy code that writes both shapes, backfill, then remove the old column in a later release.
+
+Run as a non-root user, set CPU and memory limits, terminate TLS at the ingress, and configure graceful shutdown longer than your slowest in-flight request. Scale stateless API replicas horizontally; run background workers as a separate deployment so a traffic spike does not starve them. Collect logs and metrics centrally, and alert on symptoms users feel: error rate, latency, queue depth, and saturation.
+
+## Common mistakes
+
+- A singleton holding a `DbContext` or any scoped dependency.
+- Using the service locator pattern (`IServiceProvider.GetService`) throughout business code.
+- Health checks that call the database on the liveness endpoint.
+- Retrying non-idempotent writes without an idempotency key.
+- Setting a client timeout shorter than the retry policy's total budget.
+- Logging request bodies or tokens in the name of observability.
+- Baking secrets into an image or a committed configuration file.
+- Applying migrations from every replica at startup.
+
+## Practice
+
+1. Draw the dependency graph of an existing API. Identify one class that mixes HTTP concerns with business rules and move the rule into an application service.
+2. Register the service graph with `ValidateScopes` and `ValidateOnBuild`. Deliberately introduce a captive dependency and confirm startup fails.
+3. Add liveness and readiness endpoints. Stop the database and verify readiness fails while liveness stays healthy.
+4. Wrap an outbound HTTP call with the standard resilience handler. Use a stub server to test a timeout, a 503, and a success after one retry.
+5. Add OpenTelemetry tracing and follow one request through the API and its outbound call. Confirm the trace ID appears in logs.
+6. Write a deployment checklist covering secrets, migrations, health checks, resource limits, shutdown timeout, and rollback.

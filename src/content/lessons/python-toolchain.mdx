@@ -1,0 +1,172 @@
+Python is small enough to learn in an afternoon and large enough to build production systems with for decades. The difference between a beginner and a professional is rarely syntax. It is the toolchain: knowing which interpreter runs your code, where dependencies live, how a project is laid out, and how to read the errors Python gives you.
+
+This lesson sets up that foundation. You will run a first program, create an isolated environment, organize a project, and learn the commands you will use every day.
+
+## The interpreter and the script
+
+Python is an interpreted language. The `python3` executable reads your source, compiles it to bytecode internally, and executes it. You can use it in two modes.
+
+The **REPL** (read-eval-print loop) is for quick experiments:
+
+```bash
+python3
+```
+
+```text
+Python 3.12.7 (main, Oct  1 2024, 12:00:00) [GCC 14.2.0] on linux
+Type "help", "copyright", "credits" or "license" for more information.
+>>> 2 + 2
+4
+>>> name = "Aki"
+>>> f"Hello, {name}"
+'Hello, Aki'
+>>> exit()
+```
+
+The REPL forgets everything when you exit. For anything you want to keep, write a **script** — a `.py` file executed from top to bottom:
+
+```python
+# hello.py
+def main() -> None:
+    name = input("Your name: ").strip() or "world"
+    print(f"Hello, {name}!")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+```bash
+python3 hello.py
+```
+
+On most Linux and macOS systems, `python` may be missing or may point to an old version. Use `python3` explicitly. On Windows, the launcher `py -3.12` selects a version reliably.
+
+## Virtual environments
+
+Every project needs its own dependency set. Installing packages globally means one project's upgrade breaks another, and eventually your operating system's own Python tools. A virtual environment is a directory containing a private interpreter link and a private `site-packages` folder.
+
+```bash
+mkdir invoice-tool
+cd invoice-tool
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install --upgrade pip
+```
+
+On Windows PowerShell, activation is:
+
+```bash
+.venv\Scripts\Activate.ps1
+```
+
+Your prompt will show `(.venv)`. Check which interpreter and pip you are actually using:
+
+```bash
+python3 -c "import sys; print(sys.executable)"
+python3 -m pip --version
+```
+
+Always prefer `python3 -m pip` over a bare `pip`. It guarantees that pip installs into the same interpreter running your code. Use `deactivate` to leave the environment, and never commit `.venv` to Git.
+
+## A project layout that scales
+
+A single file is fine for a script. As soon as you have tests or reusable code, give the project a shape:
+
+```text
+invoice-tool/
+├── pyproject.toml
+├── README.md
+├── .gitignore
+├── src/
+│   └── invoice_tool/
+│       ├── __init__.py
+│       ├── __main__.py
+│       ├── cli.py
+│       └── totals.py
+└── tests/
+    └── test_totals.py
+```
+
+A minimal `pyproject.toml` is enough to make the package installable:
+
+```text
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "invoice-tool"
+version = "0.1.0"
+requires-python = ">=3.12"
+```
+
+The `src/` layout prevents a subtle bug: if the package sits in the repository root, running Python from that directory imports the folder directly, masking packaging mistakes. With `src/`, an editable install is required to import the package, which is exactly what users of your package will need.
+
+Package names use lowercase with underscores. The directory `invoice_tool` becomes the import name:
+
+```python
+from invoice_tool.totals import line_total
+```
+
+## The main guard
+
+The `if __name__ == "__main__"` block is not decoration. When Python imports a module, it sets `__name__` to the module name. When it runs the file as the entry point, it sets `__name__` to the string `"__main__"`.
+
+```python
+# src/invoice_tool/__main__.py
+from invoice_tool.cli import main
+
+if __name__ == "__main__":
+    main()
+```
+
+This distinction lets tests import your functions without launching the command-line interface. It also makes the package runnable:
+
+```bash
+python3 -m invoice_tool
+```
+
+Python looks for `invoice_tool/__main__.py` and executes it. You can also run a specific module with `python3 -m invoice_tool.cli`. Module execution resolves imports relative to your installed package, which is more reliable than running a file by path.
+
+## Formatting and linting with Ruff
+
+Ruff is a fast formatter and linter that replaces several older tools. Install it inside the environment and add a small configuration:
+
+```bash
+python3 -m pip install ruff
+ruff format .
+ruff check .
+ruff check --fix .
+```
+
+```text
+# pyproject.toml
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+```
+
+`ruff format` ends debates about spacing and quotes. `ruff check` catches unused imports, undefined names, import order, and common bugs. Run both before every commit. A formatter is not a correctness tool, but it removes an entire category of noise from code review.
+
+## Common beginner errors
+
+Read tracebacks from the bottom up. The last line is the error type and message; the lines above show the call path.
+
+- `ModuleNotFoundError: No module named 'requests'` — the package is not installed in the active environment, or the virtual environment is not activated. Check `sys.executable`.
+- `IndentationError` — Python uses indentation as syntax. Mixing tabs and spaces, or misaligning a block, breaks parsing.
+- `NameError: name 'total' is not defined` — a typo, or the variable was defined inside another function and is not in scope.
+- `SyntaxError` — often a missing colon, parenthesis, or quote on the indicated line, sometimes on the line before it.
+- `python: command not found` — use `python3` or the Windows `py` launcher.
+- A package installs successfully but the import fails — pip and Python are different installations. Use `python3 -m pip`.
+
+## Practice
+
+1. Create `hello.py` with a `main()` function and a main guard. Run it with `python3 hello.py`, then import it from a second file and confirm that the greeting does not run on import.
+2. Create a project named `greet_tool` with the `src/` layout. Add `__init__.py` and `__main__.py`, install it in editable mode with `python3 -m pip install -e .`, and run `python3 -m greet_tool`.
+3. Create and activate a virtual environment. Print `sys.executable`, install Ruff, format the project, and fix every lint finding.
+4. Deliberately misspell an import and a variable. Read both tracebacks from the bottom up and explain the difference between the errors.
+5. Add `.venv/`, `__pycache__/`, and `*.egg-info/` to `.gitignore`, then verify with `git status` that no environment files are staged.

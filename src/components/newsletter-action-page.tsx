@@ -37,7 +37,7 @@ export function NewsletterActionPage({
                 </h1>
                 <p className="text-sm leading-relaxed text-muted-foreground">
                   {confirming
-                    ? 'Confirm your email address to join the MERN Learn newsletter. We send occasional notes about new modules, major lesson rewrites, and community work — never a daily drip.'
+                    ? 'Confirm your email address to join the Nyxora Sync newsletter. We send occasional notes about new modules, major lesson rewrites, and community work — never a daily drip.'
                     : 'This removes your address from the newsletter list immediately. You will not receive any more curriculum updates.'}
                 </p>
               </div>

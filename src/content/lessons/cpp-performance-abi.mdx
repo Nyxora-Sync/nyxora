@@ -1,0 +1,199 @@
+Performance work begins with a measurement, not a clever trick. The compiler is already good at local optimization, and modern CPUs reward predictable memory access more than almost anything else. This lesson covers the parts of performance that C++ programmers can actually control: data layout, allocation, build flags, profiling, and the boundary between a stable interface and its implementation.
+
+## Measure before changing code
+
+Build an optimized binary first. Debug builds disable inlining and add instrumentation, so timing them tells you almost nothing about production:
+
+```bash
+g++ -std=c++20 -O2 -DNDEBUG -g main.cpp -o app
+perf stat -d ./app
+perf record -g ./app
+perf report
+```
+
+`-O2` enables a broad set of optimizations without the aggressive size and vectorization tradeoffs of `-O3`. `-g` keeps symbols for profiling; it does not prevent optimization. `-DNDEBUG` removes `assert` checks, so do not benchmark a build that still has them unless you are measuring their cost.
+
+`perf stat` reports cycles, instructions, cache misses, and branch misses. `perf record` samples the program and produces a profile you can inspect with `perf report`; a flame graph makes deep call stacks easier to read. For allocation-heavy programs, `heaptrack` or Valgrind's Callgrind can show where memory and time go. Use the tool that answers your question, and profile a representative workload rather than a toy input.
+
+## Cache behavior and data layout
+
+The CPU does not fetch one integer from memory; it fetches cache lines and relies on prefetching and locality. A contiguous `std::vector` is usually faster to scan than a `std::list` even when both have the same complexity, because the vector's elements are adjacent and the hardware can predict the access pattern.
+
+```cpp
+#include <vector>
+
+struct ParticleAoS {
+    float x, y, z;
+    float vx, vy, vz;
+};
+
+struct ParticlesSoA {
+    std::vector<float> x, y, z;
+    std::vector<float> vx, vy, vz;
+};
+```
+
+The array-of-structs layout is convenient when a function needs every field of one particle. The struct-of-arrays layout is better when a loop touches only positions across millions of particles, because it avoids loading unused fields into cache. Neither is universally superior; the access pattern decides.
+
+Avoid pointer chasing in hot loops, keep frequently used data together, and iterate containers in their natural order. For matrices, row-major traversal can be much faster than column-major traversal even though both perform the same number of arithmetic operations.
+
+False sharing is a concurrency-specific cache problem. Two threads writing different variables that happen to share a cache line cause the line to bounce between cores. Separate hot per-thread counters:
+
+```cpp
+#include <atomic>
+#include <new>
+
+struct alignas(std::hardware_destructive_interference_size) PaddedCounter {
+    std::atomic<long> value{0};
+};
+```
+
+`std::hardware_destructive_interference_size` is a hint from the implementation, not a guarantee about every CPU. Use it when measurements show contention, not as decoration on every struct.
+
+## Allocation has a price
+
+Every dynamic allocation has bookkeeping, possible lock contention, and cache disruption. A `std::vector` that grows repeatedly reallocates and copies or moves its elements. If you know the final size, reserve it once:
+
+```cpp
+std::vector<int> values;
+values.reserve(1'000'000);
+for (int i = 0; i < 1'000'000; ++i) {
+    values.push_back(i);
+}
+```
+
+`reserve` changes capacity, not size. `resize` changes both and value-initializes new elements. Reusing a vector's storage across iterations is often better than constructing a fresh one each time.
+
+Small strings receive special treatment. Standard library implementations commonly store short strings inside the `std::string` object itself, an optimization called small-string optimization. The exact threshold is an implementation detail; libstdc++ has historically used 15 characters on 64-bit systems, but the standard does not require any particular capacity. Do not encode that number in your logic. Use `std::string_view` for read-only parameters and avoid copying strings merely to pass them around.
+
+`std::function` performs type erasure and may allocate for larger callables. A function pointer or a template parameter can avoid that cost when the callable's type is known at compile time. `std::span` provides a non-owning view over contiguous data without copying. These are tools for measured hot paths, not rules to apply everywhere.
+
+## A small benchmark harness
+
+A microbenchmark must defeat the optimizer's ability to delete work. This harness measures the effect of `reserve` and publishes a result through a volatile sink:
+
+```cpp
+#include <chrono>
+#include <cstddef>
+#include <iostream>
+#include <vector>
+
+volatile std::size_t sink = 0;
+
+template <typename Function>
+double milliseconds(Function&& function) {
+    const auto start = std::chrono::steady_clock::now();
+    function();
+    return std::chrono::duration<double, std::milli>(
+               std::chrono::steady_clock::now() - start)
+        .count();
+}
+
+int main() {
+    constexpr int count = 1'000'000;
+
+    const double withoutReserve = milliseconds([&] {
+        std::vector<int> values;
+        for (int i = 0; i < count; ++i) {
+            values.push_back(i);
+        }
+        sink = values.size();
+    });
+
+    const double withReserve = milliseconds([&] {
+        std::vector<int> values;
+        values.reserve(count);
+        for (int i = 0; i < count; ++i) {
+            values.push_back(i);
+        }
+        sink = values.size();
+    });
+
+    std::cout << withoutReserve << " ms vs "
+              << withReserve << " ms\n";
+}
+```
+
+Run each measurement several times, use a realistic size, and keep the machine otherwise idle. For serious comparisons, use Google Benchmark, which handles warm-up, repetitions, and statistical reporting. A single timing is an anecdote.
+
+## Sanitizers, optimization, and undefined behavior
+
+Sanitizers are development tools. AddressSanitizer and UndefinedBehaviorSanitizer add overhead and change allocation behavior, so never use their timings as performance data. ThreadSanitizer catches races but is also slow. Use sanitizer builds to find correctness bugs, then return to an optimized build to measure speed.
+
+Optimization can expose undefined behavior that happened to work in a debug build. Signed overflow, out-of-bounds access, and strict-aliasing violations give the compiler permission to produce surprising results. Fix the undefined behavior; do not try to out-optimize the optimizer.
+
+`-O3` may improve throughput at the cost of code size. `-march=native` enables instructions specific to the build machine and can produce a binary that crashes on older CPUs; use it for local experiments, not for distributed binaries unless the target is known. Link-time optimization can improve cross-translation-unit inlining, but it increases link time and should be validated, not assumed to help.
+
+## ABI and header hygiene
+
+An application binary interface, or ABI, is the contract between compiled components: calling conventions, name mangling, object layout, exception handling, and standard library details. Two translation units built with incompatible compilers, standard library versions, debug modes, or ABI flags may link successfully and then corrupt data at runtime.
+
+Keep public headers small and stable. Include only what the interface needs; forward-declare types used only through references or pointers when ownership allows it. Do not put `using namespace` directives, anonymous namespaces, or non-inline definitions in headers. Use `#pragma once` or include guards consistently, and include what you use rather than relying on transitive includes.
+
+For a library boundary, hide implementation details behind an opaque type or the pimpl idiom:
+
+```cpp
+// engine.hpp
+#pragma once
+
+#include <memory>
+
+class Engine {
+public:
+    Engine();
+    ~Engine();
+    Engine(Engine&&) noexcept;
+    Engine& operator=(Engine&&) noexcept;
+    Engine(const Engine&) = delete;
+    Engine& operator=(const Engine&) = delete;
+
+    void run();
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+```
+
+The destructor and move operations must be defined in the `.cpp` file where `Impl` is complete. Changing `Impl` no longer changes the layout of `Engine` or forces every client to recompile. The tradeoff is an allocation and an indirection on access.
+
+For a C-compatible boundary, use `extern "C"` and plain C types:
+
+```cpp
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+int engine_compute(int input);
+
+#ifdef __cplusplus
+}
+#endif
+```
+
+Do not expose `std::string`, `std::vector`, or C++ exceptions across a C ABI. Use opaque handles plus create, use, and destroy functions, and document who owns each handle.
+
+## Link-time concerns
+
+Static libraries are copied into the executable; shared libraries remain separate and are resolved at load time or link time. Symbol visibility and link order matter. `-fvisibility=hidden` on a shared library prevents internal symbols from leaking into the dynamic symbol table, which can reduce load time and avoid collisions. `-Wl,--gc-sections` with function and data sections can remove unused code, but it interacts with registration mechanisms and should be tested.
+
+Mixing objects built with different standard library debug modes, such as libstdc++'s debug containers and the normal containers, is an ABI mismatch. Keep build configurations separate and rebuild the entire dependency graph when changing ABI-affecting flags.
+
+## Common mistakes
+
+- Benchmarking a debug build or a single run.
+- Adding `reserve` everywhere without measuring; it can waste memory when the estimate is wrong.
+- Assuming a linked list is faster because insertion is constant time, while ignoring traversal and allocation costs.
+- Relying on a particular small-string capacity or container layout.
+- Shipping `-march=native` binaries to machines with different instruction sets.
+- Measuring with sanitizers enabled.
+- Exposing standard library types across a stable ABI boundary.
+- Letting headers include the world, then wondering why a one-line change rebuilds the project.
+
+## Practice
+
+1. Profile a small program with `perf stat` and `perf record`. Identify the hottest function and one cache-related counter, then explain what you would measure next.
+2. Run the `reserve` benchmark three times. Report the median for each version and the build flags. Then remove the volatile sink and see whether the optimizer changes the result.
+3. Compare iteration over a `std::vector<int>` and a `std::list<int>` with the same number of elements. Explain the result using locality, not just big-O notation.
+4. Print `std::string::capacity()` for strings of increasing length on your implementation. Identify the small-string threshold, then write a comment explaining why production code should not depend on it.
+5. Move an implementation detail into a pimpl class. Rebuild a client that includes only the public header and confirm that changing the private implementation does not change the header.

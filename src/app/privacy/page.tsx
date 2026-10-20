@@ -6,7 +6,7 @@ import { pageMetadata } from '@/lib/seo'
 export const metadata = pageMetadata({
   title: 'Privacy Policy',
   description:
-    'What MERN Learn stores, where it lives, why it exists, and how to remove it. Local-first progress, optional accounts, no ads or trackers.',
+    'What Nyxora Sync stores, where it lives, why it exists, and how to remove it. Local-first progress, optional accounts, no ads or trackers.',
   path: '/privacy',
 })
 
@@ -124,7 +124,7 @@ export default function PrivacyPage() {
         </li>
       </ul>
       <p>
-        Outbound links may include UTM campaign parameters that identify MERN Learn as the referrer.
+        Outbound links may include UTM campaign parameters that identify Nyxora Sync as the referrer.
         Those parameters are added to the destination URL; they do not set a cookie on this site or
         track you across websites.
       </p>

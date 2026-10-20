@@ -1,0 +1,224 @@
+EF Core is an object-relational mapper: it maps C# classes to tables, translates LINQ to SQL, and tracks changes so you can save them with one call. It is productive, but it does not hide the database. Queries still need indexes, projections still matter, and a `DbContext` still has a lifetime. This lesson covers the parts you will use in almost every application.
+
+## Packages and a model
+
+For PostgreSQL, add the provider and the design-time tools:
+
+```bash
+dotnet add package Npgsql.EntityFrameworkCore.PostgreSQL
+dotnet add package Microsoft.EntityFrameworkCore.Design
+dotnet tool install --global dotnet-ef
+```
+
+Keep EF Core, the provider, and the `dotnet-ef` tool on the same major version as the target framework. NuGet may otherwise resolve a package that targets a newer framework than your app; pin the versions deliberately.
+
+Two entities with a one-to-many relationship:
+
+```csharp
+public sealed class Author
+{
+    public int Id { get; set; }
+    public required string Name { get; set; }
+    public List<Book> Books { get; set; } = [];
+}
+
+public sealed class Book
+{
+    public int Id { get; set; }
+    public required string Title { get; set; }
+    public decimal Price { get; set; }
+    public int AuthorId { get; set; }
+    public Author Author { get; set; } = null!;
+}
+```
+
+The context exposes sets and configures the schema:
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+
+public sealed class LibraryDb(DbContextOptions<LibraryDb> options) : DbContext(options)
+{
+    public DbSet<Book> Books => Set<Book>();
+    public DbSet<Author> Authors => Set<Author>();
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Book>(book =>
+        {
+            book.Property(b => b.Title).HasMaxLength(200).IsRequired();
+            book.Property(b => b.Price).HasPrecision(10, 2);
+            book.HasIndex(b => b.Title);
+
+            book.HasOne(b => b.Author)
+                .WithMany(a => a.Books)
+                .HasForeignKey(b => b.AuthorId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+    }
+}
+```
+
+Register it in an ASP.NET Core app:
+
+```csharp
+builder.Services.AddDbContext<LibraryDb>(options =>
+    options.UseNpgsql(builder.Configuration.GetConnectionString("Library")));
+```
+
+`AddDbContext` registers the context as **scoped**, which matches one HTTP request. Do not register it as a singleton, and do not share one context across concurrent operations.
+
+## Migrations
+
+Migrations are versioned schema changes generated from your model:
+
+```bash
+dotnet ef migrations add InitialCreate
+dotnet ef database update
+```
+
+The first command writes a migration and updates the model snapshot. Review the generated SQL before committing it, especially for column drops and type changes. The second applies pending migrations to the configured database.
+
+`EnsureCreated()` creates a schema without migrations and cannot be upgraded later. Do not mix it with migrations. In production, apply migrations as a deliberate deployment step, not from every application replica at startup:
+
+```bash
+dotnet ef migrations script --idempotent -o migrate.sql
+dotnet ef migrations bundle -r linux-x64 -o migrate
+```
+
+Run the bundle or script once in the release pipeline, with a connection string supplied by the environment.
+
+## Querying and translation
+
+EF Core translates the LINQ you write into SQL. Project only what the endpoint needs:
+
+```csharp
+public sealed record BookDto(int Id, string Title, string Author, decimal Price);
+
+var books = await db.Books
+    .AsNoTracking()
+    .Where(b => b.Price > 20m)
+    .OrderBy(b => b.Title)
+    .Select(b => new BookDto(b.Id, b.Title, b.Author.Name, b.Price))
+    .ToListAsync(ct);
+```
+
+This generates a join and selects four columns, not every column of both tables. `AsNoTracking()` skips change tracking for read-only results, reducing memory and CPU.
+
+The classic performance bug is the N+1 query:
+
+```csharp
+var authors = await db.Authors.AsNoTracking().ToListAsync(ct);
+
+foreach (var author in authors)
+{
+    // One query per author.
+    var books = await db.Books
+        .Where(b => b.AuthorId == author.Id)
+        .ToListAsync(ct);
+}
+```
+
+Use a projection that returns authors with their books in one query, or use `Include` when you genuinely need the entity graph:
+
+```csharp
+var authors = await db.Authors
+    .AsNoTracking()
+    .Include(a => a.Books)
+    .ToListAsync(ct);
+```
+
+`Include` on several collections can produce a cartesian explosion. `AsSplitQuery()` issues several SQL queries instead; measure rather than assuming it is faster.
+
+Not every C# expression translates. If EF cannot translate a call, it may throw at runtime or, in older versions, silently evaluate on the client. Keep query lambdas simple, and inspect the generated SQL with `ToQueryString()`:
+
+```csharp
+Console.WriteLine(db.Books.Where(b => b.Price > 20m).ToQueryString());
+```
+
+`IQueryable<T>` composes SQL; `IEnumerable<T>` composes in memory. Calling `AsEnumerable()` too early pulls the whole table into the application before filtering.
+
+## Tracking and updates
+
+A tracked entity carries its original values, so EF can generate an `UPDATE` for the properties you changed:
+
+```csharp
+var book = await db.Books.SingleOrDefaultAsync(b => b.Id == id, ct);
+if (book is null)
+    return false;
+
+book.Price = newPrice;
+await db.SaveChangesAsync(ct);
+return true;
+```
+
+For a read-only endpoint, `AsNoTracking()` avoids the tracking overhead. For bulk changes that do not need entities, `ExecuteUpdateAsync` runs a single SQL statement:
+
+```csharp
+var count = await db.Books
+    .Where(b => b.AuthorId == authorId)
+    .ExecuteUpdateAsync(setters => setters
+        .SetProperty(b => b.Price, b => b.Price * 1.10m), ct);
+```
+
+`ExecuteUpdate` bypasses the change tracker, so already-loaded entities become stale. Use it for jobs and bulk operations, not in the middle of logic that depends on tracked objects.
+
+## Transactions
+
+A single `SaveChangesAsync` is wrapped in a transaction automatically. When several saves or raw SQL statements must succeed together, open one explicitly:
+
+```csharp
+await using var tx = await db.Database.BeginTransactionAsync(ct);
+
+db.Books.Add(book);
+await db.SaveChangesAsync(ct);
+
+db.Books.Add(new Book
+{
+    Title = "The Dispossessed",
+    AuthorId = book.AuthorId,
+    Price = 18m
+});
+await db.SaveChangesAsync(ct);
+
+await tx.CommitAsync(ct);
+```
+
+If an exception escapes, disposal rolls the transaction back. Keep transactions short; holding one open during an HTTP call or user interaction blocks other work and increases lock contention.
+
+## Connection strings and secrets
+
+A connection string is configuration, not source code. For local development, user secrets keeps it out of the repository:
+
+```bash
+dotnet user-secrets init
+dotnet user-secrets set "ConnectionStrings:Library" "Host=localhost;Database=library;Username=library;Password=localdev"
+```
+
+In production, the platform injects configuration. An environment variable uses a double underscore for nesting:
+
+```bash
+export ConnectionStrings__Library="Host=db;Database=library;Username=library;Password=..."
+```
+
+Never commit production credentials, and never log the full connection string. Prefer a secret manager or the platform's secret store, restrict database network access, and use TLS where the provider requires it. `appsettings.json` can hold a safe local default, but the real value should come from the environment.
+
+## Common mistakes
+
+- Keeping a `DbContext` alive for the whole application and accumulating tracked entities.
+- Using `Include` everywhere instead of projecting exactly what the response needs.
+- Forgetting `AsNoTracking()` on read-heavy endpoints.
+- Calling synchronous EF methods (`.ToList()`, `.SaveChanges()`) inside async request handlers.
+- Letting `EnsureCreated()` and migrations compete for schema ownership.
+- Using `double` for money columns, or forgetting `HasPrecision` so the database picks a surprising scale.
+- Running migrations from every replica during a rolling deployment.
+- Returning entities directly from endpoints, which leaks navigation properties and causes serialization cycles.
+
+## Practice
+
+1. Create a `LibraryDb` with `Author`, `Book`, and a `Review` entity. Configure a one-to-many from book to reviews and a unique index on author name.
+2. Add an initial migration, apply it to a local PostgreSQL database, and inspect the generated SQL.
+3. Seed three authors and ten books, then write a query that returns only books over 15.00 with author names, ordered by title.
+4. Write the N+1 version of an authors-with-books query, measure it with logging enabled, then rewrite it as a projection and compare the SQL.
+5. Implement a price update endpoint that loads the book, changes it, and saves. Then implement a bulk 10 percent increase with `ExecuteUpdateAsync`.
+6. Put the connection string in user secrets locally and an environment variable in a container. Verify the application never reads a hard-coded production credential.

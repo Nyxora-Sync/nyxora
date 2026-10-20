@@ -5,7 +5,7 @@ import { pageMetadata } from '@/lib/seo'
 export const metadata = pageMetadata({
   title: 'Accessibility',
   description:
-    'MERN Learn aims for WCAG 2.2 AA. What works today, the known gaps, and how to report an accessibility barrier.',
+    'Nyxora Sync aims for WCAG 2.2 AA. What works today, the known gaps, and how to report an accessibility barrier.',
   path: '/accessibility',
 })
 
@@ -19,7 +19,7 @@ export default function AccessibilityPage() {
     >
       <h2>Our target</h2>
       <p>
-        MERN Learn aims to meet the{' '}
+        Nyxora Sync aims to meet the{' '}
         <a href="https://www.w3.org/TR/WCAG22/" target="_blank" rel="noopener noreferrer">
           Web Content Accessibility Guidelines (WCAG) 2.2, Level AA
         </a>

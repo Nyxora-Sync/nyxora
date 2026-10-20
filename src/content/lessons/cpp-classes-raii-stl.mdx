@@ -1,0 +1,190 @@
+A C++ class is not just a bag of fields with functions attached. It is a boundary that protects an invariant: the rules that must stay true for an object to make sense. A well-designed class makes it impossible to create an invalid object through its public interface, and it releases resources automatically when the object goes away.
+
+This lesson connects three ideas that reinforce each other: encapsulation, RAII, and the standard template library. Together they remove most reasons to write manual `new` and `delete`.
+
+## Constructors establish the invariant
+
+Consider a product in an inventory. A product must have a non-empty SKU, a non-negative quantity, and a non-negative price. Put those rules in the constructor and keep the fields private:
+
+```cpp
+#include <stdexcept>
+#include <string>
+#include <utility>
+
+class Product {
+public:
+    Product(std::string sku, std::string name, int quantity, double price)
+        : sku_(std::move(sku)),
+          name_(std::move(name)),
+          quantity_(quantity),
+          price_(price) {
+        if (sku_.empty()) {
+            throw std::invalid_argument{"SKU must not be empty"};
+        }
+        if (quantity_ < 0 || price_ < 0.0) {
+            throw std::invalid_argument{"quantity and price must be non-negative"};
+        }
+    }
+
+    const std::string& sku() const noexcept { return sku_; }
+    const std::string& name() const noexcept { return name_; }
+    int quantity() const noexcept { return quantity_; }
+    double price() const noexcept { return price_; }
+
+    void restock(int amount) {
+        if (amount <= 0) {
+            throw std::invalid_argument{"restock amount must be positive"};
+        }
+        quantity_ += amount;
+    }
+
+    double totalValue() const noexcept {
+        return quantity_ * price_;
+    }
+
+private:
+    std::string sku_;
+    std::string name_;
+    int quantity_;
+    double price_;
+};
+```
+
+The member initializer list runs before the constructor body, so the fields are valid before validation. The getters are `const`: calling them cannot change the object. The private section is the encapsulation boundary. Code outside the class cannot set `quantity_` to a negative value behind the constructor's back; it must use `restock`, which enforces the rule.
+
+A constructor taking one argument should usually be marked `explicit` to prevent accidental implicit conversions. Here the constructor takes four arguments, so that concern does not apply.
+
+## Destructors and RAII
+
+RAII means **resource acquisition is initialization**. A resource is acquired in a constructor and released in a destructor. The resource might be heap memory, a file handle, a socket, a mutex lock, or a database transaction. Because destructors run automatically when objects leave scope, cleanup happens on every exit path, including exceptions.
+
+You have already used RAII:
+
+```cpp
+void writeReport() {
+    std::vector<int> values{1, 2, 3};       // allocates in its constructor
+    std::ofstream out{"report.txt"};        // opens the file
+    out << values.size() << '\n';
+} // out closes the file; values frees its buffer
+```
+
+No `close`, no `delete`, no `finally`. If the function throws after the file is opened, the `ofstream` destructor still runs.
+
+If you write your own owning type, give it a destructor that releases exactly what the constructor acquired, and make copying safe or forbidden. The compiler-generated destructor is correct when every member already manages itself. This is the **rule of zero**: prefer members such as `std::string`, `std::vector`, and `std::unique_ptr` so you do not need to write a destructor, copy constructor, or copy assignment operator at all. Move semantics and the full rule of five come later in this path.
+
+## `std::vector`: the default container
+
+`std::vector` is a contiguous, dynamically sized array. It is the right default for a sequence: iteration is cache-friendly, indexing is constant time, and growth is amortized.
+
+```cpp
+#include <vector>
+
+std::vector<Product> products;
+products.reserve(100); // optional: avoid repeated reallocations
+
+products.emplace_back("A-100", "Hex bolt", 250, 0.12);
+products.emplace_back("B-200", "Washer", 80, 0.05);
+
+for (const Product& product : products) {
+    std::cout << product.sku() << ": " << product.quantity() << '\n';
+}
+```
+
+`emplace_back` constructs the element in place from the arguments; `push_back` copies or moves an existing object. Use `reserve` when you know the approximate final size. Access with `operator[]` after checking the index, or use `.at()` when you want a bounds-checked exception. Adding elements may reallocate the buffer and invalidate iterators, references, and pointers into it, so do not hold them across a growth operation.
+
+## `std::map` when order matters
+
+`std::map` stores sorted key-value pairs and provides logarithmic lookup. Use it when you need ordered iteration or ordered range queries. `std::unordered_map` provides average constant-time lookup when order is irrelevant.
+
+```cpp
+#include <map>
+#include <string>
+
+std::map<std::string, int> stock;
+stock["bolts"] = 40;
+stock.try_emplace("nuts", 25);
+
+if (auto it = stock.find("bolts"); it != stock.end()) {
+    std::cout << it->second << " bolts\n";
+}
+```
+
+`operator[]` default-constructs a missing value, which is convenient for counters but can hide spelling mistakes. `find` tells you whether the key exists; `contains` is a clear C++20 alternative. `try_emplace` constructs the value only if the key is absent. Iterating a `map` yields keys in sorted order; iterating an `unordered_map` does not promise any order.
+
+## `std::optional` for values that may be absent
+
+Returning `std::optional<T>` is clearer than a magic sentinel value or an output parameter. It says at the type level that the result may be missing.
+
+```cpp
+#include <charconv>
+#include <optional>
+#include <string_view>
+
+std::optional<int> parseQuantity(std::string_view text) {
+    int value{};
+    const auto [ptr, error] =
+        std::from_chars(text.data(), text.data() + text.size(), value);
+
+    if (error != std::errc{} || ptr != text.data() + text.size() || value < 0) {
+        return std::nullopt;
+    }
+    return value;
+}
+```
+
+The caller must deliberately handle the empty case:
+
+```cpp
+if (const auto quantity = parseQuantity(input)) {
+    product.restock(*quantity);
+} else {
+    std::cout << "Invalid quantity\n";
+}
+```
+
+`std::optional` does not allocate for the contained value, and it is not a pointer. It does not replace exceptions: use it for expected absence, and exceptions for violated preconditions or unrecoverable failures.
+
+## Iterators and algorithms
+
+An iterator is a generalized position. Containers expose `begin()` and `end()`, where `end()` is one past the last element, not the last element itself. Algorithms take iterator ranges and work across containers.
+
+```cpp
+#include <algorithm>
+
+std::sort(products.begin(), products.end(),
+          [](const Product& lhs, const Product& rhs) {
+              return lhs.name() < rhs.name();
+          });
+
+auto lowStock = std::find_if(products.begin(), products.end(),
+                             [](const Product& product) {
+                                 return product.quantity() < 10;
+                             });
+
+if (lowStock != products.end()) {
+    std::cout << "Low stock: " << lowStock->sku() << '\n';
+}
+```
+
+The half-open range `[begin, end)` is a recurring C++ convention. Understand it once and iterator-based code becomes predictable.
+
+## Avoiding manual `new` and `delete`
+
+Own raw pointers only at the lowest level of a library, and even then prefer a wrapper. `std::vector` owns arrays. `std::string` owns character buffers. `std::unique_ptr<T>` owns one object with exclusive ownership. `std::shared_ptr<T>` shares ownership when the design genuinely requires it. Manual `new` and `delete` add exception-safety and lifetime bugs that these types have already solved.
+
+## Common mistakes
+
+- Validating fields after the object is already observable, instead of in the constructor.
+- Giving a class a destructor but leaving copying enabled, causing two objects to release the same resource. Follow the rule of zero, or implement all five special members deliberately.
+- Using `stock["missing"]` to check for a key; it inserts a zero value.
+- Holding a reference into a `vector` across `push_back` or `emplace_back`.
+- Throwing exceptions from a destructor during stack unwinding.
+- Assuming `std::map` iteration is faster than it is just because it is ordered; choose the container from the access pattern.
+
+## Practice
+
+1. Implement `Product` as shown and write a `main` that creates three products, restocks one, and prints the total value of the inventory.
+2. Add a `rename` method that rejects an empty name, and keep the invariant intact.
+3. Store the products in a `std::vector`, sort them by price, and use `std::find_if` to locate the first product with quantity below ten.
+4. Build a `std::map<std::string, int>` from SKU to quantity and use `try_emplace` to add a new item without overwriting an existing one.
+5. Write `parseQuantity` and test it with `"42"`, `"-3"`, `"12x"`, and an empty string. All but the first should return `std::nullopt`.

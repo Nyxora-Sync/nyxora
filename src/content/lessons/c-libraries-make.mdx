@@ -1,0 +1,183 @@
+A C program becomes maintainable when its code is divided into modules with narrow interfaces. A header describes what a module offers; a source file defines how it works. Libraries package those object files so other programs can link against them. Make coordinates the build, and portability means the same source still compiles with GCC or Clang on Linux or macOS.
+
+## Headers and source files
+
+Put declarations in a header and definitions in a source file. Declarations tell the compiler the function signatures and types. Definitions provide the actual code and storage.
+
+```c
+/* util.h */
+#ifndef UTIL_H
+#define UTIL_H
+
+int add(int left, int right);
+int clamp(int value, int low, int high);
+
+#endif
+```
+
+```c
+/* util.c */
+#include "util.h"
+
+static int is_valid_range(int low, int high)
+{
+    return low <= high;
+}
+
+int add(int left, int right)
+{
+    return left + right;
+}
+
+int clamp(int value, int low, int high)
+{
+    if (!is_valid_range(low, high)) {
+        return value;
+    }
+    if (value < low) {
+        return low;
+    }
+    if (value > high) {
+        return high;
+    }
+    return value;
+}
+```
+
+The include guard prevents the header from being processed twice in one translation unit. `#pragma once` is widely supported and shorter, but it is not part of the C standard. Use one convention consistently.
+
+`static` on `is_valid_range` gives it internal linkage, so it is private to `util.c`. It is not part of the module's public interface and cannot collide with a function of the same name in another source file.
+
+Do not put ordinary function definitions in a header. Every source file that includes the header would define the same external symbol, and the linker would report multiple definitions. Macros, type definitions, `extern` declarations, and `static inline` functions are different cases, but keep the default simple: declarations in headers, definitions in `.c` files.
+
+## Static libraries
+
+A static library is an archive of object files. On Linux and macOS, `ar` creates it:
+
+```bash
+cc -std=c17 -Wall -Wextra -c util.c -o util.o
+ar rcs libutil.a util.o
+```
+
+`r` inserts or replaces members, `c` creates the archive if needed, and `s` writes an index for fast symbol lookup. Link a program against it by naming the archive or using `-L` and `-l`:
+
+```bash
+cc -std=c17 -Wall -Wextra main.c -L. -lutil -o app
+```
+
+The linker copies the needed object code into the executable. The resulting program does not need `libutil.a` at runtime. Static linking is predictable, but every executable carries its own copy of the library code.
+
+## Shared libraries
+
+A shared library is loaded at runtime and can be used by many programs at once. On Linux, compile with position-independent code and link with `-shared`:
+
+```bash
+cc -std=c17 -Wall -Wextra -fPIC -c util.c -o util.o
+cc -shared -o libutil.so util.o
+cc main.c -L. -lutil -o app
+```
+
+On macOS the equivalent library is a `.dylib`:
+
+```bash
+cc -std=c17 -Wall -Wextra -fPIC -c util.c -o util.o
+cc -dynamiclib -o libutil.dylib util.o
+cc main.c -L. -lutil -o app
+```
+
+`-fPIC` asks for position-independent code, which is normally required for shared objects on 64-bit Linux. The runtime loader needs to find `libutil.so`; setting `LD_LIBRARY_PATH=.` works during a quick experiment but is a poor installation strategy. Use an appropriate runtime search path or install the library in a standard location. On macOS, the loader path is embedded in the dylib and shown by `otool -L`.
+
+## A Makefile with variables and patterns
+
+```text
+CC ?= cc
+AR ?= ar
+CFLAGS ?= -O2
+CFLAGS += -std=c17 -Wall -Wextra -Wpedantic
+
+TARGET := app
+LIB := libutil.a
+APP_OBJ := main.o
+LIB_OBJ := util.o
+
+.PHONY: all clean
+
+all: $(TARGET)
+
+$(TARGET): $(APP_OBJ) $(LIB)
+	$(CC) $(CFLAGS) $(APP_OBJ) $(LIB) -o $@
+
+$(LIB): $(LIB_OBJ)
+	$(AR) rcs $@ $^
+
+%.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+main.o: main.c util.h
+util.o: util.c util.h
+
+clean:
+	rm -f $(APP_OBJ) $(LIB_OBJ) $(LIB) $(TARGET)
+```
+
+`CC ?= cc` lets the environment override the compiler without editing the file. `CFLAGS +=` preserves an existing optimization level while adding required warnings. `$@`, `$^`, and `$<` mean the target, all prerequisites, and the first prerequisite. The explicit header dependencies ensure that changing `util.h` rebuilds both object files.
+
+Use `make CC=clang` to test another compiler. Add `-g` for debug builds and `-fsanitize=address` for a diagnostic build in a separate target or variable.
+
+GNU Make can generate header dependencies automatically with `-MMD -MP` and an include of the resulting `.d` files. That scales better than listing every header by hand, but it depends on GNU Make and compiler support. Plain explicit dependencies are easy to understand and work on a wider range of systems.
+
+## Include paths and library order
+
+`-Ipath` adds a directory to the header search path. `-Lpath` adds a directory to the library search path. Keep them explicit:
+
+```bash
+cc -std=c17 -Wall -Wextra -Iinclude main.c -Lbuild -lutil -o app
+```
+
+Link order matters on Unix-like systems. Put object files before the libraries that satisfy their symbols. If `-lutil` appears before `main.o`, the linker may not revisit it and will report undefined references. Put system libraries such as `-lm` at the end as well.
+
+## Warnings and standards
+
+Enable warnings everywhere and fix them:
+
+```bash
+cc -std=c17 -Wall -Wextra -Wpedantic -Wconversion -Wshadow -c main.c
+```
+
+`-std=c17` uses the C17 standard. GCC and Clang also accept `gnu17`, which enables extensions; code that compiles under `gnu17` may fail under `c17` or another compiler. `-Wpedantic` catches many such extensions. `-Wconversion` can be noisy in existing code, but it exposes dangerous narrowing conversions. `-Werror` is useful in CI once the codebase is clean.
+
+## Portability across compilers and systems
+
+Portable C avoids assumptions that are true only on one system:
+
+- Use `stdint.h` types when exact widths matter, and `inttypes.h` format macros for printing them.
+- Do not assume `long` is 64 bits. It is 64 on 64-bit Linux and macOS, but 32 on 64-bit Windows.
+- Use `size_t` for sizes and `%zu` for printing it.
+- Include `<stddef.h>` for `NULL` and `ptrdiff_t`.
+- Guard POSIX-only code with a feature test macro such as `_POSIX_C_SOURCE 200809L`, placed before any headers.
+- Test byte order and use explicit serialization rather than dumping structs.
+- Avoid GCC extensions such as nested functions and statement expressions in portable code.
+- Keep POSIX calls such as `fork`, `pthread`, and `socket` separate from Windows-specific code; a portability layer is usually better than scattering preprocessor checks.
+
+Compiler macros such as `__GNUC__`, `__clang__`, `__linux__`, and `__APPLE__` can select platform-specific flags, but do not use them to paper over a genuine API difference. Shared-library names and flags differ between Linux and macOS, so a Makefile that builds them should choose targets explicitly rather than assuming one extension.
+
+## Common mistakes
+
+- Defining a function in a header and getting multiple definition errors.
+- Omitting an include guard, causing duplicate type definitions.
+- Putting a library before the object files that need it.
+- Forgetting `-fPIC` when building a shared object.
+- Assuming a static library needs to be present at runtime.
+- Rebuilding the executable but not the changed library or object.
+- Hiding warnings instead of fixing them.
+- Writing machine-specific binary structs and calling the format portable.
+
+## Practice
+
+1. Split a small program into `main.c`, `util.c`, and `util.h`. Add include guards and compile with both `gcc` and `clang`.
+2. Build `libutil.a`, link a program against it, delete the archive, and confirm the executable still runs.
+3. Build a shared library on your platform, run the program, then remove the library from the loader's path and observe the runtime error. Fix it with a runtime search path.
+4. Extend the Makefile with `debug` and `release` targets using different `CFLAGS`.
+5. Add `-MMD -MP` and automatic dependency includes, then verify that touching a header rebuilds the right objects.
+6. Write a header that uses `#pragma once` and one with a guard, and test both when included twice in the same source file.
+7. Compile with `-std=c17 -Wpedantic` and remove every extension that prevents a clean build.

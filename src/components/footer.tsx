@@ -25,6 +25,11 @@ const footerLinks: FooterColumn = {
     { name: 'Beginner Track', href: '/learn/beginner' },
     { name: 'Developer Track', href: '/learn/developer' },
     { name: 'Specializations', href: '/learn/specializations' },
+    { name: 'All Language Paths', href: '/learn/languages' },
+    { name: 'C', href: '/learn/c' },
+    { name: 'C++', href: '/learn/cpp' },
+    { name: 'C#', href: '/learn/csharp' },
+    { name: 'Python', href: '/learn/python' },
     { name: 'All Lessons', href: '/learn' },
     { name: 'Resources', href: '/resources' },
     { name: 'Roadmap', href: '/roadmap' },
@@ -64,7 +69,7 @@ export function Footer() {
       <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8 lg:py-16">
         <div className={cn('grid gap-8 md:grid-cols-2', NEWSLETTER_ENABLED ? 'lg:grid-cols-6' : 'lg:grid-cols-5')}>
           <div className="md:col-span-2 lg:col-span-2">
-            <Link href="/" className="inline-block" aria-label="MERN Learn Home">
+            <Link href="/" className="inline-block" aria-label="Nyxora Sync Home">
               <Image
                 src="/site-logo.jpg"
                 alt=""
@@ -75,8 +80,9 @@ export function Footer() {
               />
             </Link>
             <p className="mt-4 max-w-xs text-sm text-muted-foreground">
-              Learn the MERN stack (MongoDB, Express, React, Node.js) from beginner to mastery.
-              Curated free resources, interactive playgrounds, progress tracking, and community.
+              Learn web development and programming languages for free. MERN, C, C++, C#, and Python
+              paths from beginner to mastery, with written lessons, projects, playgrounds, and
+              community.
             </p>
             <div className="mt-6 flex gap-4">
               {socialLinks.map((social) => (

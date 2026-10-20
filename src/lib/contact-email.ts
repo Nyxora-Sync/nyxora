@@ -31,14 +31,14 @@ export async function sendContactNotification(input: ContactMessageInput): Promi
     socketTimeout: 10000,
   })
 
-  const from = process.env.EMAIL_FROM || 'MERN Learn <noreply@localhost>'
+  const from = process.env.EMAIL_FROM || 'Nyxora Sync <noreply@localhost>'
   const to = process.env.CONTACT_INBOX || process.env.EMAIL_FROM || 'noreply@localhost'
 
   await transporter.sendMail({
     from,
     to,
     replyTo: input.email,
-    subject: `[MERN Learn] ${input.topic} message`,
+    subject: `[Nyxora Sync] ${input.topic} message`,
     text: [
       `From: ${input.name ?? 'Anonymous'} <${input.email}>`,
       `Topic: ${input.topic}`,

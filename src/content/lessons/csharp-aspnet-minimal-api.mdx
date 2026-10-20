@@ -1,0 +1,217 @@
+ASP.NET Core minimal APIs remove the controller ceremony without removing HTTP. An endpoint is a function with a route, a request model, and a response. That is enough for most services, provided you take validation, status codes, error shape, and authentication seriously.
+
+## The smallest useful API
+
+```csharp
+using System.Collections.Concurrent;
+using Microsoft.AspNetCore.Http.HttpResults;
+
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddSingleton<BookStore>();
+builder.Services.AddProblemDetails();
+builder.Services.AddOpenApi();
+
+var app = builder.Build();
+
+app.UseExceptionHandler();
+app.UseHttpsRedirection();
+
+app.MapOpenApi();
+
+var books = app.MapGroup("/api/books").WithTags("Books");
+
+books.MapGet("/", (BookStore store) => TypedResults.Ok(store.All()));
+
+books.MapGet("/{id:guid}", Results<Ok<Book>, NotFound> (Guid id, BookStore store) =>
+    store.Find(id) is { } book ? TypedResults.Ok(book) : TypedResults.NotFound());
+
+books.MapPost("/", Results<Created<Book>, ValidationProblem> (CreateBookRequest request, BookStore store) =>
+{
+    var errors = Validate(request);
+    if (errors.Count > 0)
+        return TypedResults.ValidationProblem(errors);
+
+    var book = new Book(Guid.NewGuid(), request.Title.Trim(), request.Author.Trim(), request.Price);
+    store.Add(book);
+
+    return TypedResults.Created($"/api/books/{book.Id}", book);
+});
+
+app.Run();
+
+static Dictionary<string, string[]> Validate(CreateBookRequest request)
+{
+    var errors = new Dictionary<string, string[]>();
+
+    if (string.IsNullOrWhiteSpace(request.Title))
+        errors["title"] = ["Title is required."];
+    if (string.IsNullOrWhiteSpace(request.Author))
+        errors["author"] = ["Author is required."];
+    if (request.Price <= 0)
+        errors["price"] = ["Price must be greater than zero."];
+
+    return errors;
+}
+
+public sealed record Book(Guid Id, string Title, string Author, decimal Price);
+public sealed record CreateBookRequest(string Title, string Author, decimal Price);
+
+public sealed class BookStore
+{
+    private readonly ConcurrentDictionary<Guid, Book> _books = new();
+
+    public IReadOnlyList<Book> All() => _books.Values.OrderBy(b => b.Title).ToList();
+    public Book? Find(Guid id) => _books.GetValueOrDefault(id);
+    public void Add(Book book) => _books[book.Id] = book;
+}
+```
+
+Run it with `dotnet run` and the API listens on the URL printed in the console. The store is in-memory, so data disappears on restart; the HTTP concerns are the same when you replace it with EF Core.
+
+The OpenAPI generator lives in the `Microsoft.AspNetCore.OpenApi` package, and JWT bearer authentication lives in `Microsoft.AspNetCore.Authentication.JwtBearer`. Add both explicitly if your project template does not. The built-in `AddOpenApi` and `MapOpenApi` pair is .NET 9+; on .NET 8, use `Swashbuckle.AspNetCore` instead.
+
+## Routing and binding
+
+`MapGet`, `MapPost`, `MapPut`, and `MapDelete` define endpoints. Route templates support constraints and optional values:
+
+```csharp
+app.MapGet("/api/books/{id:guid}", (Guid id) => $"Book {id}");
+app.MapGet("/api/books/search", (string? q, int page = 1) => $"q={q}, page={page}");
+```
+
+Simple types come from the route or query string. Complex types come from the JSON body by default. Be explicit when inference is ambiguous:
+
+```csharp
+app.MapPost("/api/books", ([FromBody] CreateBookRequest request) => Results.Ok(request));
+app.MapGet("/api/profile", ([FromHeader(Name = "X-User")] string user) => user);
+app.MapGet("/api/version", ([FromServices] IConfiguration config) => config["Version"]);
+```
+
+The binding attributes live in the `Microsoft.AspNetCore.Mvc` namespace. A route and a query parameter with the same name is a bug waiting to happen; name them distinctly. Mark required query parameters as non-nullable, but validate their contents anyway.
+
+## Status codes are part of the contract
+
+Return the code that describes what happened:
+
+```text
+200 OK              successful read or update
+201 Created         resource created, with a Location header
+204 No Content      successful delete or update with no body
+400 Bad Request     malformed JSON or failed validation
+401 Unauthorized    missing or invalid credentials
+403 Forbidden       authenticated but not allowed
+404 Not Found       resource does not exist
+409 Conflict        state conflict, duplicate key, concurrency failure
+500 Internal Error  unexpected failure
+```
+
+Do not return `200` with an error object. Clients, proxies, and monitoring all rely on the status line. `TypedResults` makes the possible responses visible in the method signature, and OpenAPI picks them up.
+
+For validation failures, `TypedResults.ValidationProblem` produces an RFC 9457 problem document with an `errors` dictionary. Register problem details support once:
+
+```csharp
+builder.Services.AddProblemDetails(options =>
+{
+    options.CustomizeProblemDetails = context =>
+    {
+        context.ProblemDetails.Extensions["traceId"] = context.HttpContext.TraceIdentifier;
+    };
+});
+```
+
+Then `app.UseExceptionHandler()` converts unhandled exceptions into a generic 500 problem document without leaking stack traces. Expected failures should be returned, not thrown.
+
+## Validation
+
+Minimal APIs in .NET 8 and .NET 9 do not automatically run DataAnnotations on parameters. Validate explicitly, either in a small helper or an endpoint filter shared by a group:
+
+```csharp
+var group = app.MapGroup("/api/books")
+    .AddEndpointFilter(async (context, next) =>
+    {
+        if (context.Arguments.OfType<CreateBookRequest>().FirstOrDefault() is { } request)
+        {
+            var errors = Validate(request);
+            if (errors.Count > 0)
+                return TypedResults.ValidationProblem(errors);
+        }
+
+        return await next(context);
+    });
+```
+
+Validation belongs at the boundary, but business rules belong in the domain. “Title is required” is a request rule; “a book cannot be published before its author's contract date” is a domain rule. Keep them separate so both can be tested and reused.
+
+## OpenAPI
+
+.NET 9 includes OpenAPI document generation:
+
+```csharp
+builder.Services.AddOpenApi();
+// ...
+app.MapOpenApi(); // /openapi/v1.json
+```
+
+The document reflects routes, parameter binding, request types, and declared response types. Add human-readable metadata with `WithName`, `WithSummary`, and `WithDescription`. For a browser UI, add a compatible viewer such as Scalar or Swagger UI; the JSON document is the contract, the UI is optional.
+
+## Authentication and authorization
+
+Authentication answers who the caller is. Authorization answers what they may do. JWT bearer authentication is the common choice for service-to-service and SPA clients:
+
+```csharp
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.Authority = builder.Configuration["Auth:Authority"];
+        options.Audience = builder.Configuration["Auth:Audience"];
+    });
+
+builder.Services.AddAuthorizationBuilder()
+    .AddPolicy("editor", policy => policy.RequireClaim("role", "editor", "admin"));
+
+// ...
+app.UseAuthentication();
+app.UseAuthorization();
+
+books.MapPost("/", CreateBook).RequireAuthorization("editor");
+```
+
+Do not validate tokens by hand. Use the framework handler, which checks signature, issuer, audience, and expiry. Keep authorization policies close to the endpoint definitions, and test the 401 and 403 paths, not only the happy path. `AllowAnonymous()` is appropriate for health and public reads.
+
+For same-origin browser apps, also configure CORS explicitly. Never combine a wildcard origin with credentials.
+
+## Middleware order
+
+Middleware runs in registration order and unwinds in reverse. A reliable order:
+
+```csharp
+app.UseExceptionHandler();
+app.UseHttpsRedirection();
+app.UseCors("frontend");
+app.UseAuthentication();
+app.UseAuthorization();
+```
+
+The exception handler must wrap everything you want it to catch. Authentication must run before authorization, and both must run before the endpoint that requires them. A custom middleware that logs duration should be registered early enough to see the final status code.
+
+## Common mistakes
+
+- Assuming `[ApiController]` validation behavior applies to minimal APIs. It does not.
+- Returning `200 OK` for created resources instead of `201` with a location.
+- Throwing exceptions for validation or missing records, then returning 500.
+- Forgetting `CancellationToken` and continuing work after the client disconnects.
+- Blocking with `.Result` inside an endpoint; it can exhaust the thread pool under load.
+- Registering authorization without authentication and wondering why every caller is anonymous.
+- Putting `UseAuthentication` after `MapPost` and expecting the endpoint to be protected.
+- Exposing entities that contain navigation properties or internal fields.
+
+## Practice
+
+1. Build a `Tasks` API with `GET /api/tasks`, `GET /api/tasks/{id}`, `POST`, `PUT`, and `DELETE`, backed by a thread-safe in-memory store.
+2. Add request records and validation for title, due date, and priority. Return a validation problem with field keys that match the JSON names.
+3. Return `201` with a `Location` header on create, `204` on delete, and `404` for unknown IDs.
+4. Add `AddOpenApi` and `MapOpenApi`, then inspect the generated document. Confirm every declared response appears.
+5. Add a custom middleware that adds an `X-Request-Id` response header and logs method, path, status, and elapsed milliseconds.
+6. Configure JWT bearer authentication against a local identity provider or a test issuer. Protect writes with an `editor` policy and verify both the 401 and 403 cases.
+7. Add an endpoint filter that rejects requests with a missing `Idempotency-Key` header on `POST`, and explain why that header matters for retries.
