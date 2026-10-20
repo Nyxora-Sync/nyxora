@@ -1,6 +1,8 @@
 import { notFound } from 'next/navigation'
 import type { Metadata } from 'next'
 
+export const runtime = 'edge'
+
 export const instant = false
 import Link from 'next/link'
 import { getTrack, tracks, getTotalXP, getTotalMinutes } from '@/lib/curriculum'

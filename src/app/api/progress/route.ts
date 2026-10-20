@@ -4,6 +4,8 @@ import { prisma } from '@/lib/db'
 import { tracks } from '@/lib/curriculum'
 import type { ProgressState } from '@/lib/progress-state'
 
+export const runtime = 'edge'
+
 const lessonProgressSchema = z.object({
   completed: z.boolean(),
   completedAt: z.string().max(40).nullish(),

@@ -9,6 +9,8 @@ import {
 import { siteUrl } from '@/lib/seo'
 import { NEWSLETTER_ENABLED } from '@/lib/newsletter-feature'
 
+export const runtime = 'edge'
+
 const emailSchema = z
   .email('Enter a valid email address')
   .max(254)

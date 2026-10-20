@@ -13,6 +13,8 @@ import {
   sinceMinutes,
 } from '@/lib/community'
 
+export const runtime = 'edge'
+
 export async function GET(request: Request) {
   if (!communityEnabled()) {
     return jsonError(COMMUNITY_DISABLED.status, COMMUNITY_DISABLED.code, COMMUNITY_DISABLED.message)

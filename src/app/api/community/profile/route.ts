@@ -8,6 +8,8 @@ import {
   profileSchema,
 } from '@/lib/community'
 
+export const runtime = 'edge'
+
 export async function GET() {
   if (!communityEnabled()) {
     return jsonError(COMMUNITY_DISABLED.status, COMMUNITY_DISABLED.code, COMMUNITY_DISABLED.message)

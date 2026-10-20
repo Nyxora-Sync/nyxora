@@ -1,4 +1,3 @@
-import { cacheLife } from 'next/cache'
 import { auth } from '@/lib/auth/auth'
 import { prisma } from '@/lib/db'
 import {
@@ -11,9 +10,9 @@ import {
   sinceMinutes,
 } from '@/lib/community'
 
+export const runtime = 'edge'
+
 async function getComments(targetType: string, targetId: string) {
-  'use cache'
-  cacheLife({ revalidate: 15, expire: 120 })
 
   const comments = await prisma.comment.findMany({
     where: {

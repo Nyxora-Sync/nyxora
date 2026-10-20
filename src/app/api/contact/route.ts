@@ -3,6 +3,8 @@ import { prisma } from '@/lib/db'
 import { jsonError, sinceMinutes } from '@/lib/community'
 import { sendContactNotification } from '@/lib/contact-email'
 
+export const runtime = 'edge'
+
 const emailSchema = z.email('Enter a valid email address').max(254).transform((value) => value.toLowerCase())
 
 const contactSchema = z

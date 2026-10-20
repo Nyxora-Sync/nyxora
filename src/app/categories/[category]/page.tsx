@@ -12,6 +12,8 @@ import { trackCategories, tracks as curriculumTracks } from '@/lib/curriculum'
 import { cn, getAccent } from '@/lib/utils'
 import { pageMetadata } from '@/lib/seo'
 
+export const runtime = 'edge'
+
 interface CategoryPageProps {
   params: Promise<{ category: string }>
 }

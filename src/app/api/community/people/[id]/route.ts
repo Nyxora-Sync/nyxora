@@ -7,6 +7,8 @@ import {
   publicUserSelect,
 } from '@/lib/community'
 
+export const runtime = 'edge'
+
 type RouteContext = { params: Promise<{ id: string }> }
 
 export async function GET(request: Request, { params }: RouteContext) {
