@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "build:cf": "npm run build "build:cf": "npm run build && npx @cloudflare/next-on-pages""build:cf": "npm run build && npx @cloudflare/next-on-pages" npx @cloudflare/next-on-pages --legacy-peer-deps",
+    "build:cf": "npm run build && npx @cloudflare/next-on-pages --legacy-peer-deps",
     "preview:cf": "npx wrangler pages dev .vercel/output/static",
     "deploy:cf": "npm run build:cf && npx wrangler pages deploy .vercel/output/static --project-name=nyxora-sync",
     "start": "next start",
