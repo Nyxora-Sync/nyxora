@@ -1,13 +1,12 @@
 # Cloudflare Pages Configuration for Nyxora Sync
 # https://developers.cloudflare.com/pages/configuration/wrangler-configuration/
-# 
-# NOTE: Build configuration (command, output directory) must be set in
-# Cloudflare Dashboard → Pages → Settings → Build
-# NOT in this file - Pages projects don't support [build] section in wrangler.toml
 
 name = "nyxora-sync"
 compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat_v2"]
+
+# Required for Pages to recognize this as a Pages config
+pages_build_output_dir = ".vercel/output/static"
 
 # Preview environment (auto-created per branch)
 [env.preview]
@@ -19,8 +18,3 @@ name = "nyxora-sync"
 
 # Node.js version for builds
 # Set in Cloudflare Dashboard: Pages → Settings → Build → Node.js version = 20
-
-# Build settings (configure in Dashboard, not here):
-# Build command: npm run build:cf
-# Build output directory: .vercel/output/static
-# Root directory: (leave empty)
