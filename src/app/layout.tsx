@@ -2,8 +2,12 @@ import type { Metadata, Viewport } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
 import { Providers } from '@/components/providers'
 import { JsonLd } from '@/components/structured-data'
+import { CookieNotice } from '@/components/site/cookie-notice'
+import { FloatingActions } from '@/components/site/floating-actions'
+import { OutboundUtm } from '@/components/site/outbound-utm'
 import { absoluteUrl, defaultDescription, siteName, siteUrl } from '@/lib/seo'
 import './globals.css'
+import './print.css'
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -102,11 +106,22 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`} suppressHydrationWarning>
       <body className="min-h-full flex flex-col bg-background text-foreground">
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-md focus:border focus:border-border focus:bg-background focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-foreground focus:shadow-lg focus:outline-none focus:ring-2 focus:ring-ring"
+        >
+          Skip to content
+        </a>
         <noscript>
           <style>{'[data-motion-reveal]{opacity:1!important;transform:none!important}'}</style>
         </noscript>
         <JsonLd data={siteSchema} />
-        <Providers>{children}</Providers>
+        <Providers>
+          {children}
+          <FloatingActions />
+          <CookieNotice />
+          <OutboundUtm />
+        </Providers>
       </body>
     </html>
   )

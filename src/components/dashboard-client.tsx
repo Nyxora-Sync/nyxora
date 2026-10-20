@@ -1,11 +1,13 @@
 'use client'
 
 import Link from 'next/link'
+import { useState } from 'react'
 import { useSession } from 'next-auth/react'
 import { useProgress, type ProgressState } from '@/hooks/use-progress'
 import { tracks, type Lesson } from '@/lib/curriculum'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Progress } from '@/components/ui/progress'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
@@ -37,6 +39,7 @@ const badgeDefinitions: {
 export function DashboardClient() {
   const { state, isLoaded, xp, streak, resetProgress, bookmarks } = useProgress()
   const { data: session } = useSession()
+  const [resetConfirmOpen, setResetConfirmOpen] = useState(false)
 
   if (!isLoaded) {
     return (
@@ -323,27 +326,37 @@ export function DashboardClient() {
 
       {/* Reset */}
       <Separator />
-      <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div data-print-hide className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="font-medium text-sm">Reset progress</p>
           <p className="text-xs text-muted-foreground">
-            This clears all local progress, XP, streaks, and bookmarks. Cannot be undone.
+            This clears lesson completion, XP, streaks, bookmarks, and notes. Signed-in resets also
+            sync to your account. Cannot be undone.
           </p>
         </div>
         <Button
           variant="outline"
           size="sm"
           className="text-destructive hover:text-destructive"
-          onClick={() => {
-            if (confirm('Are you sure? This will erase all your local progress.')) {
-              resetProgress()
-            }
-          }}
+          onClick={() => setResetConfirmOpen(true)}
         >
           <RotateCcw className="mr-2 h-4 w-4" aria-hidden="true" />
           Reset Progress
         </Button>
       </div>
+
+      <ConfirmDialog
+        open={resetConfirmOpen}
+        onOpenChange={setResetConfirmOpen}
+        title="Reset all progress?"
+        description="This clears lesson completion, XP, streaks, bookmarks, and notes. If you are signed in, the reset also syncs to your account. It cannot be undone."
+        confirmLabel="Reset progress"
+        destructive
+        onConfirm={() => {
+          resetProgress()
+          setResetConfirmOpen(false)
+        }}
+      />
     </div>
   )
 }

@@ -1,0 +1,111 @@
+@media print {
+  :root {
+    color-scheme: light;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+    color: #000 !important;
+  }
+
+  body {
+    font-size: 11pt;
+  }
+
+  * {
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+
+  /* Cards, callouts, badges, and gradients should not carry dark-mode or
+     accent backgrounds into print. Keep code blocks readable separately. */
+  body *:not(pre):not(code) {
+    background-color: transparent !important;
+    color: #000 !important;
+    border-color: #bbb !important;
+  }
+
+  [data-print-hide],
+  [data-site-header],
+  [data-site-footer],
+  .fixed,
+  iframe,
+  button,
+  input,
+  textarea,
+  select,
+  form,
+  nav {
+    display: none !important;
+  }
+
+  main {
+    display: block !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  main > div,
+  .prose {
+    max-width: none !important;
+  }
+
+  a {
+    color: #000 !important;
+    text-decoration: underline;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    break-after: avoid;
+  }
+
+  p,
+  li,
+  blockquote {
+    orphans: 3;
+    widows: 3;
+  }
+
+  pre,
+  blockquote,
+  table,
+  li {
+    break-inside: avoid;
+  }
+
+  pre {
+    white-space: pre-wrap !important;
+    word-break: break-word;
+    background: #f5f5f5 !important;
+    color: #000 !important;
+    border: 1px solid #d4d4d4;
+    box-shadow: none !important;
+  }
+
+  code {
+    background: #f5f5f5 !important;
+    color: #000 !important;
+  }
+
+  img,
+  svg {
+    max-width: 100% !important;
+  }
+
+  .shadow,
+  .shadow-sm,
+  .shadow-md,
+  .shadow-lg,
+  .shadow-xl {
+    box-shadow: none !important;
+  }
+
+  @page {
+    margin: 1.5cm;
+  }
+}

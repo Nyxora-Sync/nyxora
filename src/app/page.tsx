@@ -112,7 +112,7 @@ export default function HomePage() {
   return (
     <div className="flex min-h-screen flex-col">
       <Header />
-      <main className="flex-1">
+      <main id="main-content" tabIndex={-1} className="flex-1">
         {/* Hero Section */}
         <section className="relative overflow-hidden py-20 sm:py-32 lg:pb-32 xl:pb-36">
           <HeroVisual />

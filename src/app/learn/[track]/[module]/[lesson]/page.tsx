@@ -12,7 +12,8 @@ import { absoluteUrl, canonicalLearnPath, canonicalTrackForModule, pageMetadata 
 import { LessonClient } from '@/components/lesson-client'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
-import { Clock, Zap, BookOpen, Construction } from 'lucide-react'
+import { formatLessonUpdated, getLessonUpdated } from '@/lib/lesson-updates'
+import { Clock, Zap, BookOpen, Construction, CalendarDays } from 'lucide-react'
 import { cn, getDifficultyColor, getAccent } from '@/lib/utils'
 
 export function generateStaticParams() {
@@ -88,6 +89,7 @@ export default async function LessonPage({
   const canonicalPath = canonicalLearnPath(track.key, mod.key, lesson.id)
   const canonicalTrackKey = canonicalTrackForModule(track.key, mod.key)
   const canonicalTrack = getTrack(canonicalTrackKey) ?? track
+  const updated = getLessonUpdated(lesson.id)
   const breadcrumbSchema = {
     '@context': 'https://schema.org',
     '@type': 'BreadcrumbList',
@@ -110,6 +112,7 @@ export default async function LessonPage({
     isAccessibleForFree: true,
     inLanguage: 'en',
     timeRequired: `PT${lesson.estimatedMinutes}M`,
+    ...(updated ? { dateModified: `${updated}T00:00:00.000Z` } : {}),
     teaches: lesson.keyTakeaways,
     isPartOf: {
       '@type': 'Course',
@@ -127,7 +130,7 @@ export default async function LessonPage({
     <div className="flex min-h-screen flex-col">
       <JsonLd data={[breadcrumbSchema, learningResourceSchema]} />
       <Header />
-      <main className="flex-1">
+      <main id="main-content" tabIndex={-1} className="flex-1">
         <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 py-10 sm:py-14">
           {/* Breadcrumb */}
           <nav className="text-sm text-muted-foreground mb-6" aria-label="Breadcrumb">
@@ -176,6 +179,13 @@ export default async function LessonPage({
                 <BookOpen className="h-4 w-4" aria-hidden="true" />
                 {lesson.resources.length} curated resources
               </span>
+              {updated && (
+                <span className="flex items-center gap-1.5">
+                  <CalendarDays className="h-4 w-4" aria-hidden="true" />
+                  Last updated{' '}
+                  <time dateTime={updated}>{formatLessonUpdated(updated)}</time>
+                </span>
+              )}
             </div>
           </header>
 

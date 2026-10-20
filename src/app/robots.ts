@@ -13,6 +13,7 @@ export default function robots(): MetadataRoute.Robots {
           '/dashboard',
           '/auth/',
           '/admin/',
+          '/search',
           '/newsletter/confirm',
           '/newsletter/unsubscribe',
         ],

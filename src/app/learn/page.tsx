@@ -53,7 +53,7 @@ export default function LearnPage() {
   return (
     <div className="flex min-h-screen flex-col">
       <Header />
-      <main className="flex-1">
+      <main id="main-content" tabIndex={-1} className="flex-1">
         {/* Hero */}
         <section className="py-16 sm:py-24 bg-muted/30">
           <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 text-center">

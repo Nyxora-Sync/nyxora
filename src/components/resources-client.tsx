@@ -90,7 +90,7 @@ export function ResourcesClient({ resources }: { resources: DirectoryResource[] 
                 className={cn(
                   'rounded-full border px-3 py-1 text-xs font-medium transition-colors',
                   topic === t.key
-                    ? 'border-primary bg-primary text-primary-foreground'
+                    ? 'border-primary bg-primary text-primary-foreground hover:bg-primary/90'
                     : 'border-border bg-background hover:bg-accent'
                 )}
                 aria-pressed={topic === t.key}
@@ -111,7 +111,7 @@ export function ResourcesClient({ resources }: { resources: DirectoryResource[] 
                   className={cn(
                     'rounded-full border px-3 py-1 text-xs font-medium transition-colors',
                     type === t.key
-                      ? 'border-primary bg-primary text-primary-foreground'
+                      ? 'border-primary bg-primary text-primary-foreground hover:bg-primary/90'
                       : 'border-border bg-background hover:bg-accent'
                   )}
                   aria-pressed={type === t.key}
@@ -131,7 +131,7 @@ export function ResourcesClient({ resources }: { resources: DirectoryResource[] 
                   className={cn(
                     'rounded-full border px-3 py-1 text-xs font-medium transition-colors',
                     level === l.key
-                      ? 'border-primary bg-primary text-primary-foreground'
+                      ? 'border-primary bg-primary text-primary-foreground hover:bg-primary/90'
                       : 'border-border bg-background hover:bg-accent'
                   )}
                   aria-pressed={level === l.key}

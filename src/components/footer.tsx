@@ -37,6 +37,7 @@ const footerLinks: FooterColumn = {
   ],
   platform: [
     { name: 'About', href: '/about' },
+    { name: 'FAQ', href: '/faq' },
     { name: 'Privacy Policy', href: '/privacy' },
     { name: 'Terms of Service', href: '/terms' },
     { name: 'Accessibility', href: '/accessibility' },
@@ -58,7 +59,7 @@ const socialLinks: FooterLink[] = [
 
 export function Footer() {
   return (
-    <footer className="border-t border-border/50 bg-muted/30" role="contentinfo">
+    <footer data-site-footer data-print-hide className="border-t border-border/50 bg-muted/30" role="contentinfo">
       <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8 lg:py-16">
         <div className={cn('grid gap-8 md:grid-cols-2', NEWSLETTER_ENABLED ? 'lg:grid-cols-6' : 'lg:grid-cols-5')}>
           <div className="md:col-span-2 lg:col-span-2">

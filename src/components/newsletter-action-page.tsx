@@ -18,7 +18,7 @@ export function NewsletterActionPage({
   return (
     <div className="flex min-h-screen flex-col">
       <Header />
-      <main className="flex-1 py-12 sm:py-20">
+      <main id="main-content" tabIndex={-1} className="flex-1 py-12 sm:py-20">
         <div className="mx-auto max-w-xl px-4 sm:px-6">
           <Card className="overflow-hidden">
             <div className="h-1.5 bg-gradient-to-r from-emerald-500 via-teal-500 to-violet-500" />

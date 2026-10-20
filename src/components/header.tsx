@@ -1,11 +1,13 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
+import { usePathname } from 'next/navigation'
 import { useSession, signOut } from 'next-auth/react'
+import { useTheme } from 'next-themes'
 import { AnimatePresence, motion, useReducedMotion, useScroll, useSpring } from 'motion/react'
-import { Menu, X, Sun, Moon, User, LogOut, BookOpen, Trophy, Users, Code2, Rocket } from 'lucide-react'
+import { Menu, X, Sun, Moon, User, LogOut, BookOpen, Trophy, Users, Code2, Rocket, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
@@ -22,13 +24,35 @@ const navigation = [
 
 export function Header() {
   const { data: session, status } = useSession()
+  const { setTheme } = useTheme()
+  const pathname = usePathname()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [isDark, setIsDark] = useState(false)
   const reduceMotion = useReducedMotion()
   const { scrollYProgress } = useScroll()
   const progress = useSpring(scrollYProgress, { stiffness: 140, damping: 30, mass: 0.2 })
 
+  // next-themes owns the class on <html>; mirror it so the toggle exposes an
+  // accurate pressed state for assistive technology.
+  useEffect(() => {
+    const root = document.documentElement
+    const sync = () => setIsDark(root.classList.contains('dark'))
+    sync()
+    const observer = new MutationObserver(sync)
+    observer.observe(root, { attributes: true, attributeFilter: ['class'] })
+    return () => observer.disconnect()
+  }, [])
+
+  const activeNavigationHref = navigation
+    .filter((item) => pathname === item.href || pathname.startsWith(`${item.href}/`))
+    .sort((a, b) => b.href.length - a.href.length)[0]?.href
+
   return (
-    <header className="sticky top-0 z-50 w-full border-b border-border/50 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+    <header
+      data-site-header
+      data-print-hide
+      className="sticky top-0 z-50 w-full border-b border-border/50 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60"
+    >
       <nav className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8" aria-label="Main navigation">
         <div className="flex items-center gap-8">
           <Link href="/" className="flex shrink-0 items-center gap-2" aria-label="MERN Learn Home">
@@ -52,7 +76,7 @@ export function Header() {
                   `relative flex items-center gap-1.5 text-sm font-medium transition-colors after:absolute after:-bottom-1 after:left-0 after:h-px after:w-full after:origin-left after:scale-x-0 after:bg-primary after:transition-transform after:duration-200 after:content-[''] hover:text-primary hover:after:scale-x-100`,
                   session || !item.auth ? 'text-foreground' : 'text-muted-foreground'
                 )}
-                aria-current={item.href === '/learn' ? 'page' : undefined}
+                aria-current={activeNavigationHref === item.href ? 'page' : undefined}
               >
                 <item.icon className="h-4 w-4" aria-hidden="true" />
                 {item.name}
@@ -65,10 +89,27 @@ export function Header() {
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" onClick={() => document.documentElement.classList.toggle('dark')}>
+                <Button variant="ghost" size="icon" asChild>
+                  <Link href="/search" aria-label="Search the site">
+                    <Search className="h-5 w-5" aria-hidden="true" />
+                  </Link>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" align="center">
+                Search the site
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setTheme(isDark ? 'light' : 'dark')}
+                  aria-label="Dark mode"
+                  aria-pressed={isDark}
+                >
                   <Sun className="h-5 w-5 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" aria-hidden="true" />
                   <Moon className="absolute h-5 w-5 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" aria-hidden="true" />
-                  <span className="sr-only">Toggle theme</span>
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="bottom" align="center">
@@ -156,6 +197,14 @@ export function Header() {
             }
           >
             <div className="mx-auto flex max-w-7xl flex-col items-start gap-4 px-4 py-4">
+              <Link
+                href="/search"
+                className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-base font-medium text-foreground transition-colors hover:bg-accent"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                <Search className="h-5 w-5" aria-hidden="true" />
+                Search the site
+              </Link>
               {navigation.map((item) => (
                 <Link
                   key={item.name}
@@ -164,6 +213,7 @@ export function Header() {
                     'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-base font-medium transition-colors hover:bg-accent',
                     session || !item.auth ? 'text-foreground' : 'text-muted-foreground'
                   )}
+                  aria-current={activeNavigationHref === item.href ? 'page' : undefined}
                   onClick={() => setMobileMenuOpen(false)}
                 >
                   <item.icon className="h-5 w-5" aria-hidden="true" />

@@ -38,7 +38,7 @@ function SignInFallback() {
   return (
     <div className="flex min-h-screen flex-col">
       <Header />
-      <main className="flex-1 flex items-center justify-center px-4 py-12">
+      <main id="main-content" tabIndex={-1} className="flex-1 flex items-center justify-center px-4 py-12">
         <div className="w-full max-w-md">
           <div className="h-96 animate-pulse rounded-xl bg-muted" aria-hidden="true" />
         </div>
@@ -77,7 +77,7 @@ function SignInContent({ enabled }: { enabled: EnabledProviders }) {
   return (
     <div className="flex min-h-screen flex-col">
       <Header />
-      <main className="flex-1 flex items-center justify-center px-4 py-12 sm:py-20">
+      <main id="main-content" tabIndex={-1} className="flex-1 flex items-center justify-center px-4 py-12 sm:py-20">
         <div className="w-full max-w-md">
           <div className="text-center mb-8">
             <Link href="/" className="mb-6 inline-block">

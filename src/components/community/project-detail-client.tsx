@@ -17,6 +17,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Separator } from '@/components/ui/separator'
 import { UserChip } from '@/components/community/user-chip'
 import { UpvoteButton } from '@/components/community/upvote-button'
@@ -38,6 +39,8 @@ export function ProjectDetailClient({ id }: { id: string }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
   const [editOpen, setEditOpen] = useState(false)
 
   useEffect(() => {
@@ -69,16 +72,23 @@ export function ProjectDetailClient({ id }: { id: string }) {
 
   async function handleDelete() {
     if (!project || deleting) return
-    if (!window.confirm('Delete this project? Its comments will be removed too.')) return
     setDeleting(true)
-    const response = await fetch(`/api/community/projects/${project.id}`, { method: 'DELETE' })
-    if (response.ok) {
-      router.push('/community/showcase')
-      router.refresh()
-    } else {
+    setDeleteError(null)
+    try {
+      const response = await fetch(`/api/community/projects/${project.id}`, { method: 'DELETE' })
+      if (response.ok) {
+        setDeleteConfirmOpen(false)
+        router.push('/community/showcase')
+        router.refresh()
+        return
+      }
       const payload = await response.json().catch(() => null)
-      setError(payload?.error?.message ?? 'Could not delete the project.')
+      setDeleteError(payload?.error?.message ?? 'Could not delete the project.')
+    } catch {
+      setDeleteError('Could not delete the project. Check your connection and try again.')
+    } finally {
       setDeleting(false)
+      setDeleteConfirmOpen(false)
     }
   }
 
@@ -222,7 +232,10 @@ export function ProjectDetailClient({ id }: { id: string }) {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={handleDelete}
+                      onClick={() => {
+                        setDeleteError(null)
+                        setDeleteConfirmOpen(true)
+                      }}
                       disabled={deleting}
                       className="w-full gap-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
                     >
@@ -233,6 +246,11 @@ export function ProjectDetailClient({ id }: { id: string }) {
                       )}
                       Delete project
                     </Button>
+                    {deleteError && (
+                      <p className="text-sm text-destructive" role="alert">
+                        {deleteError}
+                      </p>
+                    )}
                   </div>
                 </>
               )}
@@ -263,6 +281,17 @@ export function ProjectDetailClient({ id }: { id: string }) {
           setEditOpen(false)
           router.refresh()
         }}
+      />
+
+      <ConfirmDialog
+        open={deleteConfirmOpen}
+        onOpenChange={setDeleteConfirmOpen}
+        title="Delete this project?"
+        description="The project, its screenshot, and all of its comments will be removed. This cannot be undone."
+        confirmLabel="Delete project"
+        destructive
+        pending={deleting}
+        onConfirm={handleDelete}
       />
 
       <Separator />

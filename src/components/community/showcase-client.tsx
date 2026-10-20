@@ -114,7 +114,7 @@ export function ShowcaseClient() {
                 aria-pressed={track === option}
                 className={cn(
                   'rounded-md px-3 py-1.5 text-xs font-medium capitalize transition-colors',
-                  track === option ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'
+                  track === option ? 'bg-muted text-foreground hover:bg-muted/70' : 'text-muted-foreground hover:text-foreground'
                 )}
               >
                 {option}

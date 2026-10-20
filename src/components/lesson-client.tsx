@@ -184,7 +184,7 @@ export function LessonClient({ lesson, track, moduleKey, prev, next, children }:
       )}
 
       {/* Notes */}
-      <Card>
+      <Card data-print-hide>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-lg">
             <StickyNote className="h-5 w-5 text-blue-500" aria-hidden="true" />
@@ -212,6 +212,7 @@ export function LessonClient({ lesson, track, moduleKey, prev, next, children }:
 
       {/* Complete + Bookmark */}
       <Card
+        data-print-hide
         className={cn(
           'transition-colors',
           completed ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-border/50'

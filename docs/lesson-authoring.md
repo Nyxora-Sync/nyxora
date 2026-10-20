@@ -112,5 +112,6 @@ Difficulty is `easy`, `medium`, or `hard`.
 - [ ] Quiz answer index is right.
 - [ ] Exercise is doable with only what the lesson taught.
 - [ ] No dead links in the lesson body.
+- [ ] Updated the lesson's date in `src/lib/lesson-updates.ts` if the content changed.
 - [ ] `npx tsc --noEmit`, `npx eslint src`, and `npm run build` pass.
 - [ ] The lesson page renders content (not the “coming soon” fallback).

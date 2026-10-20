@@ -115,14 +115,19 @@ export default function PrivacyPage() {
           short-lived CSRF cookie during sign-in. These are required for authentication.
         </li>
         <li>
-          <strong>Local storage:</strong> theme, progress, notes, and bookmarks. These stay on your
-          device.
+          <strong>Local storage:</strong> theme, progress, notes, bookmarks, and whether you dismissed
+          the cookie notice. These stay on your device.
         </li>
         <li>
           <strong>No tracking cookies:</strong> this site does not include advertising pixels,
           third-party analytics, or session-replay scripts.
         </li>
       </ul>
+      <p>
+        Outbound links may include UTM campaign parameters that identify MERN Learn as the referrer.
+        Those parameters are added to the destination URL; they do not set a cookie on this site or
+        track you across websites.
+      </p>
 
       <h2>Service providers</h2>
       <p>These providers process data on our behalf so the site works:</p>

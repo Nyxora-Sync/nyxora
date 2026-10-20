@@ -7,6 +7,7 @@ import { useSession } from 'next-auth/react'
 import { CornerDownRight, Loader2, MessageSquare, Send, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Textarea } from '@/components/ui/textarea'
 import { UserChip } from '@/components/community/user-chip'
 import type { CommentItem } from '@/lib/community-types'
@@ -40,6 +41,9 @@ export function CommentThread({
   const [replyTo, setReplyTo] = useState<string | null>(null)
   const [replyBody, setReplyBody] = useState('')
   const [replySubmitting, setReplySubmitting] = useState(false)
+
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; kind: 'comment' | 'reply' } | null>(null)
+  const [deletePending, setDeletePending] = useState(false)
 
   const total = comments.reduce((sum, comment) => sum + 1 + comment.replies.length, 0)
 
@@ -127,25 +131,32 @@ export function CommentThread({
   }
 
   async function handleDelete(id: string) {
-    if (!window.confirm('Delete this comment? Replies will be removed too.')) return
-    const response = await fetch(`/api/community/comments/${id}`, { method: 'DELETE' })
-    if (response.ok) {
-      setComments((current) =>
-        current
-          .filter((comment) => comment.id !== id)
-          .map((comment) => ({
-            ...comment,
-            replies: comment.replies.filter((reply) => reply.id !== id),
-          }))
-      )
-    } else {
-      const payload = await response.json().catch(() => null)
-      setFormError(payload?.error?.message ?? 'Could not delete the comment.')
+    setDeletePending(true)
+    try {
+      const response = await fetch(`/api/community/comments/${id}`, { method: 'DELETE' })
+      if (response.ok) {
+        setComments((current) =>
+          current
+            .filter((comment) => comment.id !== id)
+            .map((comment) => ({
+              ...comment,
+              replies: comment.replies.filter((reply) => reply.id !== id),
+            }))
+        )
+      } else {
+        const payload = await response.json().catch(() => null)
+        setFormError(payload?.error?.message ?? 'Could not delete the comment.')
+      }
+    } catch {
+      setFormError('Could not delete the comment. Check your connection and try again.')
+    } finally {
+      setDeletePending(false)
+      setDeleteTarget(null)
     }
   }
 
   return (
-    <section aria-labelledby="discussion-heading" className="space-y-5">
+    <section aria-labelledby="discussion-heading" data-print-hide className="space-y-5">
       <div className="flex flex-wrap items-end justify-between gap-2">
         <div>
           <h2 id="discussion-heading" className="flex items-center gap-2 text-2xl font-bold tracking-tight">
@@ -228,7 +239,7 @@ export function CommentThread({
                   {own && (
                     <button
                       type="button"
-                      onClick={() => handleDelete(comment.id)}
+                      onClick={() => setDeleteTarget({ id: comment.id, kind: 'comment' })}
                       className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
                       aria-label="Delete your comment"
                     >
@@ -289,7 +300,7 @@ export function CommentThread({
                             {replyOwn && (
                               <button
                                 type="button"
-                                onClick={() => handleDelete(reply.id)}
+                                onClick={() => setDeleteTarget({ id: reply.id, kind: 'reply' })}
                                 className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
                                 aria-label="Delete your reply"
                               >
@@ -308,6 +319,25 @@ export function CommentThread({
           })}
         </ul>
       )}
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null)
+        }}
+        title={deleteTarget?.kind === 'reply' ? 'Delete this reply?' : 'Delete this comment?'}
+        description={
+          deleteTarget?.kind === 'reply'
+            ? 'The reply will be removed immediately. This cannot be undone.'
+            : 'The comment and any replies will be removed immediately. This cannot be undone.'
+        }
+        confirmLabel={deleteTarget?.kind === 'reply' ? 'Delete reply' : 'Delete comment'}
+        destructive
+        pending={deletePending}
+        onConfirm={() => {
+          if (deleteTarget) return handleDelete(deleteTarget.id)
+        }}
+      />
     </section>
   )
 }
