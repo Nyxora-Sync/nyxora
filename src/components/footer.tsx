@@ -1,74 +1,54 @@
 import Link from 'next/link'
 import Image from 'next/image'
-import { Mail } from 'lucide-react'
+import { Mail, ExternalLink, Cpu, Smartphone, Brain, Cloud, Gamepad2, Monitor, Code2, Globe } from 'lucide-react'
 import { GithubIcon } from '@/components/icons/brand'
 import { NewsletterForm } from '@/components/newsletter-form'
 import { NEWSLETTER_ENABLED } from '@/lib/newsletter-feature'
+import { trackCategories } from '@/lib/curriculum'
 import { cn } from '@/lib/utils'
 
-interface FooterLink {
-  name: string
-  href: string
-  external?: boolean
-  icon?: React.ComponentType<{ className?: string; 'aria-hidden'?: boolean | 'true' | 'false' }>
+const categoryIcons: Record<string, React.ComponentType<{ className?: string }>> = {
+  'web-development': Globe,
+  'programming-languages': Code2,
+  'embedded-systems': Cpu,
+  'mobile-development': Smartphone,
+  'data-science': Brain,
+  'devops-cloud': Cloud,
+  'game-development': Gamepad2,
+  'desktop-apps': Monitor,
 }
 
-interface FooterColumn {
-  learn: FooterLink[]
-  community: FooterLink[]
-  platform: FooterLink[]
-  connect: FooterLink[]
-}
+const platformLinks = [
+  { name: 'About', href: '/about' },
+  { name: 'FAQ', href: '/faq' },
+  { name: 'Privacy Policy', href: '/privacy' },
+  { name: 'Terms of Service', href: '/terms' },
+  { name: 'Accessibility', href: '/accessibility' },
+  { name: 'Open Source', href: 'https://github.com/Nyxora-Sync/nyxora-sync', external: true },
+]
 
-const footerLinks: FooterColumn = {
-  learn: [
-    { name: 'Beginner Track', href: '/learn/beginner' },
-    { name: 'Developer Track', href: '/learn/developer' },
-    { name: 'Specializations', href: '/learn/specializations' },
-    { name: 'All Language Paths', href: '/learn/languages' },
-    { name: 'C', href: '/learn/c' },
-    { name: 'C++', href: '/learn/cpp' },
-    { name: 'C#', href: '/learn/csharp' },
-    { name: 'Python', href: '/learn/python' },
-    { name: 'All Lessons', href: '/learn' },
-    { name: 'Resources', href: '/resources' },
-    { name: 'Roadmap', href: '/roadmap' },
-  ],
-  community: [
-    { name: 'Lesson Discussions', href: '/community' },
-    { name: 'GitHub Issues', href: 'https://github.com/Nyxora-Sync/nyxora-sync/issues', external: true, icon: GithubIcon },
-    { name: 'Project Showcase', href: '/community/showcase' },
-    { name: 'Contribute', href: '/contribute' },
-    { name: 'Code of Conduct', href: '/code-of-conduct' },
-  ],
-  platform: [
-    { name: 'About', href: '/about' },
-    { name: 'FAQ', href: '/faq' },
-    { name: 'Privacy Policy', href: '/privacy' },
-    { name: 'Terms of Service', href: '/terms' },
-    { name: 'Accessibility', href: '/accessibility' },
-    { name: 'Open Source', href: 'https://github.com/Nyxora-Sync/nyxora-sync', external: true, icon: GithubIcon },
-  ],
-  connect: [
-    ...(NEWSLETTER_ENABLED
-      ? [{ name: 'Newsletter', href: '/newsletter', icon: Mail }]
-      : []),
-    { name: 'GitHub', href: 'https://github.com/Nyxora-Sync/nyxora-sync', external: true, icon: GithubIcon },
-    { name: 'Contact', href: '/contact', icon: Mail },
-  ],
-}
+const communityLinks = [
+  { name: 'Lesson Discussions', href: '/community' },
+  { name: 'Project Showcase', href: '/community/showcase' },
+  { name: 'GitHub Issues', href: 'https://github.com/Nyxora-Sync/nyxora-sync/issues', external: true },
+  { name: 'Contribute', href: '/contribute' },
+  { name: 'Code of Conduct', href: '/code-of-conduct' },
+]
 
-const socialLinks: FooterLink[] = [
-  { name: 'GitHub', href: 'https://github.com/Nyxora-Sync/nyxora-sync', icon: GithubIcon },
-  { name: 'Contact', href: '/contact', icon: Mail },
+const socialLinks = [
+  { name: 'GitHub', href: 'https://github.com/Nyxora-Sync/nyxora-sync', external: true },
+  { name: 'Contact', href: '/contact', external: false },
 ]
 
 export function Footer() {
+  const visibleCategories = trackCategories.filter((cat) => cat.order <= 4) // Show first 4 in footer
+
   return (
     <footer data-site-footer data-print-hide className="border-t border-border/50 bg-muted/30" role="contentinfo">
       <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8 lg:py-16">
-        <div className={cn('grid gap-8 md:grid-cols-2', NEWSLETTER_ENABLED ? 'lg:grid-cols-6' : 'lg:grid-cols-5')}>
-          <div className="md:col-span-2 lg:col-span-2">
+        <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-6">
+          {/* Brand */}
+          <div className="col-span-2 lg:col-span-2">
             <Link href="/" className="inline-block" aria-label="Nyxora Sync Home">
               <Image
                 src="/site-logo.jpg"
@@ -80,9 +60,7 @@ export function Footer() {
               />
             </Link>
             <p className="mt-4 max-w-xs text-sm text-muted-foreground">
-              Learn web development and programming languages for free. MERN, C, C++, C#, and Python
-              paths from beginner to mastery, with written lessons, projects, playgrounds, and
-              community.
+              Free learning paths for developers. Web, languages, embedded, and more — from beginner to mastery.
             </p>
             <div className="mt-6 flex gap-4">
               {socialLinks.map((social) => (
@@ -94,48 +72,53 @@ export function Footer() {
                   className="text-muted-foreground hover:text-foreground transition-colors"
                   aria-label={social.name}
                 >
-                  {social.icon && <social.icon className="h-5 w-5" aria-hidden="true" />}
+                  {social.name === 'GitHub' && (
+                    <GithubIcon className="h-5 w-5" aria-hidden="true" />
+                  )}
                 </a>
               ))}
             </div>
           </div>
 
-          <nav aria-label="Learn">
-            <h3 className="font-semibold">Learn</h3>
+          {/* Learning Categories */}
+          <nav aria-label="Learning Categories">
+            <h3 className="font-semibold">Categories</h3>
             <ul className="mt-4 space-y-3">
-              {footerLinks.learn.map((link) => (
-                <li key={link.name}>
-                  <Link href={link.href} className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-                    {link.name}
+              {trackCategories.map((category) => (
+                <li key={category.id}>
+                  <Link
+                    href={`/learn?category=${category.id}`}
+                    className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    {(() => {
+                      const Icon = categoryIcons[category.id];
+                      return <Icon className="h-4 w-4" aria-hidden="true" />;
+                    })()}
+                    {category.name}
                   </Link>
                 </li>
               ))}
             </ul>
           </nav>
 
-          <nav aria-label="Community">
-            <h3 className="font-semibold">Community</h3>
+          {/* Web Development Tracks */}
+          <nav aria-label="Web Development">
+            <h3 className="font-semibold">Web Development</h3>
             <ul className="mt-4 space-y-3">
-              {footerLinks.community.map((link) => (
-                <li key={link.name}>
-                  <a
-                    href={link.href}
-                    target={link.external ? '_blank' : undefined}
-                    rel={link.external ? 'noopener noreferrer' : undefined}
-                    className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    {link.icon && <link.icon className="h-3.5 w-3.5" aria-hidden="true" />}
-                    {link.name}
-                  </a>
-                </li>
-              ))}
+              <li><Link href="/learn/beginner" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Beginner Track</Link></li>
+              <li><Link href="/learn/developer" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Developer Track</Link></li>
+              <li><Link href="/learn/specializations" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Specializations</Link></li>
+              <li><Link href="/learn/languages" className="text-sm text-muted-foreground hover:text-foreground transition-colors">All Language Paths</Link></li>
+              <li><Link href="/learn" className="text-sm text-muted-foreground hover:text-foreground transition-colors">All Lessons</Link></li>
+              <li><Link href="/roadmap" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Full Roadmap</Link></li>
             </ul>
           </nav>
 
+          {/* Platform */}
           <nav aria-label="Platform">
             <h3 className="font-semibold">Platform</h3>
             <ul className="mt-4 space-y-3">
-              {footerLinks.platform.map((link) => (
+              {platformLinks.map((link) => (
                 <li key={link.name}>
                   <a
                     href={link.href}
@@ -143,7 +126,7 @@ export function Footer() {
                     rel={link.external ? 'noopener noreferrer' : undefined}
                     className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
                   >
-                    {link.icon && <link.icon className="h-3.5 w-3.5" aria-hidden="true" />}
+                    {link.external && <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />}
                     {link.name}
                   </a>
                 </li>
@@ -151,20 +134,25 @@ export function Footer() {
             </ul>
           </nav>
 
-          {NEWSLETTER_ENABLED && (
-            <div>
-              <h3 className="font-semibold">Stay Updated</h3>
-              <p className="mt-2 text-sm text-muted-foreground">
-                One confirmation email, then occasional updates when a new module or major resource
-                ships. No spam.
-              </p>
-              <NewsletterForm compact />
-              <p className="mt-3 text-xs text-muted-foreground">
-                Unsubscribe anytime; unsubscribing deletes the address.{' '}
-                <a href="/privacy" className="underline hover:text-foreground">Privacy Policy</a>
-              </p>
-            </div>
-          )}
+          {/* Community */}
+          <nav aria-label="Community">
+            <h3 className="font-semibold">Community</h3>
+            <ul className="mt-4 space-y-3">
+              {communityLinks.map((link) => (
+                <li key={link.name}>
+                  <a
+                    href={link.href}
+                    target={link.external ? '_blank' : undefined}
+                    rel={link.external ? 'noopener noreferrer' : undefined}
+                    className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    {link.external && <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />}
+                    {link.name}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </nav>
         </div>
 
         <div className="mt-12 border-t border-border/50 pt-8 text-center">
@@ -177,6 +165,9 @@ export function Footer() {
             <a href="https://github.com/Nyxora-Sync/nyxora-sync/blob/main/LICENSE" target="_blank" rel="noopener noreferrer" className="underline hover:text-foreground">
               MIT License
             </a>
+          </p>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Built with Next.js, React, and TypeScript. Deployed on Vercel.
           </p>
         </div>
       </div>

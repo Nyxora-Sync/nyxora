@@ -82,6 +82,26 @@ const cDocs = {
   http: docs('RFC 9110: HTTP Semantics', 'https://www.rfc-editor.org/rfc/rfc9110.html', 'IETF'),
   libc: docs('GNU C Library Manual', 'https://www.gnu.org/software/libc/manual/html_node/', 'GNU'),
   explorer: practice('Compiler Explorer', 'https://godbolt.org/', 'Compiler Explorer'),
+  // Advanced Systems
+  linuxKernel: docs('The Linux Kernel Documentation', 'https://www.kernel.org/doc/html/latest/', 'kernel.org'),
+  ldd3: docs('Linux Device Drivers, 3rd Ed.', 'https://lwn.net/Kernel/LDD3/', 'LWN.net'),
+  ld: docs('Linkers and Loaders', 'https://www.iecc.com/linker/', 'John R. Levine'),
+  elf: docs('ELF Format', 'https://refspecs.linuxfoundation.org/elf/', 'Linux Foundation'),
+  // Kernel/Driver
+  kernelNewbies: docs('Kernel Newbies', 'https://kernelnewbies.org/', 'Kernel Community'),
+  driverModel: docs('Linux Driver Model', 'https://www.kernel.org/doc/html/latest/driver-api/', 'kernel.org'),
+  charDrivers: docs('Character Device Drivers', 'https://www.kernel.org/doc/html/latest/driver-api/char.html', 'kernel.org'),
+  blockDrivers: docs('Block Device Drivers', 'https://www.kernel.org/doc/html/latest/block/', 'kernel.org'),
+  // RTOS/Embedded
+  freertos: docs('FreeRTOS Documentation', 'https://www.freertos.org/Documentation/RTOS_book.html', 'FreeRTOS'),
+  zephyr: docs('Zephyr RTOS Documentation', 'https://docs.zephyrproject.org/latest/', 'Zephyr Project'),
+  embc: docs('Embedded C Coding Standard', 'https://barrgroup.com/Embedded-Systems/Books/Embedded-C-Coding-Standard', 'Barr Group'),
+  misra: docs('MISRA C Guidelines', 'https://www.misra.org.uk/', 'MISRA'),
+  // Security/Hardening
+  seccomp: docs('seccomp BPF', 'https://www.kernel.org/doc/html/latest/userspace-api/seccomp_filter.html', 'kernel.org'),
+  caps: docs('Linux Capabilities', 'https://man7.org/linux/man-pages/man7/capabilities.7.html', 'Linux man-pages'),
+  selinux: docs('SELinux User Guide', 'https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/9/html/selinux_users_and_administrators_guide/', 'Red Hat'),
+  hardening: docs('Compiler Hardening Guide', 'https://hardening-guide.org/', 'Hardening Guide'),
 }
 
 const cModules: Module[] = [
@@ -310,6 +330,389 @@ const cModules: Module[] = [
 ]
 
 // ---------------------------------------------------------------------------
+// C - Advanced Modules (Modules 4-8)
+// ---------------------------------------------------------------------------
+
+const cAdvancedModules: Module[] = [
+  module(
+    'c-advanced-systems',
+    'Advanced Systems Programming',
+    'Deep dive into Linux internals, memory management, virtual filesystems, kernel modules, and eBPF for observability and networking.',
+    4,
+    30,
+    'blue',
+    [
+      lesson(
+        'c-linux-internals',
+        'Linux Kernel Architecture & Source Navigation',
+        'Understand the kernel source tree, process scheduler, virtual memory subsystem, and how to navigate and cross-reference kernel code effectively.',
+        1,
+        300,
+        'advanced',
+        50,
+        [
+          'Navigate the kernel source with tags and cross-references',
+          'Understand task_struct, mm_struct, and key kernel data structures',
+          'Trace a system call from userspace to kernel and back',
+          'Use kgdb and ftrace for kernel debugging',
+        ],
+        [cDocs.linuxKernel, cDocs.explorer, cDocs.gdb]
+      ),
+      lesson(
+        'c-memory-management-deep',
+        'Advanced Memory Management & Allocators',
+        'Explore slab allocators, page allocation, vmalloc, memory cgroups, and write a custom allocator for a specific workload.',
+        2,
+        300,
+        'advanced',
+        50,
+        [
+          'Distinguish page, slab, and vmalloc allocators',
+          'Understand zone watermarks and OOM killer logic',
+          'Implement a pool allocator with alignment and debugging',
+          'Profile allocator behaviour with kmemleak and tracepoints',
+        ],
+        [cDocs.linuxKernel, cDocs.libc, cDocs.valgrind]
+      ),
+      lesson(
+        'c-vfs-filesystems',
+        'Virtual Filesystem & Custom Filesystems',
+        'Implement a simple in-kernel filesystem using the VFS layer, understand inodes, dentries, superblocks, and the page cache.',
+        3,
+        300,
+        'advanced',
+        50,
+        [
+          'Register a filesystem type and mount it',
+          'Implement inode operations: create, lookup, link, unlink',
+          'Use the page cache for read/write performance',
+          'Handle concurrency with inode and VFS locks',
+        ],
+        [cDocs.linuxKernel, cDocs.ldd3, cDocs.reference]
+      ),
+      lesson(
+        'c-ebpf-observability',
+        'eBPF: Kernel Programmability & Observability',
+        'Write eBPF programs in C for tracing, networking, and security, compile with clang, and load them with libbpf or bpftool.',
+        4,
+        300,
+        'advanced',
+        55,
+        [
+          'Understand the eBPF verifier and instruction set limits',
+          'Write socket filters, kprobes, tracepoints, and XDP programs',
+          'Use maps for kernel-userspace communication',
+          'Build a minimal observability tool from scratch',
+        ],
+        [cDocs.linuxKernel, cDocs.explorer, docs('BCC Reference Guide', 'https://github.com/iovisor/bcc/blob/master/docs/reference_guide.md', 'iovisor')]
+      ),
+    ]
+  ),
+  module(
+    'c-kernel-drivers',
+    'Kernel & Driver Development',
+    'Character and block device drivers, interrupt handling, DMA, device trees, and the modern driver model with sysfs and udev integration.',
+    5,
+    32,
+    'blue',
+    [
+      lesson(
+        'c-char-device-drivers',
+        'Character Device Drivers & cdev',
+        'Build a complete character driver with file_operations, ioctl, poll, async notification, and proper reference counting.',
+        1,
+        300,
+        'advanced',
+        50,
+        [
+          'Allocate major/minor numbers dynamically',
+          'Implement open, read, write, llseek, ioctl, poll, release',
+          'Use cdev and device_create for sysfs/udev integration',
+          'Handle concurrent access with mutexes and wait queues',
+        ],
+        [cDocs.ldd3, cDocs.driverModel, cDocs.charDrivers]
+      ),
+      lesson(
+        'c-block-device-drivers',
+        'Block Device Drivers & Request Queues',
+        'Implement a block driver with blk-mq, request queues, bio submission, and understand I/O schedulers and elevator algorithms.',
+        2,
+        300,
+        'advanced',
+        50,
+        [
+          'Set up a blk_mq_tag_set and request queue',
+          'Handle bio construction, submission, and completion',
+          'Implement flush/discard for storage devices',
+          'Tune queue depth and understand latency vs throughput',
+        ],
+        [cDocs.ldd3, cDocs.blockDrivers, cDocs.linuxKernel]
+      ),
+      lesson(
+        'c-interrupts-dma',
+        'Interrupts, Bottom Halves & DMA',
+        'Handle hardware interrupts, defer work with tasklets, workqueues, and threaded IRQs, and set up coherent and streaming DMA mappings.',
+        3,
+        300,
+        'advanced',
+        50,
+        [
+          'Register and free interrupt handlers with proper flags',
+          'Choose the right bottom-half mechanism for latency',
+          'Map DMA buffers with consistent and streaming APIs',
+          'Handle MSI/MSI-X and interrupt affinity',
+        ],
+        [cDocs.ldd3, cDocs.linuxKernel, cDocs.driverModel]
+      ),
+      lesson(
+        'c-device-tree-platform',
+        'Device Tree, Platform Drivers & ACPI',
+        'Describe hardware in device tree bindings, write platform drivers with probe/remove, and handle ACPI enumeration for x86.',
+        4,
+        300,
+        'advanced',
+        50,
+        [
+          'Write and compile device tree overlays',
+          'Match drivers with compatible strings',
+          'Use devm_ managed resources for automatic cleanup',
+          'Support both device tree and ACPI probing',
+        ],
+        [cDocs.linuxKernel, cDocs.driverModel, docs('Device Tree Spec', 'https://www.devicetree.org/', 'devicetree.org')]
+      ),
+    ]
+  ),
+  module(
+    'c-rtos-embedded',
+    'RTOS & Embedded Systems',
+    'Real-time scheduling, FreeRTOS and Zephyr primitives, memory-constrained programming, deterministic I/O, and certification-aware coding.',
+    6,
+    30,
+    'blue',
+    [
+      lesson(
+        'c-freertos-fundamentals',
+        'FreeRTOS: Tasks, Queues & Synchronisation',
+        'Create tasks with priorities, use queues, semaphores, mutexes, and stream buffers, and understand scheduler behaviour and priority inversion.',
+        1,
+        270,
+        'advanced',
+        45,
+        [
+          'Configure configUSE_PREEMPTION and tick rate',
+          'Use queues for thread-safe data transfer',
+          'Prevent priority inversion with priority inheritance mutexes',
+          'Measure task stack usage with watermark checking',
+        ],
+        [cDocs.freertos, cDocs.embc, cDocs.explorer]
+      ),
+      lesson(
+        'c-zephyr-rtos',
+        'Zephyr RTOS: Kernel Services & Subsystems',
+        'Use Zephyr threads, kernel objects, device driver model, logging, shell, and build system (west/CMake) for multi-board projects.',
+        2,
+        300,
+        'advanced',
+        50,
+        [
+          'Configure Kconfig and devicetree for a target board',
+          'Write a Zephyr device driver with the driver model',
+          'Use the shell subsystem for interactive debugging',
+          'Manage power with PM policy and idle states',
+        ],
+        [cDocs.zephyr, cDocs.embc, cDocs.explorer]
+      ),
+      lesson(
+        'c-embedded-c-patterns',
+        'Embedded C Patterns: MISRA, Static Analysis & Safety',
+        'Apply MISRA C rules, use static analysis (Cppcheck, MISRA checkers), design for deterministic memory and time, and document safety cases.',
+        3,
+        270,
+        'advanced',
+        45,
+        [
+          'Adopt a subset of MISRA C:2012 for the project',
+          'Run static analysis in CI with baseline suppression',
+          'Avoid dynamic allocation after initialisation',
+          'Use circular buffers and fixed-size pools',
+        ],
+        [cDocs.misra, cDocs.embc, cDocs.valgrind]
+      ),
+      lesson(
+        'c-bare-metal-peripherals',
+        'Bare-Metal Peripheral Drivers: UART, SPI, I2C, ADC',
+        'Write register-level drivers for common peripherals, handle interrupts, use DMA for throughput, and build a hardware abstraction layer.',
+        4,
+        300,
+        'advanced',
+        50,
+        [
+          'Memory-map peripheral registers with volatile',
+          'Implement blocking and interrupt-driven transfers',
+          'Chain DMA descriptors for continuous streaming',
+          'Create a portable HAL header for multiple MCUs',
+        ],
+        [cDocs.freertos, cDocs.zephyr, cDocs.reference]
+      ),
+    ]
+  ),
+  module(
+    'c-security-hardening',
+    'Security & Hardening',
+    'Secure coding, exploit mitigation, capability-based sandboxing, seccomp filters, SELinux/AppArmor policies, and supply-chain integrity.',
+    7,
+    28,
+    'blue',
+    [
+      lesson(
+        'c-secure-coding',
+        'Secure C Coding: CWE, CERT & Undefined Behaviour',
+        'Eliminate classes of vulnerabilities: buffer overflows, integer wrap, use-after-free, format strings, and TOCTOU races.',
+        1,
+        270,
+        'advanced',
+        45,
+        [
+          'Use bounds-checking interfaces (C11 Annex K) or safe wrappers',
+          'Enable -fstack-protector-strong, -D_FORTIFY_SOURCE=3',
+          'Annotate with __attribute__((nonnull, alloc_size))',
+          'Fuzz with libFuzzer and AFL++ in CI',
+        ],
+        [cDocs.reference, cDocs.asan, cDocs.gcc]
+      ),
+      lesson(
+        'c-sandboxing-seccomp',
+        'Sandboxing with seccomp-bpf & Landlock',
+        'Design a syscall policy, build a seccomp filter with libseccomp, and use Landlock for filesystem sandboxing on modern kernels.',
+        2,
+        270,
+        'advanced',
+        45,
+        [
+          'Trace syscalls with strace to build a minimal allowlist',
+          'Handle errno gracefully when syscalls are denied',
+          'Use Landlock rulesets for path-based access control',
+          'Combine with namespaces for defence in depth',
+        ],
+        [cDocs.seccomp, cDocs.linuxKernel, cDocs.libc]
+      ),
+      lesson(
+        'c-capabilities-mac',
+        'Capabilities, SELinux & AppArmor',
+        'Drop root privileges with capability bounding sets, write SELinux policy modules, and confine applications with AppArmor profiles.',
+        3,
+        270,
+        'advanced',
+        45,
+        [
+          'Use capset and ambient capabilities for least privilege',
+          'Write a targeted SELinux module with type enforcement',
+          'Generate AppArmor profiles with aa-genprof',
+          'Audit denials with auditd and ausearch',
+        ],
+        [cDocs.caps, cDocs.selinux, docs('AppArmor Wiki', 'https://gitlab.com/apparmor/apparmor/-/wikis/home', 'AppArmor')]
+      ),
+      lesson(
+        'c-supply-chain-integrity',
+        'Supply Chain Integrity: SBOM, Reproducible Builds & Signing',
+        'Generate SBOMs with CycloneDX, achieve bit-for-bit reproducible builds, sign artifacts with cosign/sigstore, and verify in CI/CD.',
+        4,
+        270,
+        'advanced',
+        45,
+        [
+          'Use SPDX or CycloneDX for machine-readable SBOMs',
+          'Strip timestamps and paths for reproducibility',
+          'Sign containers and binaries with keyless sigstore',
+          'Verify provenance in deployment pipelines',
+        ],
+        [cDocs.hardening, docs('Reproducible Builds', 'https://reproducible-builds.org/', 'Reproducible Builds'), docs('Sigstore', 'https://www.sigstore.dev/', 'Sigstore')]
+      ),
+    ]
+  ),
+  module(
+    'c-advanced-topics',
+    'Advanced Topics & Emerging Areas',
+    'Userspace drivers with io_uring, DPDK for packet processing, WebAssembly with WASI, and cross-compilation for heterogeneous targets.',
+    8,
+    26,
+    'blue',
+    [
+      lesson(
+        'c-io-uring-async',
+        'io_uring: High-Performance Async I/O',
+        'Use the io_uring interface for submission/completion queues, linked requests, and poll-based completions without context switches.',
+        1,
+        270,
+        'advanced',
+        45,
+        [
+          'Set up ring buffers with io_uring_queue_init',
+          'Submit read/write/accept with IOSQE_FIXED_FILE',
+          'Use IORING_FEAT_FAST_POLL for network servers',
+          'Compare throughput vs epoll on real workloads',
+        ],
+        [cDocs.linuxKernel, docs('io_uring Tutorial', 'https://github.com/axboe/liburing', 'Jens Axboe'), cDocs.explorer]
+      ),
+      lesson(
+        'c-dpdk-packet-processing',
+        'DPDK: Data Plane Development Kit',
+        'Poll-mode drivers, hugepages, memory pools, ring buffers, and build a L2/L3 forwarding application with zero-copy.',
+        2,
+        300,
+        'advanced',
+        50,
+        [
+          'Bind NICs to vfio-pci or uio for userspace access',
+          'Configure hugepages and mempools for packet buffers',
+          'Use rte_ring for lock-free inter-core communication',
+          'Profile with cycle-accurate timestamps',
+        ],
+        [cDocs.linuxKernel, docs('DPDK Programmer\'s Guide', 'https://doc.dpdk.org/guides/', 'DPDK'), cDocs.explorer]
+      ),
+      lesson(
+        'c-wasm-wasi',
+        'WebAssembly & WASI: C Beyond the Browser',
+        'Compile C to WebAssembly with WASI, use wasmtime/wasm3 for embedding, and interop with host capabilities (files, sockets, clocks).',
+        3,
+        240,
+        'advanced',
+        40,
+        [
+          'Target wasm32-wasi with clang and wasi-sdk',
+          'Use wasi-libc for POSIX-like syscalls',
+          'Export functions and import host capabilities',
+          'Embed a Wasm runtime in a C host application',
+        ],
+        [docs('WASI Spec', 'https://github.com/WebAssembly/WASI', 'WebAssembly'), docs('wasmtime', 'https://wasmtime.dev/', 'Bytecode Alliance'), cDocs.explorer]
+      ),
+      lesson(
+        'c-cross-compilation',
+        'Cross-Compilation & Heterogeneous Targets',
+        'Build Canadian crosses, use sysroot and multiarch, target RISC-V, ARM64, and GPUs with OpenMP/OpenACC offloading.',
+        4,
+        240,
+        'advanced',
+        40,
+        [
+          'Construct a sysroot with headers and libraries',
+          'Use CMake toolchain files for reproducible crosses',
+          'Bootstrap glibc or musl for the target',
+          'Offload compute kernels with OpenMP target directives',
+        ],
+        [cDocs.gcc, cDocs.make, cDocs.linuxKernel]
+      ),
+    ]
+  ),
+]
+
+// Combine all C modules
+const cModulesAll: Module[] = [
+  ...cModules,
+  ...cAdvancedModules,
+]
+
+// ---------------------------------------------------------------------------
 // C++
 // ---------------------------------------------------------------------------
 
@@ -327,6 +730,26 @@ const cppDocs = {
   asan: docs('AddressSanitizer for Clang', 'https://clang.llvm.org/docs/AddressSanitizer.html', 'LLVM'),
   explorer: practice('Compiler Explorer', 'https://godbolt.org/', 'Compiler Explorer'),
   presets: docs('CMake Presets', 'https://cmake.org/cmake/help/latest/manual/cmake-presets.7.html', 'CMake'),
+  // Template Metaprogramming
+  tmp: docs('C++ Templates: The Complete Guide', 'https://www.tmplbook.com/', 'Vandevoorde/Josuttis'),
+  metaprog: docs('Template Metaprogramming', 'https://www.boost.org/doc/libs/release/libs/mpl/doc/refmanual.html', 'Boost'),
+  concepts: docs('C++20 Concepts', 'https://en.cppreference.com/w/cpp/language/constraints', 'cppreference'),
+  // Coroutines
+  coro: docs('C++ Coroutines', 'https://lewissbaker.github.io/2020/05/11/understanding_symmetric_transfer', 'Lewis Baker'),
+  coroTS: docs('C++ Coroutines TS', 'https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2019/n4868.pdf', 'ISO C++'),
+  cppcoro: docs('cppcoro Library', 'https://github.com/lewissbaker/cppcoro', 'Lewis Baker'),
+  // SIMD/Vectorization
+  simd: docs('std::simd (P1928)', 'https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2023/p1928r6.pdf', 'ISO C++'),
+  vcl: docs('VCL: Vector Class Library', 'https://github.com/vectorclass/version2', 'Agner Fog'),
+  intrinsics: docs('x86 Intrinsics Guide', 'https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html', 'Intel'),
+  // Modules
+  modules: docs('C++20 Modules', 'https://en.cppreference.com/w/cpp/language/modules', 'cppreference'),
+  bmi: docs('Module Implementation', 'https://clang.llvm.org/docs/Modules.html', 'LLVM'),
+  // Advanced Concurrency
+  exec: docs('std::execution (P2300)', 'https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2023/p2300r9.pdf', 'ISO C++'),
+  stdexec: docs('stdexec Reference', 'https://github.com/NVIDIA/stdexec', 'NVIDIA'),
+  folly: docs('Folly Concurrency', 'https://github.com/facebook/folly/blob/main/folly/docs/Async.md', 'Facebook'),
+  hazard: docs('Hazard Pointers & RCU', 'https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2023/p2540r1.pdf', 'ISO C++'),
 }
 
 const cppModules: Module[] = [
@@ -555,6 +978,389 @@ const cppModules: Module[] = [
 ]
 
 // ---------------------------------------------------------------------------
+// C++ - Advanced Modules (Modules 4-8)
+// ---------------------------------------------------------------------------
+
+const cppAdvancedModules: Module[] = [
+  module(
+    'cpp-template-metaprogramming',
+    'Template Metaprogramming & Concepts',
+    'Advanced template techniques, SFINAE, concepts, type traits, constexpr programming, and compile-time data structures.',
+    4,
+    30,
+    'indigo',
+    [
+      lesson(
+        'cpp-advanced-templates',
+        'Advanced Templates: Variadic, Alias & Deduction',
+        'Master variadic templates, template template parameters, alias templates, CTAD, and deduction guides for generic libraries.',
+        1,
+        270,
+        'advanced',
+        45,
+        [
+          'Expand parameter packs with fold expressions',
+          'Use alias templates for readable type transformations',
+          'Guide class template argument deduction',
+          'Write generic code that works with any callable',
+        ],
+        [cppDocs.reference, cppDocs.tmp, cppDocs.explorer]
+      ),
+      lesson(
+        'cpp-concepts-constraints',
+        'Concepts & Constrained Templates',
+        'Design expressive concepts, use requires expressions, constrain auto, and diagnose substitution failures with readable errors.',
+        2,
+        270,
+        'advanced',
+        45,
+        [
+          'Compose concepts with logical operators',
+          'Distinguish syntactic from semantic requirements',
+          'Use concept maps for retroactive modelling',
+          'Migrate SFINAE to concepts incrementally',
+        ],
+        [cppDocs.concepts, cppDocs.reference, cppDocs.guidelines]
+      ),
+      lesson(
+        'cpp-constexpr-metaprog',
+        'constexpr, consteval & Compile-Time Computation',
+        'Write algorithms that execute at compile time, use consteval for guaranteed evaluation, and build compile-time data structures.',
+        3,
+        300,
+        'advanced',
+        50,
+        [
+          'Allocate and construct in constant evaluation',
+          'Use std::is_constant_evaluated for hybrid paths',
+          'Build string/format parsers at compile time',
+          'Measure compile-time cost vs runtime benefit',
+        ],
+        [cppDocs.reference, cppDocs.tmp, cppDocs.explorer]
+      ),
+      lesson(
+        'cpp-type-traits-mpl',
+        'Type Traits, MPL & Policy-Based Design',
+        'Leverage <type_traits>, Boost.MPL/Boost.Hana, and policy classes to write configurable, high-performance generic components.',
+        4,
+        270,
+        'advanced',
+        45,
+        [
+          'Detect properties with detection idiom and concepts',
+          'Compose policies for orthogonal customisation points',
+          'Use Hana for heterogeneous compile-time sequences',
+          'Avoid template bloat with type erasure where needed',
+        ],
+        [cppDocs.metaprog, cppDocs.reference, cppDocs.explorer]
+      ),
+    ]
+  ),
+  module(
+    'cpp-coroutines',
+    'Coroutines & Asynchronous C++',
+    'Stackless coroutines, awaitable types, structured concurrency, async generators, and integration with executors and I/O frameworks.',
+    5,
+    28,
+    'indigo',
+    [
+      lesson(
+        'cpp-coroutine-basics',
+        'Coroutines: co_await, co_yield, co_return',
+        'Understand the coroutine state machine, promise types, and build basic awaitables for async operations and generators.',
+        1,
+        270,
+        'advanced',
+        45,
+        [
+          'Implement promise_type with return_value and yield_value',
+          'Distinguish co_await, co_yield, and co_return',
+          'Handle exceptions in the coroutine frame',
+          'Manage coroutine lifetime with coroutine_handle',
+        ],
+        [cppDocs.coro, cppDocs.reference, cppDocs.explorer]
+      ),
+      lesson(
+        'cpp-awaitables-schedulers',
+        'Awaitables, Schedulers & Structured Concurrency',
+        'Build awaitables for timers, I/O, and synchronization; integrate with execution contexts; compose with when_all/when_any.',
+        2,
+        300,
+        'advanced',
+        50,
+        [
+          'Implement await_ready/await_suspend/await_resume',
+          'Schedule continuation on a thread pool or io_uring',
+          'Use structured concurrency for child task lifetimes',
+          'Propagate cancellation through awaitable chains',
+        ],
+        [cppDocs.coroTS, cppDocs.cppcoro, cppDocs.exec]
+      ),
+      lesson(
+        'cpp-async-generators',
+        'Async Generators & Ranges Integration',
+        'Produce and consume asynchronous sequences with co_yield, adapt to ranges views, and handle backpressure in pipelines.',
+        3,
+        270,
+        'advanced',
+        45,
+        [
+          'Implement async_generator with single-pass semantics',
+          'Compose with views::transform, views::filter lazily',
+          'Buffer and batch for throughput vs latency',
+          'Clean up resources on early termination',
+        ],
+        [cppDocs.coro, cppDocs.ranges, cppDocs.cppcoro]
+      ),
+      lesson(
+        'cpp-coro-io-integration',
+        'Coroutines with I/O: io_uring, HTTP & gRPC',
+        'Integrate coroutines with Linux io_uring, build async HTTP clients, and wrap gRPC completion queues in awaitables.',
+        4,
+        300,
+        'advanced',
+        50,
+        [
+          'Wrap io_uring submission/completion in awaitables',
+          'Build a coroutine-based HTTP/1.1 and HTTP/2 client',
+          'Bridge gRPC async API to co_await',
+          'Benchmark coroutine overhead vs callback chains',
+        ],
+        [cppDocs.coro, cppDocs.folly, docs('liburing C++', 'https://github.com/axboe/liburing/tree/master/src/cpp', 'Jens Axboe')]
+      ),
+    ]
+  ),
+  module(
+    'cpp-simd-vectorization',
+    'SIMD, Vectorization & Hardware Acceleration',
+    'Explicit SIMD with std::simd, compiler auto-vectorization, intrinsic programming, and GPU offloading with SYCL/OpenMP.',
+    6,
+    26,
+    'indigo',
+    [
+      lesson(
+        'cpp-std-simd',
+        'std::simd: Portable Data-Parallel Types',
+        'Use fixed-size and native SIMD types, masks, permutations, reductions, and math operations with ABI stability.',
+        1,
+        240,
+        'advanced',
+        40,
+        [
+          'Choose simd<float> vs native_simd<float> for portability',
+          'Masked operations for conditional execution',
+          'Horizontal reductions and cross-lane shuffles',
+          'Interop with scalar code and standard algorithms',
+        ],
+        [cppDocs.simd, cppDocs.reference, cppDocs.explorer]
+      ),
+      lesson(
+        'cpp-auto-vectorization',
+        'Compiler Auto-Vectorization & Optimization',
+        'Write vectorization-friendly loops, use pragmas and attributes, analyse optimization reports, and fix missed opportunities.',
+        2,
+        270,
+        'advanced',
+        45,
+        [
+          'Align data and use restrict/assume_aligned',
+          'Enable -fopt-info-vec and read vectorization reports',
+          'Avoid pointer aliasing and loop-carried dependencies',
+          'Use #pragma GCC ivdep / #pragma clang loop vectorize',
+        ],
+        [cppDocs.explorer, cppDocs.guidelines, cppDocs.asan]
+      ),
+      lesson(
+        'cpp-intrinsics-simd',
+        'Explicit Intrinsics: AVX2, AVX-512, NEON, SVE',
+        'Write architecture-specific kernels with intrinsics, dispatch at runtime with cpuid, and maintain portable fallbacks.',
+        3,
+        300,
+        'advanced',
+        50,
+        [
+          'Use _mm256_* for AVX2, _mm512_* for AVX-512',
+          'Dispatch with __builtin_cpu_supports or cpuid',
+          'Handle alignment, tail masking, and remainder loops',
+          'Test on multiple microarchitectures in CI',
+        ],
+        [cppDocs.intrinsics, cppDocs.vcl, cppDocs.explorer]
+      ),
+      lesson(
+        'cpp-gpu-offload',
+        'GPU Offloading: SYCL, OpenMP Target & CUDA Interop',
+        'Offload parallel kernels to GPUs with SYCL (oneAPI) or OpenMP target, manage unified memory, and interop with CUDA.',
+        4,
+        300,
+        'advanced',
+        50,
+        [
+          'Write SYCL kernels with buffer/accessor model',
+          'Use OpenMP target teams distribute parallel for',
+          'Share memory with CUDA via interop APIs',
+          'Profile with NVIDIA Nsight / Intel VTune',
+        ],
+        [docs('SYCL 2020 Spec', 'https://www.khronos.org/sycl/', 'Khronos'), docs('OpenMP 5.2', 'https://www.openmp.org/spec-html/5.2/openmp.html', 'OpenMP'), cppDocs.explorer]
+      ),
+    ]
+  ),
+  module(
+    'cpp-modules-build',
+    'C++ Modules & Modern Build Systems',
+    'C++20 modules, module partitions, header units, BMI caching, and scaling builds with CMake, Bazel, and distributed compilation.',
+    7,
+    24,
+    'indigo',
+    [
+      lesson(
+        'cpp-modules-fundamentals',
+        'Modules: interface, implementation & partitions',
+        'Write module interface units, partition units, export declarations, and understand the module dependency graph.',
+        1,
+        240,
+        'advanced',
+        40,
+        [
+          'export module, export import, and module :partition',
+          'Reachability vs visibility in module interfaces',
+          'Header units: import <vector> vs #include <vector>',
+          'Migrate headers to modules incrementally',
+        ],
+        [cppDocs.modules, cppDocs.reference, cppDocs.explorer]
+      ),
+      lesson(
+        'cpp-build-systems-modules',
+        'CMake, Ninja & BMI Caching for Modules',
+        'Configure CMake for module scanning, use Ninja dyndep for implicit dependencies, and share BMIs across CI workers.',
+        2,
+        270,
+        'advanced',
+        45,
+        [
+          'set(CMAKE_CXX_SCAN_DEPENDENCIES ON)',
+          'Use CMAKE_CXX_MODULE_STD for standard library modules',
+          'Cache BMIs with ccache or sccache',
+          'Distributed builds with BuildBuddy or EngFlow',
+        ],
+        [cppDocs.cmake, cppDocs.bmi, cppDocs.presets]
+      ),
+      lesson(
+        'cpp-modules-packaging',
+        'Packaging Modules: BMI Distribution & ABI',
+        'Distribute precompiled module interfaces, manage ABI compatibility across compiler versions, and version module libraries.',
+        3,
+        240,
+        'advanced',
+        40,
+        [
+          'Ship BMI artifacts alongside headers for consumers',
+          'Use module versioning with semantic versioning',
+          'Handle ODR across module and header boundaries',
+          'Test with multiple compiler versions in CI',
+        ],
+        [cppDocs.modules, cppDocs.bmi, cppDocs.guidelines]
+      ),
+      lesson(
+        'cpp-bazel-modules',
+        'Bazel, Buck2 & Remote Execution for C++',
+        'Scale C++ builds with Bazel or Buck2, configure remote execution and caching, and integrate with module-aware toolchains.',
+        4,
+        270,
+        'advanced',
+        45,
+        [
+          'Write BUILD.bazel with cc_library and module rules',
+          'Configure remote execution (RBE) and caching',
+          'Migrate from CMake to Bazel incrementally',
+          'Hermetic toolchains for reproducible builds',
+        ],
+        [docs('Bazel C++ Rules', 'https://bazel.build/rules/cpp', 'Bazel'), docs('Buck2', 'https://buck2.build/', 'Meta'), cppDocs.explorer]
+      ),
+    ]
+  ),
+  module(
+    'cpp-advanced-concurrency',
+    'Advanced Concurrency & Parallelism',
+    'std::execution/senders-receivers, hazard pointers, RCU, lock-free data structures, and scalable synchronization patterns.',
+    8,
+    28,
+    'indigo',
+    [
+      lesson(
+        'cpp-senders-receivers',
+        'std::execution: Senders, Receivers & Schedulers',
+        'Compose asynchronous workflows with senders, customize with schedulers, and build algorithms on the execution framework.',
+        1,
+        270,
+        'advanced',
+        45,
+        [
+          'Connect senders to receivers with execution::connect',
+          'Use execution::schedule for scheduler ergonomics',
+          'Compose with then, let_value, let_error, let_stopped',
+          'Integrate with io_uring and thread pools via custom schedulers',
+        ],
+        [cppDocs.exec, cppDocs.stdexec, cppDocs.reference]
+      ),
+      lesson(
+        'cpp-lockfree-hazard',
+        'Lock-Free Programming: Hazard Pointers & Epoch Reclamation',
+        'Implement lock-free stacks, queues, and maps with hazard pointers or epoch-based reclamation for safe memory reclamation.',
+        2,
+        300,
+        'advanced',
+        50,
+        [
+          'Protect nodes with hazard_pointer_obj_base',
+          'Retire objects and reclaim in bulk with epochs',
+          'ABA prevention with tagged pointers',
+          'Verify linearizability with model checking',
+        ],
+        [cppDocs.hazard, cppDocs.reference, cppDocs.asan]
+      ),
+      lesson(
+        'cpp-rcu-scalable-sync',
+        'RCU, Read-Copy-Update & Scalable Synchronization',
+        'Use userspace RCU (urcu) for read-heavy workloads, implement seqlocks, and design sharded data structures for NUMA.',
+        3,
+        270,
+        'advanced',
+        45,
+        [
+          'Grace periods and quiescent state detection',
+          'urcu API: rcu_read_lock, synchronize_rcu',
+          'Per-CPU counters and sharded hash tables',
+          'Benchmark read-side scalability vs locks',
+        ],
+        [cppDocs.hazard, docs('userspace RCU', 'https://liburcu.org/', 'urcu'), cppDocs.explorer]
+      ),
+      lesson(
+        'cpp-concurrency-patterns',
+        'Patterns: Actor Model, Channels & Structured Parallelism',
+        'Build actor frameworks with senders/receivers, implement typed channels, and use structured parallelism for fork-join workloads.',
+        4,
+        270,
+        'advanced',
+        45,
+        [
+          'Actors as state machines with message mailboxes',
+          'Typed channels with send/receive semantics',
+          'Structured parallelism with execution::bulk',
+          'Supervision trees for fault tolerance',
+        ],
+        [cppDocs.exec, cppDocs.stdexec, cppDocs.folly]
+      ),
+    ]
+  ),
+]
+
+// Combine all C++ modules
+const cppModulesAll: Module[] = [
+  ...cppModules,
+  ...cppAdvancedModules,
+]
+
+// ---------------------------------------------------------------------------
 // C#
 // ---------------------------------------------------------------------------
 
@@ -577,6 +1383,22 @@ const csharpDocs = {
   spans: docs('Memory and Spans', 'https://learn.microsoft.com/en-us/dotnet/standard/memory-and-spans/', 'Microsoft Learn'),
   benchmark: docs('BenchmarkDotNet', 'https://learn.microsoft.com/en-us/dotnet/core/diagnostics/benchmarkdotnet', 'Microsoft Learn'),
   security: docs('ASP.NET Core Security', 'https://learn.microsoft.com/en-us/aspnet/core/security/', 'Microsoft Learn'),
+  // Source Generators
+  sourceGen: docs('C# Source Generators', 'https://learn.microsoft.com/en-us/dotnet/csharp/roslyn-sdk/source-generators-overview', 'Microsoft Learn'),
+  roslyn: docs('Roslyn API Reference', 'https://learn.microsoft.com/en-us/dotnet/csharp/roslyn-sdk/', 'Microsoft Learn'),
+  // MAUI/Blazor
+  maui: docs('.NET MAUI Documentation', 'https://learn.microsoft.com/en-us/dotnet/maui/', 'Microsoft Learn'),
+  blazor: docs('Blazor Documentation', 'https://learn.microsoft.com/en-us/aspnet/core/blazor/', 'Microsoft Learn'),
+  // gRPC/Cloud Native
+  grpc: docs('gRPC for .NET', 'https://learn.microsoft.com/en-us/aspnet/core/grpc/', 'Microsoft Learn'),
+  protobuf: docs('Protocol Buffers C#', 'https://developers.google.com/protocol-buffers/docs/csharptutorial', 'Google'),
+  k8s: docs('Kubernetes with .NET', 'https://learn.microsoft.com/en-us/dotnet/architecture/cloud-native/', 'Microsoft Learn'),
+  dapr: docs('Dapr for .NET', 'https://docs.dapr.io/developing-applications/sdks/dotnet/', 'Dapr'),
+  // Orleans/Distributed
+  orleans: docs('Orleans Documentation', 'https://learn.microsoft.com/en-us/dotnet/orleans/', 'Microsoft Learn'),
+  actors: docs('Actor Model in Orleans', 'https://learn.microsoft.com/en-us/dotnet/orleans/grains/', 'Microsoft Learn'),
+  signalr: docs('ASP.NET Core SignalR', 'https://learn.microsoft.com/en-us/aspnet/core/signalr/', 'Microsoft Learn'),
+  yarp: docs('YARP Reverse Proxy', 'https://microsoft.github.io/reverse-proxy/', 'Microsoft'),
 }
 
 const csharpModules: Module[] = [
@@ -805,6 +1627,389 @@ const csharpModules: Module[] = [
 ]
 
 // ---------------------------------------------------------------------------
+// C# - Advanced Modules (Modules 4-8)
+// ---------------------------------------------------------------------------
+
+const csharpAdvancedModules: Module[] = [
+  module(
+    'csharp-source-generators',
+    'Source Generators & Compiler Extensibility',
+    'Build incremental source generators, analyze syntax trees, emit code at compile time, and integrate with the Roslyn pipeline for AOT-ready libraries.',
+    4,
+    26,
+    'violet',
+    [
+      lesson(
+        'csharp-source-gen-basics',
+        'Source Generators: IIncrementalGenerator & Syntax Analysis',
+        'Create an incremental generator, register syntax receivers, analyze compilation units, and emit generated source files with proper diagnostics.',
+        1,
+        270,
+        'advanced',
+        45,
+        [
+          'Implement IIncrementalGenerator for incremental builds',
+          'Use SyntaxProvider.CreateSyntaxProvider for filtering',
+          'Transform syntax trees with SyntaxFactory and CSharpSyntaxTree',
+          'Report diagnostics with GeneratorExecutionContext',
+        ],
+        [csharpDocs.sourceGen, csharpDocs.roslyn, csharpDocs.testing]
+      ),
+      lesson(
+        'csharp-generators-advanced',
+        'Advanced Generators: Attributes, Interceptors & AOT',
+        'Drive generation with attributes, use interceptors for method substitution, and ensure generated code is AOT-compatible for NativeAOT.',
+        2,
+        300,
+        'advanced',
+        50,
+        [
+          'Read attribute data from INamedTypeSymbol',
+          'Apply [InterceptsLocation] for ahead-of-time weaving',
+          'Avoid reflection in generated code for trimming safety',
+          'Test generators with Verifier and snapshot testing',
+        ],
+        [csharpDocs.sourceGen, csharpDocs.roslyn, csharpDocs.diagnostics]
+      ),
+      lesson(
+        'csharp-roslyn-analyzers',
+        'Roslyn Analyzers & Code Fixes',
+        'Write diagnostic analyzers with code fixes, register them as NuGet packages, and enforce architectural rules at compile time.',
+        3,
+        270,
+        'advanced',
+        45,
+        [
+          'Implement DiagnosticAnalyzer with SyntaxNodeAnalysisContext',
+          'Provide CodeFixProvider with RegisterCodeFixesAsync',
+          'Package analyzers with buildTransitive for consumers',
+          'Suppress with #pragma warning or EditorConfig',
+        ],
+        [csharpDocs.roslyn, csharpDocs.testing, csharpDocs.security]
+      ),
+      lesson(
+        'csharp-compiler-pipeline',
+        'Compiler Pipeline: MSBuild, NuGet & Build Integration',
+        'Integrate generators into MSBuild, control execution order, debug generator execution, and publish as analyzer packages.',
+        4,
+        240,
+        'advanced',
+        40,
+        [
+          'Configure <IsRoslynComponent>true</IsRoslynComponent>',
+          'Use EmitCompilerGeneratedFiles for IDE integration',
+          'Debug with DOTNET_ROSLYN_DEBUGGER_ATTACH',
+          'Version and publish to NuGet with SourceLink',
+        ],
+        [csharpDocs.sourceGen, csharpDocs.cli, csharpDocs.testing]
+      ),
+    ]
+  ),
+  module(
+    'csharp-maui-blazor',
+    'Cross-Platform UI: MAUI & Blazor',
+    'Build native mobile/desktop apps with .NET MAUI and interactive web UIs with Blazor WebAssembly and Server, sharing logic via Razor components.',
+    5,
+    28,
+    'violet',
+    [
+      lesson(
+        'csharp-maui-fundamentals',
+        '.NET MAUI: Single Project, Handlers & Platform Integration',
+        'Structure a multi-platform app project, customize controls with handlers, access native APIs, and manage platform-specific resources.',
+        1,
+        270,
+        'advanced',
+        45,
+        [
+          'Single project with Platforms/ folder structure',
+          'Map controls to native views with IElementHandler',
+          'Use Platforms/ for iOS/Android/WinUI/MacCatalyst code',
+          'Access platform services via DependencyService or DI',
+        ],
+        [csharpDocs.maui, csharpDocs.di, csharpDocs.testing]
+      ),
+      lesson(
+        'csharp-blazor-webassembly',
+        'Blazor WebAssembly: Client-Side .NET in the Browser',
+        'Build interactive WASM apps, interop with JavaScript, optimize download size, and handle offline with service workers.',
+        2,
+        300,
+        'advanced',
+        50,
+        [
+          'Component lifecycle: OnInitialized, OnParametersSet',
+          'JS interop with IJSRuntime and [JSInvokable]',
+          'Lazy-load assemblies with OnNavigateAsync',
+          'PWA: manifest, service worker, and caching strategies',
+        ],
+        [csharpDocs.blazor, csharpDocs.testing, csharpDocs.diagnostics]
+      ),
+      lesson(
+        'csharp-blazor-server-hybrid',
+        'Blazor Server & Hybrid: Real-Time & Native Apps',
+        'Use SignalR for server-side rendering, build hybrid MAUI/Blazor apps, and share components across web and native.',
+        3,
+        270,
+        'advanced',
+        45,
+        [
+          'Circuit lifecycle and reconnection handling',
+          'Prerender for SEO and initial load performance',
+          'Blazor Hybrid: BlazorWebView in MAUI/WPF/WinForms',
+          'Share Razor class libraries across hosts',
+        ],
+        [csharpDocs.blazor, csharpDocs.signalr, csharpDocs.maui]
+      ),
+      lesson(
+        'csharp-ui-testing',
+        'UI Testing: bUnit, Playwright & MAUI Test Harness',
+        'Test Blazor components with bUnit, E2E test with Playwright, and automate MAUI UI tests with Appium or headless runners.',
+        4,
+        240,
+        'advanced',
+        40,
+        [
+          'Render components with bUnit TestContext',
+          'Snapshot test with Verify or ApprovalTests',
+          'Playwright for cross-browser E2E scenarios',
+          'MAUI: use Microsoft.Maui.TestUtils for headless tests',
+        ],
+        [csharpDocs.testing, csharpDocs.blazor, csharpDocs.maui]
+      ),
+    ]
+  ),
+  module(
+    'csharp-grpc-cloud',
+    'Cloud Native: gRPC, Dapr & Kubernetes',
+    'Build polyglot microservices with gRPC/Protobuf, implement resilient patterns with Dapr, and deploy to Kubernetes with .NET Aspire.',
+    6,
+    30,
+    'violet',
+    [
+      lesson(
+        'csharp-grpc-protobuf',
+        'gRPC Services: Contract-First, Streaming & Interceptors',
+        'Define services with .proto, generate C# code, implement unary/streaming RPCs, and add interceptors for auth/logging.',
+        1,
+        270,
+        'advanced',
+        45,
+        [
+          'Protobuf syntax: messages, services, options',
+          'Server streaming, client streaming, bidirectional',
+          'Interceptors for metadata, auth, retries, tracing',
+          'gRPC-Web for browser clients with Envoy',
+        ],
+        [csharpDocs.grpc, csharpDocs.protobuf, csharpDocs.testing]
+      ),
+      lesson(
+        'csharp-dapr-resilience',
+        'Dapr: Service Invocation, State, Pub/Sub & Actors',
+        'Use Dapr sidecar for service-to-service calls, state management, pub/sub, and virtual actors without infrastructure lock-in.',
+        2,
+        300,
+        'advanced',
+        50,
+        [
+          'DaprClient for typed service invocation',
+          'State stores: Redis, CosmosDB, PostgreSQL',
+          'Pub/Sub with CloudEvents and dead-letter topics',
+          'Actors as stateful, single-threaded units',
+        ],
+        [csharpDocs.dapr, csharpDocs.di, csharpDocs.channels]
+      ),
+      lesson(
+        'csharp-k8s-aspire',
+        'Kubernetes & .NET Aspire: Orchestration & Observability',
+        'Deploy to K8s with Helm/operators, use Aspire for local dev orchestration, and implement OpenTelemetry, health checks, and service discovery.',
+        3,
+        300,
+        'advanced',
+        50,
+        [
+          'Containerize with multi-stage Dockerfiles',
+          'Aspire AppHost for service dependencies',
+          'OpenTelemetry: traces, metrics, logs to OTLP',
+          'Liveness/readiness probes and graceful shutdown',
+        ],
+        [csharpDocs.k8s, csharpDocs.health, csharpDocs.diagnostics]
+      ),
+      lesson(
+        'csharp-yarp-gateway',
+        'YARP: Reverse Proxy, Load Balancing & API Gateway',
+        'Build an API gateway with YARP, route by path/host, transform requests/responses, and integrate with auth and rate limiting.',
+        4,
+        270,
+        'advanced',
+        45,
+        [
+          'Configure routes with transforms and metadata',
+          'Load balancing: round-robin, least-requests, session affinity',
+          'Integrate with Azure AD, Keycloak, or custom auth',
+          'Rate limiting with AspNetCoreRateLimit or Dapr',
+        ],
+        [csharpDocs.yarp, csharpDocs.security, csharpDocs.health]
+      ),
+    ]
+  ),
+  module(
+    'csharp-orleans-distributed',
+    'Distributed Systems: Orleans, Actors & Real-Time',
+    'Virtual actors with Orleans, grain persistence, clustering, streams, and real-time messaging with SignalR for scalable stateful services.',
+    7,
+    28,
+    'violet',
+    [
+      lesson(
+        'csharp-orleans-grains',
+        'Orleans Grains: Virtual Actors, State & Lifecycle',
+        'Define grain interfaces, implement stateful grains with IPersistentState, and understand activation/deactivation lifecycle.',
+        1,
+        270,
+        'advanced',
+        45,
+        [
+          'Grain identity: primary key and key extensions',
+          'IPersistentState<T> for automatic persistence',
+          'Timers, reminders, and grain calls',
+          'Versioning grain state with schema evolution',
+        ],
+        [csharpDocs.orleans, csharpDocs.actors, csharpDocs.channels]
+      ),
+      lesson(
+        'csharp-orleans-clustering',
+        'Clustering, Persistence & Multi-Region',
+        'Configure cluster membership, grain storage providers, and deploy multi-region with geo-redundancy and failover.',
+        2,
+        300,
+        'advanced',
+        50,
+        [
+          'Cluster providers: Azure Storage, Consul, ZooKeeper',
+          'Grain storage: ADO.NET, Azure Tables, MongoDB',
+          'Multi-region: primary/secondary with fallback',
+          'Observability: metrics, tracing, silo health',
+        ],
+        [csharpDocs.orleans, csharpDocs.diagnostics, csharpDocs.health]
+      ),
+      lesson(
+        'csharp-orleans-streams',
+        'Streams, Event Sourcing & Distributed Sagas',
+        'Use Orleans streams for event processing, implement event-sourced grains, and coordinate distributed transactions with sagas.',
+        3,
+        270,
+        'advanced',
+        45,
+        [
+          'Implicit vs explicit stream subscriptions',
+          'Event-sourced grains with IEventSourcedGrain',
+          'Saga pattern: orchestrator vs choreography',
+          'Idempotency and exactly-once semantics',
+        ],
+        [csharpDocs.orleans, csharpDocs.channels, csharpDocs.actors]
+      ),
+      lesson(
+        'csharp-signalr-realtime',
+        'SignalR: Real-Time at Scale with Orleans Backplane',
+        'Build real-time hubs, scale with Orleans or Redis backplane, and implement connection groups, streaming, and client diagnostics.',
+        4,
+        270,
+        'advanced',
+        45,
+        [
+          'Hub methods, clients, groups, and streaming',
+          'Orleans backplane for grain-to-client notifications',
+          'MessagePack/Protobuf protocols for throughput',
+          'Connection lifecycle and automatic reconnect',
+        ],
+        [csharpDocs.signalr, csharpDocs.orleans, csharpDocs.diagnostics]
+      ),
+    ]
+  ),
+  module(
+    'csharp-advanced-architecture',
+    'Advanced Architecture: Modularity, Testing & Evolution',
+    'Modular monoliths, vertical slice architecture, contract testing, API versioning, and evolutionary architecture practices.',
+    8,
+    26,
+    'violet',
+    [
+      lesson(
+        'csharp-modular-monolith',
+        'Modular Monolith: Boundaries, MediatR & Modules',
+        'Structure a solution with module boundaries, use MediatR for in-process messaging, and enforce architectural rules with analyzers.',
+        1,
+        270,
+        'advanced',
+        45,
+        [
+          'Vertical slices: features own their data and logic',
+          'MediatR for commands, queries, and domain events',
+          'Enforce boundaries with NDepend or Roslyn analyzers',
+          'Extract modules to services when needed',
+        ],
+        [csharpDocs.di, csharpDocs.testing, csharpDocs.roslyn]
+      ),
+      lesson(
+        'csharp-contract-testing',
+        'Contract Testing: Pact, Consumer-Driven Contracts',
+        'Write consumer-driven contracts with Pact, verify provider compliance, and integrate into CI for safe deployments.',
+        2,
+        240,
+        'advanced',
+        40,
+        [
+          'Define interactions in consumer tests',
+          'Verify with PactNet provider tests',
+          'Publish/broker contracts with Pactflow',
+          'Can-I-deploy for matrix compatibility',
+        ],
+        [csharpDocs.testing, csharpDocs.grpc, csharpDocs.diagnostics]
+      ),
+      lesson(
+        'csharp-api-versioning',
+        'API Versioning, Deprecation & Evolution',
+        'Implement versioning strategies, deprecate gracefully, and use OpenAPI/Swagger for client generation and documentation.',
+        3,
+        240,
+        'advanced',
+        40,
+        [
+          'URL, header, or query string versioning',
+          'MapToApiVersion and [ApiVersion] attributes',
+          'Deprecation sunset headers and client migration',
+          'Generate clients with NSwag or Kiota',
+        ],
+        [csharpDocs.minimalApi, csharpDocs.testing, csharpDocs.diagnostics]
+      ),
+      lesson(
+        'csharp-architecture-evolution',
+        'Evolutionary Architecture: Fitness Functions & Observability',
+        'Define architectural fitness functions, automate governance in CI, and build observable systems for continuous delivery.',
+        4,
+        240,
+        'advanced',
+        40,
+        [
+          'Fitness functions: cyclic deps, coupling, complexity',
+          'Run in CI with NetArchTest or ArchUnitNET',
+          'SLOs/SLIs for latency, error rate, saturation',
+          'Chaos engineering: fault injection in staging',
+        ],
+        [csharpDocs.diagnostics, csharpDocs.health, csharpDocs.testing]
+      ),
+    ]
+  ),
+]
+
+// Combine all C# modules
+const csharpModulesAll: Module[] = [
+  ...csharpModules,
+  ...csharpAdvancedModules,
+]
+
+// ---------------------------------------------------------------------------
 // Python
 // ---------------------------------------------------------------------------
 
@@ -831,6 +2036,29 @@ const pythonDocs = {
   sqlite: docs('sqlite3', 'https://docs.python.org/3/library/sqlite3.html', 'Python'),
   ruff: docs('Ruff Documentation', 'https://docs.astral.sh/ruff/', 'Astral'),
   mock: docs('unittest.mock', 'https://docs.python.org/3/library/unittest.mock.html', 'Python'),
+  // C Extensions
+  cApi: docs('Python C API', 'https://docs.python.org/3/c-api/', 'Python'),
+  cython: docs('Cython Documentation', 'https://cython.readthedocs.io/', 'Cython'),
+  pybind11: docs('pybind11', 'https://pybind11.readthedocs.io/', 'pybind11'),
+  nanobind: docs('nanobind', 'https://nanobind.readthedocs.io/', 'nanobind'),
+  // ML Ops
+  sklearn: docs('scikit-learn', 'https://scikit-learn.org/stable/', 'scikit-learn'),
+  mlflow: docs('MLflow', 'https://mlflow.org/docs/latest/', 'MLflow'),
+  dvc: docs('DVC: Data Version Control', 'https://dvc.org/doc', 'DVC'),
+  kubeflow: docs('Kubeflow', 'https://www.kubeflow.org/docs/', 'Kubeflow'),
+  // Distributed Systems
+  ray: docs('Ray Documentation', 'https://docs.ray.io/', 'Anyscale'),
+  dask: docs('Dask Documentation', 'https://docs.dask.org/', 'Dask'),
+  celery: docs('Celery Documentation', 'https://docs.celeryq.dev/', 'Celery'),
+  kafka: docs('confluent-kafka-python', 'https://docs.confluent.io/kafka-clients/python/current/', 'Confluent'),
+  // Async Patterns
+  trio: docs('Trio Documentation', 'https://trio.readthedocs.io/', 'Trio'),
+  anyio: docs('AnyIO Documentation', 'https://anyio.readthedocs.io/', 'AnyIO'),
+  httpxAsync: docs('HTTPX Async', 'https://www.python-httpx.org/async/', 'HTTPX'),
+  grpc: docs('gRPC Python', 'https://grpc.io/docs/languages/python/', 'gRPC'),
+  explorer: practice('Compiler Explorer', 'https://godbolt.org/', 'Compiler Explorer'),
+  git: docs('Git Documentation', 'https://git-scm.com/doc', 'Git'),
+  channels: docs('System.Threading.Channels', 'https://learn.microsoft.com/en-us/dotnet/standard/parallel-programming/channels', 'Microsoft Learn'),
 }
 
 const pythonModules: Module[] = [
@@ -1058,6 +2286,389 @@ const pythonModules: Module[] = [
   ),
 ]
 
+// ---------------------------------------------------------------------------
+// Python - Advanced Modules (Modules 4-8)
+// ---------------------------------------------------------------------------
+
+const pythonAdvancedModules: Module[] = [
+  module(
+    'python-c-extensions',
+    'C Extensions & Performance',
+    'Write high-performance extensions with the C API, Cython, pybind11, and nanobind; manage the GIL, memory, and ABI compatibility.',
+    4,
+    28,
+    'amber',
+    [
+      lesson(
+        'python-c-api-basics',
+        'Python C API: Types, Reference Counting & Modules',
+        'Create extension types with PyTypeObject, manage reference counts, define methods/slots, and build a minimal C extension module.',
+        1,
+        270,
+        'advanced',
+        45,
+        [
+          'PyObject_HEAD, ob_refcnt, and type object slots',
+          'INCREF/DECREF and borrowed vs stolen references',
+          'Module initialization with PyModuleDef and PyInit',
+          'Build with setuptools and pyproject.toml',
+        ],
+        [pythonDocs.cApi, pythonDocs.packaging, pythonDocs.explorer]
+      ),
+      lesson(
+        'python-cython',
+        'Cython: Typed Python for C Speed',
+        'Annotate Python with type declarations, compile to C, release the GIL for numerical loops, and interface with C/C++ libraries.',
+        2,
+        300,
+        'advanced',
+        50,
+        [
+          'cdef, cpdef, and typed memoryviews for buffers',
+          'nogil sections for parallel numerical work',
+          'cimport C headers and call C functions directly',
+          'Profile with cython -a for annotated HTML output',
+        ],
+        [pythonDocs.cython, pythonDocs.profile, pythonDocs.futures]
+      ),
+      lesson(
+        'python-pybind11',
+        'pybind11 & nanobind: Modern C++ Bindings',
+        'Expose C++ classes/functions to Python with pybind11, use nanobind for smaller binaries, and handle STL containers, eigenvalues, and custom casters.',
+        3,
+        270,
+        'advanced',
+        45,
+        [
+          'PYBIND11_MODULE and class_<T> bindings',
+          'Automatic STL vector/map/converter registration',
+          'Custom type casters for domain types',
+          'nanobind for reduced compile time and binary size',
+        ],
+        [pythonDocs.pybind11, pythonDocs.nanobind, pythonDocs.explorer]
+      ),
+      lesson(
+        'python-abi-compatibility',
+        'ABI Stability, manylinux & Distribution',
+        'Target the stable ABI (PEP 384), build manylinux wheels with cibuildwheel, and manage versioning for C extension packages.',
+        4,
+        240,
+        'advanced',
+        40,
+        [
+          'Py_LIMITED_API for stable ABI across versions',
+          'cibuildwheel for multi-platform wheel building',
+          'Auditwheel/delve for dependency bundling',
+          'Test matrix: CPython 3.8–3.13, pypy, musl/glibc',
+        ],
+        [pythonDocs.packaging, pythonDocs.cApi, pythonDocs.explorer]
+      ),
+    ]
+  ),
+  module(
+    'python-ml-ops',
+    'ML Ops: Experiment Tracking, Pipelines & Deployment',
+    'End-to-end ML lifecycle with MLflow, DVC, Kubeflow, and scikit-learn; reproducible experiments, model registry, and production serving.',
+    5,
+    30,
+    'amber',
+    [
+      lesson(
+        'python-mlflow-tracking',
+        'MLflow: Tracking, Projects & Model Registry',
+        'Log parameters, metrics, artifacts; package reproducible MLflow Projects; register and stage models for deployment.',
+        1,
+        270,
+        'advanced',
+        45,
+        [
+          'Autolog for sklearn, XGBoost, LightGBM, PyTorch',
+          'MLflow Projects with conda/docker environments',
+          'Model registry: staging, production, archived',
+          'Deploy with MLflow serve or export to Docker',
+        ],
+        [pythonDocs.mlflow, pythonDocs.sklearn, pythonDocs.packaging]
+      ),
+      lesson(
+        'python-dvc-pipelines',
+        'DVC: Data & Pipeline Version Control',
+        'Version datasets with DVC, define reproducible pipelines (dvc.yaml), cache to remote storage, and integrate with CI/CD.',
+        2,
+        300,
+        'advanced',
+        50,
+        [
+          'dvc add for large data files, dvc push/pull',
+          'dvc stage add / dvc.yaml for pipeline definition',
+          'Parameterize with params.yaml and foreach',
+          'Metrics/plots for experiment comparison',
+        ],
+        [pythonDocs.dvc, pythonDocs.sklearn, pythonDocs.git]
+      ),
+      lesson(
+        'python-kubeflow-serving',
+        'Kubeflow Pipelines & KServe for Model Serving',
+        'Build portable pipelines with Kubeflow SDK, compile to Argo YAML, and serve models with KServe (Triton, TorchServe, Triton).',
+        3,
+        300,
+        'advanced',
+        50,
+        [
+          'KFP DSL: @dsl.pipeline, components, and caching',
+          'Compile to Argo workflow YAML for cluster execution',
+          'KServe InferenceService for autoscaling endpoints',
+          'Canary rollout and model mesh for multi-model',
+        ],
+        [pythonDocs.kubeflow, pythonDocs.mlflow, pythonDocs.dvc]
+      ),
+      lesson(
+        'python-ml-testing',
+        'Testing ML: Data Validation, Model Tests & Monitoring',
+        'Validate data with Great Expectations, test model behaviour, and monitor drift/performance in production with Evidently.',
+        4,
+        270,
+        'advanced',
+        45,
+        [
+          'Great Expectations for data contracts',
+          'Behavioural tests: invariants, slice-based metrics',
+          'Evidently for data/target/concept drift dashboards',
+          'Alerting on distribution shifts and silent failures',
+        ],
+        [docs('Great Expectations', 'https://greatexpectations.io/', 'GX'), docs('Evidently', 'https://www.evidentlyai.com/', 'Evidently'), pythonDocs.mlflow]
+      ),
+    ]
+  ),
+  module(
+    'python-distributed-systems',
+    'Distributed Systems: Ray, Dask, Celery & Kafka',
+    'Scale Python workloads with Ray and Dask, build resilient task queues with Celery, and process event streams with Kafka.',
+    6,
+    32,
+    'amber',
+    [
+      lesson(
+        'python-ray-core',
+        'Ray: Distributed Compute, Actors & Datasets',
+        'Scale functions and classes with @ray.remote, use actors for stateful services, and process data with Ray Data.',
+        1,
+        300,
+        'advanced',
+        50,
+        [
+          'Tasks vs actors: stateless vs stateful distribution',
+          'Ray Data for scalable ETL and ML preprocessing',
+          'Placement groups for gang scheduling',
+          'Dashboard and profiling for bottleneck analysis',
+        ],
+        [pythonDocs.ray, pythonDocs.futures, pythonDocs.profile]
+      ),
+      lesson(
+        'python-dask-parallel',
+        'Dask: Parallel Arrays, DataFrames & Task Graphs',
+        'Scale NumPy/pandas with dask.array/dask.dataframe, build custom task graphs, and deploy on clusters with dask-gateway.',
+        2,
+        270,
+        'advanced',
+        45,
+        [
+          'Chunked arrays/frames with familiar APIs',
+          'Delayed for custom task graph construction',
+          'Distributed scheduler: workers, nanny, diagnostics',
+          'Interop with Ray, PySpark, and SQL engines',
+        ],
+        [pythonDocs.dask, pythonDocs.futures, pythonDocs.profile]
+      ),
+      lesson(
+        'python-celery-resilience',
+        'Celery: Resilient Task Queues, Canvas & Monitoring',
+        'Design idempotent tasks, compose workflows with canvas (chain, group, chord), and operate with Flower, retries, and dead letters.',
+        3,
+        300,
+        'advanced',
+        50,
+        [
+          'Task routing, priority queues, and rate limits',
+          'Canvas primitives: chain, group, chord, map, starmap',
+          'Acks late, retries with exponential backoff',
+          'Monitor with Flower and Prometheus exporters',
+        ],
+        [pythonDocs.celery, pythonDocs.channels, pythonDocs.logging]
+      ),
+      lesson(
+        'python-kafka-streams',
+        'Kafka: Producers, Consumers & Stream Processing',
+        'Build exactly-once producers, consumer groups with rebalance listeners, and stream processing with Faust or ksqlDB.',
+        4,
+        300,
+        'advanced',
+        50,
+        [
+          'Idempotent producers: enable.idempotence, transactional.id',
+          'Consumer group protocol and cooperative rebalancing',
+          'Faust for Kafka Streams-like DSL in Python',
+          'Schema registry with Avro/Protobuf for evolution',
+        ],
+        [pythonDocs.kafka, pythonDocs.celery, pythonDocs.asyncio]
+      ),
+    ]
+  ),
+  module(
+    'python-advanced-async',
+    'Advanced Async Patterns: Trio, AnyIO, gRPC & Structured Concurrency',
+    'Modern async with Trio/AnyIO, structured concurrency nurseries, gRPC async services, and async database drivers.',
+    7,
+    28,
+    'amber',
+    [
+      lesson(
+        'python-trio-structured',
+        'Trio: Structured Concurrency, Nurseries & Cancellation',
+        'Use nurseries for automatic child task management, cancellation scopes, and timeout propagation without manual tracking.',
+        1,
+        270,
+        'advanced',
+        45,
+        [
+          'async with trio.open_nursery() for lifecycles',
+          'CancellationScope for structured timeouts',
+          'MultiError for concurrent exception handling',
+          'Sync primitives: Event, Lock, Channel, MemoryReceiveChannel',
+        ],
+        [pythonDocs.trio, pythonDocs.anyio, pythonDocs.asyncio]
+      ),
+      lesson(
+        'python-anyio-portable',
+        'AnyIO: Portable Async Primitives for Trio & asyncio',
+        'Write library code that runs on both Trio and asyncio, use structured concurrency, and implement portable async iterators.',
+        2,
+        240,
+        'advanced',
+        40,
+        [
+          'anyio.create_task_group for nursery abstraction',
+          'Run asyncio and Trio code in the same process',
+          'Async file I/O, sockets, and subprocesses',
+          'Testing with anyio.testing and pytest-asyncio',
+        ],
+        [pythonDocs.anyio, pythonDocs.trio, pythonDocs.asyncio]
+      ),
+      lesson(
+        'python-grpc-async',
+        'gRPC Async: Unary, Streaming & Interceptors',
+        'Build async gRPC services with grpc.aio, implement streaming RPCs, and add interceptors for auth, logging, and tracing.',
+        3,
+        300,
+        'advanced',
+        50,
+        [
+          'grpc.aio.server and ServicerContext',
+          'Async generators for server/client/bidi streaming',
+          'Interceptors: ServerInterceptor and ClientInterceptor',
+          'Load balancing with xDS and service mesh',
+        ],
+        [pythonDocs.grpc, pythonDocs.asyncio, pythonDocs.httpxAsync]
+      ),
+      lesson(
+        'python-async-db-orm',
+        'Async Databases: SQLAlchemy 2.0, asyncpg & Tortoise ORM',
+        'Use SQLAlchemy 2.0 async session, asyncpg for raw performance, and Tortoise ORM for Django-like async models.',
+        4,
+        270,
+        'advanced',
+        45,
+        [
+          'AsyncSession and async_engine for connection pooling',
+          'Selectinload/joinedload for eager loading async',
+          'Tortoise ORM: models, migrations, and queryset API',
+          'Connection pooling and prepared statement caching',
+        ],
+        [docs('SQLAlchemy 2.0', 'https://docs.sqlalchemy.org/en/20/', 'SQLAlchemy'), docs('asyncpg', 'https://magicstack.github.io/asyncpg/', 'MagicStack'), docs('Tortoise ORM', 'https://tortoise-orm.readthedocs.io/', 'Tortoise')]
+      ),
+    ]
+  ),
+  module(
+    'python-advanced-topics',
+    'Advanced Topics: WASM, Packaging, Security & Performance',
+    'Python in WebAssembly (Pyodide), advanced packaging with Hatch/PDM, supply chain security, and interpreter internals.',
+    8,
+    26,
+    'amber',
+    [
+      lesson(
+        'python-pyodide-wasm',
+        'Pyodide: Python in the Browser via WebAssembly',
+        'Run Python in the browser with Pyodide, load packages from PyPI, interop with JavaScript, and build interactive notebooks.',
+        1,
+        240,
+        'advanced',
+        40,
+        [
+          'Load Pyodide CDN and runPythonAsync',
+          'micropip.install for pure-Python and binary wheels',
+          'jsproxy: convert between Python and JS objects',
+          'Bundle for offline with pyodide build',
+        ],
+        [docs('Pyodide', 'https://pyodide.org/en/stable/', 'Pyodide'), pythonDocs.packaging, pythonDocs.explorer]
+      ),
+      lesson(
+        'python-modern-packaging',
+        'Modern Packaging: Hatch, PDM & uv',
+        'Use Hatch for project management, PDM for dependency resolution, and uv for fast installs; manage lockfiles and environments.',
+        2,
+        240,
+        'advanced',
+        40,
+        [
+          'Hatch: environments, scripts, versioning, publishing',
+          'PDM: PEP 621, lockfiles, and cross-platform resolve',
+          'uv: Rust-based pip replacement for speed',
+          'Migration from poetry/flit/setuptools',
+        ],
+        [pythonDocs.packaging, pythonDocs.venv, docs('uv', 'https://github.com/astral-sh/uv', 'Astral')]
+      ),
+      lesson(
+        'python-supply-chain-security',
+        'Supply Chain Security: Sigstore, SBOM & Dependency Scanning',
+        'Sign packages with sigstore/keyless, generate SBOMs with CycloneDX, scan dependencies for vulnerabilities, and enforce policies.',
+        3,
+        270,
+        'advanced',
+        45,
+        [
+          'pip-audit / safety / osv-scanner for vuln scanning',
+          'Sigstore: keyless signing with OIDC identity',
+          'CycloneDX SBOM with cyclonedx-bom or syft',
+          'Enforce with pip-index-conf and trusted publishers',
+        ],
+        [docs('Sigstore Python', 'https://github.com/sigstore/sigstore-python', 'Sigstore'), docs('Syft', 'https://github.com/anchore/syft', 'Anchore'), pythonDocs.packaging]
+      ),
+      lesson(
+        'python-internals-perf',
+        'Interpreter Internals: CPython VM, Specializing & JIT',
+        'Understand the CPython bytecode interpreter, specialized adaptive interpreter (PEP 659), and the new JIT compiler (3.13+).',
+        4,
+        270,
+        'advanced',
+        45,
+        [
+          'Bytecode: dis, opcode, and stack machine',
+          'Specializing Adaptive Interpreter: quickening',
+          'Tier 2 JIT: copy-and-patch compilation (3.13+)',
+          'Profile-guided optimization with python -m compileall',
+        ],
+        [docs('CPython Dev Guide', 'https://devguide.python.org/', 'Python'), pythonDocs.profile, pythonDocs.explorer]
+      ),
+    ]
+  ),
+]
+
+// Combine all Python modules
+const pythonModulesAll: Module[] = [
+  ...pythonModules,
+  ...pythonAdvancedModules,
+]
+
 export const languageTracks: Track[] = [
   {
     id: 'c',
@@ -1067,7 +2678,7 @@ export const languageTracks: Track[] = [
     category: 'programming-languages',
     icon: 'FileCode',
     color: 'blue',
-    modules: cModules,
+    modules: cModulesAll,
   },
   {
     id: 'cpp',
@@ -1077,7 +2688,7 @@ export const languageTracks: Track[] = [
     category: 'programming-languages',
     icon: 'Braces',
     color: 'indigo',
-    modules: cppModules,
+    modules: cppModulesAll,
   },
   {
     id: 'csharp',
@@ -1087,7 +2698,7 @@ export const languageTracks: Track[] = [
     category: 'programming-languages',
     icon: 'Hash',
     color: 'violet',
-    modules: csharpModules,
+    modules: csharpModulesAll,
   },
   {
     id: 'python',
@@ -1097,6 +2708,6 @@ export const languageTracks: Track[] = [
     category: 'programming-languages',
     icon: 'Terminal',
     color: 'amber',
-    modules: pythonModules,
+    modules: pythonModulesAll,
   },
 ]
