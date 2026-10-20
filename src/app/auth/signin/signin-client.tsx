@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
-import { Loader2, BookOpen, ShieldCheck, Mail, Chrome } from 'lucide-react'
+import { Loader2, BookOpen, ShieldCheck, Mail, Globe } from 'lucide-react'
 import { GithubIcon } from '@/components/icons/brand'
 import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
@@ -23,7 +23,7 @@ export type EnabledProviders = {
 
 const oauthProviders = [
   { id: 'github', name: 'GitHub', icon: GithubIcon },
-  { id: 'google', name: 'Google', icon: Chrome },
+  { id: 'google', name: 'Google', icon: Globe },
 ]
 
 export function SignInClient({ enabled }: { enabled: EnabledProviders }) {
