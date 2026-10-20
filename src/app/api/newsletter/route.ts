@@ -7,6 +7,7 @@ import {
   verifyNewsletterToken,
 } from '@/lib/newsletter'
 import { siteUrl } from '@/lib/seo'
+import { NEWSLETTER_ENABLED } from '@/lib/newsletter-feature'
 
 const emailSchema = z
   .email('Enter a valid email address')
@@ -37,6 +38,10 @@ function databaseReady() {
 }
 
 export async function POST(request: Request) {
+  if (!NEWSLETTER_ENABLED) {
+    return jsonError(404, 'NEWSLETTER_DISABLED', 'The newsletter is not available.')
+  }
+
   if (!databaseReady()) {
     return jsonError(503, 'NEWSLETTER_UNAVAILABLE', 'Newsletter signup is temporarily unavailable.')
   }
@@ -147,6 +152,10 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  if (!NEWSLETTER_ENABLED) {
+    return jsonError(404, 'NEWSLETTER_DISABLED', 'The newsletter is not available.')
+  }
+
   if (!databaseReady()) {
     return jsonError(503, 'NEWSLETTER_UNAVAILABLE', 'Newsletter settings are temporarily unavailable.')
   }

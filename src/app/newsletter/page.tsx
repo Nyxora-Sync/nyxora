@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
+import { redirect } from 'next/navigation'
 import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
 import { Badge } from '@/components/ui/badge'
@@ -9,6 +10,7 @@ import { NewsletterForm } from '@/components/newsletter-form'
 import { BellOff, BookOpen, CheckCircle2, Mail, ShieldCheck, Sparkles } from 'lucide-react'
 import { GithubIcon } from '@/components/icons/brand'
 import { pageMetadata } from '@/lib/seo'
+import { NEWSLETTER_ENABLED } from '@/lib/newsletter-feature'
 
 export const metadata: Metadata = pageMetadata({
   title: 'Newsletter',
@@ -24,6 +26,8 @@ const updates = [
 ]
 
 export default function NewsletterPage() {
+  if (!NEWSLETTER_ENABLED) redirect('/')
+
   return (
     <div className="flex min-h-screen flex-col">
       <Header />

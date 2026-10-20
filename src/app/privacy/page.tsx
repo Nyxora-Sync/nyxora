@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { LegalPage } from '@/components/legal-page'
+import { NEWSLETTER_ENABLED } from '@/lib/newsletter-feature'
 import { pageMetadata } from '@/lib/seo'
 
 export const metadata = pageMetadata({
@@ -50,7 +51,10 @@ export default function PrivacyPage() {
         </li>
         <li>
           <strong>Preferences:</strong> theme, preferred track, whether your progress is visible to
-          others, and whether you opted into email updates.
+          others
+          {NEWSLETTER_ENABLED
+            ? ', and whether you opted into email updates.'
+            : ', and any legacy email-updates preference saved before the newsletter was paused.'}
         </li>
       </ul>
       <p>
@@ -71,17 +75,30 @@ export default function PrivacyPage() {
         its replies.
       </p>
 
-      <h2>Newsletter</h2>
-      <p>
-        If you subscribe, we store your email address, where it was collected (the footer or the
-        newsletter page), the signup date, and when a confirmation email was sent. We send one
-        confirmation email; only confirmed addresses receive updates. Confirmation and unsubscribe
-        links are signed and expire, and unsubscribe links appear in every newsletter. Unsubscribing
-        on the <Link href="/newsletter">newsletter page</Link> or through an email link deletes the
-        stored address. For each broadcast we keep an audit record containing the sender, subject,
-        recipient count, failure count, and date — not the email body. A global rate limit protects
-        the signup form from abuse.
-      </p>
+      {NEWSLETTER_ENABLED ? (
+        <>
+          <h2>Newsletter</h2>
+          <p>
+            If you subscribe, we store your email address, where it was collected (the footer or the
+            newsletter page), the signup date, and when a confirmation email was sent. We send one
+            confirmation email; only confirmed addresses receive updates. Confirmation and unsubscribe
+            links are signed and expire, and unsubscribe links appear in every newsletter. Unsubscribing
+            on the <Link href="/newsletter">newsletter page</Link> or through an email link deletes the
+            stored address. For each broadcast we keep an audit record containing the sender, subject,
+            recipient count, failure count, and date — not the email body. A global rate limit protects
+            the signup form from abuse.
+          </p>
+        </>
+      ) : (
+        <>
+          <h2>Newsletter (paused)</h2>
+          <p>
+            Newsletter signup and delivery are currently disabled. Any address submitted before the
+            newsletter was paused remains in the database but will not receive emails. To remove it,
+            use the <Link href="/contact">contact form</Link>.
+          </p>
+        </>
+      )}
 
       <h2>Contact messages</h2>
       <p>
@@ -122,8 +139,11 @@ export default function PrivacyPage() {
           <strong>GitHub and Google</strong> handle OAuth sign-in when you choose those providers.
         </li>
         <li>
-          <strong>Our email provider</strong> delivers sign-in links, newsletter confirmation and
-          broadcast emails, and, when configured, contact notifications.
+          <strong>Our email provider</strong> delivers sign-in links and, when configured, contact
+          notifications.
+          {NEWSLETTER_ENABLED
+            ? ' It also delivers newsletter confirmation and broadcast emails.'
+            : ' Newsletter delivery is currently disabled.'}
         </li>
       </ul>
       <p>
@@ -142,10 +162,17 @@ export default function PrivacyPage() {
       <ul>
         <li>Account data remains until you request deletion.</li>
         <li>Comments and projects remain until you delete them or your account is deleted.</li>
-        <li>
-          Newsletter addresses remain until you unsubscribe, including unconfirmed addresses that
-          never completed the double opt-in step.
-        </li>
+        {NEWSLETTER_ENABLED ? (
+          <li>
+            Newsletter addresses remain until you unsubscribe, including unconfirmed addresses that
+            never completed the double opt-in step.
+          </li>
+        ) : (
+          <li>
+            Newsletter addresses collected before the newsletter was paused remain stored until you
+            request deletion through the contact form.
+          </li>
+        )}
         <li>Contact messages remain until they are resolved or deleted.</li>
         <li>Hosting logs are retained according to the hosting provider&apos;s policy.</li>
       </ul>
@@ -158,10 +185,12 @@ export default function PrivacyPage() {
       <ul>
         <li>Edit your profile and hide your progress in <Link href="/settings">settings</Link>.</li>
         <li>Delete your comments and projects directly on the site.</li>
-        <li>
-          Unsubscribe from the newsletter on the <Link href="/newsletter">newsletter page</Link> or
-          through the link in any newsletter email.
-        </li>
+        {NEWSLETTER_ENABLED && (
+          <li>
+            Unsubscribe from the newsletter on the <Link href="/newsletter">newsletter page</Link> or
+            through the link in any newsletter email.
+          </li>
+        )}
         <li>
           Request an account export or deletion through the <Link href="/contact">contact form</Link>.
           We may ask you to verify control of the account first.

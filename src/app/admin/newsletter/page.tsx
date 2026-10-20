@@ -9,6 +9,7 @@ import { NewsletterAdminForm } from '@/components/admin/newsletter-admin-form'
 import { auth } from '@/lib/auth/auth'
 import { prisma } from '@/lib/db'
 import { isNewsletterAdmin, newsletterEmailConfigured } from '@/lib/newsletter'
+import { NEWSLETTER_ENABLED } from '@/lib/newsletter-feature'
 
 export const metadata: Metadata = {
   title: 'Newsletter admin',
@@ -23,6 +24,8 @@ function readableDate(date: Date): string {
 }
 
 export default async function NewsletterAdminPage() {
+  if (!NEWSLETTER_ENABLED) notFound()
+
   const session = await auth()
   if (!isNewsletterAdmin(session?.user?.email)) notFound()
   if (!process.env.DATABASE_URL) notFound()

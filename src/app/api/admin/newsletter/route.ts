@@ -8,6 +8,7 @@ import {
   sendNewsletterBroadcast,
 } from '@/lib/newsletter'
 import { siteUrl } from '@/lib/seo'
+import { NEWSLETTER_ENABLED } from '@/lib/newsletter-feature'
 
 // Sending to a small list can take longer than the default route budget. The
 // admin UI is intentionally limited to a few hundred recipients per send.
@@ -34,6 +35,10 @@ const schema = z
   .strict()
 
 export async function POST(request: Request) {
+  if (!NEWSLETTER_ENABLED) {
+    return jsonError(404, 'NEWSLETTER_DISABLED', 'The newsletter is not available.')
+  }
+
   if (!process.env.DATABASE_URL) {
     return jsonError(503, 'NEWSLETTER_UNAVAILABLE', 'The newsletter database is not configured.')
   }

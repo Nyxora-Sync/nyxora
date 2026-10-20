@@ -2,10 +2,15 @@ import { z } from 'zod'
 import { prisma } from '@/lib/db'
 import { jsonError } from '@/lib/community'
 import { verifyNewsletterToken } from '@/lib/newsletter'
+import { NEWSLETTER_ENABLED } from '@/lib/newsletter-feature'
 
 const schema = z.object({ token: z.string().trim().min(20).max(4096) }).strict()
 
 export async function POST(request: Request) {
+  if (!NEWSLETTER_ENABLED) {
+    return jsonError(404, 'NEWSLETTER_DISABLED', 'The newsletter is not available.')
+  }
+
   if (!process.env.DATABASE_URL) {
     return jsonError(503, 'NEWSLETTER_UNAVAILABLE', 'Newsletter settings are temporarily unavailable.')
   }

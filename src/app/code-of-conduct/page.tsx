@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { LegalPage } from '@/components/legal-page'
+import { NEWSLETTER_ENABLED } from '@/lib/newsletter-feature'
 import { pageMetadata } from '@/lib/seo'
 
 export const metadata = pageMetadata({
@@ -56,8 +57,8 @@ export default function CodeOfConductPage() {
       <h2>Scope</h2>
       <p>
         This code applies in lesson discussions, the project showcase, public profiles, GitHub
-        issues and pull requests, contact messages, the newsletter, and any space where you are
-        representing MERN Learn.
+        issues and pull requests, contact messages{NEWSLETTER_ENABLED && ', the newsletter'}, and
+        any space where you are representing MERN Learn.
       </p>
 
       <h2>Reporting</h2>

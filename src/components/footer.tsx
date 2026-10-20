@@ -3,6 +3,8 @@ import Image from 'next/image'
 import { Mail } from 'lucide-react'
 import { GithubIcon } from '@/components/icons/brand'
 import { NewsletterForm } from '@/components/newsletter-form'
+import { NEWSLETTER_ENABLED } from '@/lib/newsletter-feature'
+import { cn } from '@/lib/utils'
 
 interface FooterLink {
   name: string
@@ -41,7 +43,9 @@ const footerLinks: FooterColumn = {
     { name: 'Open Source', href: 'https://github.com/Nyxora-Sync/mern-learn', external: true, icon: GithubIcon },
   ],
   connect: [
-    { name: 'Newsletter', href: '/newsletter', icon: Mail },
+    ...(NEWSLETTER_ENABLED
+      ? [{ name: 'Newsletter', href: '/newsletter', icon: Mail }]
+      : []),
     { name: 'GitHub', href: 'https://github.com/Nyxora-Sync/mern-learn', external: true, icon: GithubIcon },
     { name: 'Contact', href: '/contact', icon: Mail },
   ],
@@ -56,7 +60,7 @@ export function Footer() {
   return (
     <footer className="border-t border-border/50 bg-muted/30" role="contentinfo">
       <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8 lg:py-16">
-        <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-6">
+        <div className={cn('grid gap-8 md:grid-cols-2', NEWSLETTER_ENABLED ? 'lg:grid-cols-6' : 'lg:grid-cols-5')}>
           <div className="md:col-span-2 lg:col-span-2">
             <Link href="/" className="inline-block" aria-label="MERN Learn Home">
               <Image
@@ -138,18 +142,20 @@ export function Footer() {
             </ul>
           </nav>
 
-          <div>
-            <h3 className="font-semibold">Stay Updated</h3>
-            <p className="mt-2 text-sm text-muted-foreground">
-              One confirmation email, then occasional updates when a new module or major resource
-              ships. No spam.
-            </p>
-            <NewsletterForm compact />
-            <p className="mt-3 text-xs text-muted-foreground">
-              Unsubscribe anytime; unsubscribing deletes the address.{' '}
-              <a href="/privacy" className="underline hover:text-foreground">Privacy Policy</a>
-            </p>
-          </div>
+          {NEWSLETTER_ENABLED && (
+            <div>
+              <h3 className="font-semibold">Stay Updated</h3>
+              <p className="mt-2 text-sm text-muted-foreground">
+                One confirmation email, then occasional updates when a new module or major resource
+                ships. No spam.
+              </p>
+              <NewsletterForm compact />
+              <p className="mt-3 text-xs text-muted-foreground">
+                Unsubscribe anytime; unsubscribing deletes the address.{' '}
+                <a href="/privacy" className="underline hover:text-foreground">Privacy Policy</a>
+              </p>
+            </div>
+          )}
         </div>
 
         <div className="mt-12 border-t border-border/50 pt-8 text-center">

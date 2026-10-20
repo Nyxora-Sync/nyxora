@@ -1,5 +1,7 @@
 import type { Metadata } from 'next'
+import { redirect } from 'next/navigation'
 import { NewsletterActionPage } from '@/components/newsletter-action-page'
+import { NEWSLETTER_ENABLED } from '@/lib/newsletter-feature'
 
 export const metadata: Metadata = {
   title: 'Confirm newsletter subscription',
@@ -14,6 +16,8 @@ export default async function NewsletterConfirmPage({
 }: {
   searchParams: Promise<{ token?: string | string[] }>
 }) {
+  if (!NEWSLETTER_ENABLED) redirect('/')
+
   const { token } = await searchParams
   return (
     <NewsletterActionPage

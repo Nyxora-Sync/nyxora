@@ -1,7 +1,15 @@
 # Newsletter and contact operations
 
-Both features store data in the shared PostgreSQL database and degrade to a `503`
-when `DATABASE_URL` is missing. The rest of the site keeps working.
+> **Newsletter status: disabled.** The newsletter is switched off with
+> `NEWSLETTER_ENABLED = false` in `src/lib/newsletter-feature.ts`. No signup form
+> or navigation link is rendered, `/newsletter` and its confirmation and
+> unsubscribe pages redirect home, and the newsletter and admin API routes return
+> `404`. The implementation, database models, and existing addresses are
+> preserved. See [Re-enabling the newsletter](#re-enabling-the-newsletter) before
+> turning it back on.
+>
+> The contact form is still active. It stores data in the shared PostgreSQL
+> database and degrades to a `503` when `DATABASE_URL` is missing.
 
 ## Newsletter
 
@@ -81,6 +89,26 @@ Limits and safety:
 - The message body is not stored. `NewsletterSend` records the sender, subject,
   recipient count, failure count, test flag, and date.
 
+### Re-enabling the newsletter
+
+1. Set `NEWSLETTER_ENABLED` to `true` in `src/lib/newsletter-feature.ts`.
+2. Add working SMTP credentials for the production environment. These normally
+   come from the email provider's dashboard; do not copy placeholder values from
+   `.env.example`.
+3. Set `ADMIN_EMAILS` to the exact email address used to sign in to the admin
+   account. Optionally set `NEWSLETTER_SECRET`; otherwise the code falls back to
+   `AUTH_SECRET`.
+4. Confirm `NEXT_PUBLIC_SITE_URL` is the public production origin, or let Vercel
+   derive it from `VERCEL_PROJECT_PRODUCTION_URL`, so confirmation and
+   unsubscribe links point at the live domain.
+5. Redeploy. Environment variable changes do not apply to an existing build.
+6. Submit a real address, open the confirmation email, and complete a test send
+   before broadcasting to the list.
+
+Existing rows from before double opt-in are unconfirmed and will not receive
+broadcasts. Any address submitted before the newsletter was disabled must be
+submitted again to receive a fresh confirmation email.
+
 ### Email configuration
 
 Newsletter signup and broadcasts require SMTP. The code accepts either:
@@ -106,7 +134,7 @@ instead of silently storing an address that can never be confirmed.
 ### Production checklist
 
 In Vercel, open **Project → Settings → Environment Variables → Production** and
-add the SMTP values from your local `.env.local`:
+add the SMTP values supplied by your email provider:
 
 - `EMAIL_SERVER_HOST`
 - `EMAIL_SERVER_PORT`
@@ -120,8 +148,9 @@ site. Optionally add `NEWSLETTER_SECRET`; otherwise the site falls back to
 origin (or let Vercel derive it from `VERCEL_PROJECT_PRODUCTION_URL`) so
 confirmation and unsubscribe links point at the live domain.
 
-Redeploy after changing environment variables. Until SMTP is configured,
-`POST /api/newsletter` intentionally returns `503` and no address is stored.
+Redeploy after changing environment variables. While the feature flag is off,
+the API returns `404` and no address is stored. When the flag is on but SMTP is
+not configured, `POST /api/newsletter` returns `503` and no address is stored.
 
 ### Database and operations
 

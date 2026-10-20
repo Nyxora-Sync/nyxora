@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Separator } from '@/components/ui/separator'
+import { NEWSLETTER_ENABLED } from '@/lib/newsletter-feature'
 
 interface SettingsResponse {
   id: string
@@ -238,7 +239,7 @@ export function SettingsClient() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Privacy & updates</CardTitle>
+          <CardTitle>{NEWSLETTER_ENABLED ? 'Privacy & updates' : 'Privacy'}</CardTitle>
           <CardDescription>Control what other learners can see.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -257,22 +258,26 @@ export function SettingsClient() {
             </span>
           </label>
 
-          <Separator />
+          {NEWSLETTER_ENABLED && (
+            <>
+              <Separator />
 
-          <label className="flex cursor-pointer items-start gap-3">
-            <input
-              type="checkbox"
-              checked={form.emailUpdates}
-              onChange={(event) => update('emailUpdates', event.target.checked)}
-              className="mt-1 h-4 w-4 rounded border-input accent-emerald-500"
-            />
-            <span>
-              <span className="block text-sm font-medium">Email me about new lessons</span>
-              <span className="block text-xs text-muted-foreground">
-                Occasional updates when a new module or major resource lands. No spam.
-              </span>
-            </span>
-          </label>
+              <label className="flex cursor-pointer items-start gap-3">
+                <input
+                  type="checkbox"
+                  checked={form.emailUpdates}
+                  onChange={(event) => update('emailUpdates', event.target.checked)}
+                  className="mt-1 h-4 w-4 rounded border-input accent-emerald-500"
+                />
+                <span>
+                  <span className="block text-sm font-medium">Email me about new lessons</span>
+                  <span className="block text-xs text-muted-foreground">
+                    Occasional updates when a new module or major resource lands. No spam.
+                  </span>
+                </span>
+              </label>
+            </>
+          )}
         </CardContent>
       </Card>
 
