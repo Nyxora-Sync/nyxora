@@ -1,6 +1,7 @@
 import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
 import { PlaygroundClient } from '@/components/playground-client'
+import { Reveal } from '@/components/motion/reveal'
 import { Badge } from '@/components/ui/badge'
 import { Code2 } from 'lucide-react'
 import { pageMetadata } from '@/lib/seo'
@@ -18,7 +19,7 @@ export default function PlaygroundPage() {
       <Header />
       <main className="flex-1">
         <section className="py-12 sm:py-16 border-b border-border/50">
-          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 text-center">
+          <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 text-center">
             <Badge variant="outline" className="mb-4">
               <Code2 className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
               No setup required
@@ -33,13 +34,13 @@ export default function PlaygroundPage() {
               Experiment with code right here in your browser. The web playground runs locally;
               Node, Express, and React environments launch in StackBlitz with one click.
             </p>
-          </div>
+          </Reveal>
         </section>
 
         <section className="py-12 sm:py-16">
-          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <PlaygroundClient />
-          </div>
+          </Reveal>
         </section>
       </main>
       <Footer />

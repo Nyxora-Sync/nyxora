@@ -10,6 +10,7 @@ import { JsonLd } from '@/components/structured-data'
 import { absoluteUrl, pageMetadata } from '@/lib/seo'
 import { Badge } from '@/components/ui/badge'
 import { TrackProgressClient } from '@/components/track-progress-client'
+import { Reveal } from '@/components/motion/reveal'
 import { BookOpen, Code2, Server, Database, Atom, Layers, FileCode, FlaskConical, ShieldCheck, Container, Network, Gauge, Rocket, ArrowRight, Clock, Zap, type LucideIcon } from 'lucide-react'
 import { cn, getAccent } from '@/lib/utils'
 
@@ -153,12 +154,12 @@ export default async function TrackPage({ params }: { params: Promise<{ track: s
                 const moduleLessons = module.lessons.length
                 const moduleXP = module.lessons.reduce((sum, l) => sum + l.xpReward, 0)
                 return (
-                  <Link
-                    key={module.id}
-                    href={`/learn/${track.key}/${module.key}`}
-                    className="group block"
-                  >
-                    <div className="flex items-center gap-4 rounded-xl border border-border/50 bg-card p-5 sm:p-6 transition-all hover:border-border hover:shadow-md">
+                  <Reveal key={module.id} delay={Math.min(index * 0.04, 0.24)}>
+                    <Link
+                      href={`/learn/${track.key}/${module.key}`}
+                      className="group block"
+                    >
+                    <div className="flex items-center gap-4 rounded-xl border border-border/50 bg-card p-5 sm:p-6 transition-all motion-safe:hover:-translate-y-0.5 hover:border-border hover:shadow-md">
                       <div
                         className={cn('hidden sm:flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-xl', getAccent(track.color).icon)}
                       >
@@ -188,8 +189,9 @@ export default async function TrackPage({ params }: { params: Promise<{ track: s
                         className="h-5 w-5 flex-shrink-0 text-muted-foreground transition-transform group-hover:translate-x-1 group-hover:text-foreground"
                         aria-hidden="true"
                       />
-                    </div>
-                  </Link>
+                      </div>
+                    </Link>
+                  </Reveal>
                 )
               })}
             </div>

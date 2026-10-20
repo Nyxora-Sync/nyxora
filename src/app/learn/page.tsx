@@ -5,6 +5,7 @@ import { Separator } from '@/components/ui/separator'
 import { BookOpen, Code2, ArrowRight, CheckCircle, Clock, Users, Trophy, Code2 as Code2Icon } from 'lucide-react'
 import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
+import { Reveal } from '@/components/motion/reveal'
 import { cn, getAccent } from '@/lib/utils'
 import { tracks as curriculumTracks } from '@/lib/curriculum'
 import { pageMetadata } from '@/lib/seo'
@@ -70,11 +71,11 @@ export default function LearnPage() {
 
         {/* Track Cards */}
         <section className="py-16 sm:py-20">
-          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <div className="grid gap-8 lg:grid-cols-2">
               {tracks.map((track) => (
                 <Link key={track.key} href={`/learn/${track.key}`} className="group">
-                  <Card className="relative overflow-hidden transition-all hover:shadow-xl h-full border-border/50">
+                  <Card className="relative overflow-hidden transition-all motion-safe:hover:-translate-y-1 hover:shadow-xl h-full border-border/50">
                     <div className={cn('absolute top-0 left-0 right-0 h-1 bg-gradient-to-r', getAccent(track.color).gradient)} />
                     <CardHeader>
                       <div className={cn('flex items-center gap-2 text-sm font-medium', getAccent(track.color).text)}>
@@ -124,12 +125,12 @@ export default function LearnPage() {
                 </Link>
               ))}
             </div>
-          </div>
+          </Reveal>
         </section>
 
         {/* Why MERN Learn */}
         <section className="py-16 sm:py-20 bg-muted/30">
-          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <div className="text-center max-w-3xl mx-auto mb-16">
               <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">Why Learn with MERN Learn?</h2>
               <p className="mt-4 text-lg text-muted-foreground">
@@ -145,7 +146,7 @@ export default function LearnPage() {
                 { icon: Users, title: 'Community', desc: 'Lesson discussions, a project showcase, and public learner profiles.', color: 'blue' },
                 { icon: BookOpen, title: 'Curated Resources', desc: 'Hand-picked from freeCodeCamp, Net Ninja, official docs, and top educators.', color: 'indigo' },
               ].map((feature) => (
-                <Card key={feature.title} className="group hover:shadow-lg transition-shadow">
+                <Card key={feature.title} className="group transition-all motion-safe:hover:-translate-y-0.5 hover:shadow-lg">
                   <CardContent className="pt-6">
                     <div className={cn('mb-4 flex h-12 w-12 items-center justify-center rounded-xl', getAccent(feature.color).icon)}>
                       <feature.icon className="h-6 w-6" aria-hidden="true" />
@@ -156,12 +157,12 @@ export default function LearnPage() {
                 </Card>
               ))}
             </div>
-          </div>
+          </Reveal>
         </section>
 
         {/* CTA */}
         <section className="py-16 sm:py-20">
-          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <Card className="relative overflow-hidden bg-gradient-to-br from-emerald-500/10 via-violet-500/10 to-amber-500/10 border-border/50">
               <CardContent className="relative py-12 sm:py-16 text-center">
                 <div className="mx-auto max-w-2xl">
@@ -188,7 +189,7 @@ export default function LearnPage() {
                 </div>
               </CardContent>
             </Card>
-          </div>
+          </Reveal>
         </section>
       </main>
       <Footer />

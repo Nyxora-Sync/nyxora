@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { Textarea } from '@/components/ui/textarea'
 import { CommentThread } from '@/components/community/comment-thread'
+import { Reveal } from '@/components/motion/reveal'
 import {
   CheckCircle2, Circle, ExternalLink, Play, FileText, BookOpen, Code2,
   ChevronLeft, ChevronRight, Zap, Bookmark, BookmarkCheck, Lightbulb, StickyNote,
@@ -67,7 +68,8 @@ export function LessonClient({ lesson, track, moduleKey, prev, next, children }:
     <div className="space-y-10">
       {/* Key Takeaways */}
       {lesson.keyTakeaways.length > 0 && (
-        <Card className="border-amber-500/20 bg-amber-500/5">
+        <Reveal>
+          <Card className="border-amber-500/20 bg-amber-500/5">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-lg">
               <Lightbulb className="h-5 w-5 text-amber-500" aria-hidden="true" />
@@ -83,8 +85,9 @@ export function LessonClient({ lesson, track, moduleKey, prev, next, children }:
                 </li>
               ))}
             </ul>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        </Reveal>
       )}
 
       {/* Written lesson */}
@@ -95,7 +98,8 @@ export function LessonClient({ lesson, track, moduleKey, prev, next, children }:
       )}
 
       {/* Resources */}
-      <section aria-labelledby="resources-heading">
+      <Reveal>
+        <section aria-labelledby="resources-heading">
         <div className="flex items-center justify-between mb-5">
           <h2 id="resources-heading" className="text-2xl font-bold tracking-tight">
             Go deeper
@@ -115,7 +119,7 @@ export function LessonClient({ lesson, track, moduleKey, prev, next, children }:
                 href={resource.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="group flex flex-col rounded-xl border border-border/50 bg-card p-4 transition-all hover:border-border hover:shadow-md"
+                className="group flex flex-col rounded-xl border border-border/50 bg-card p-4 transition-all motion-safe:hover:-translate-y-0.5 hover:border-border hover:shadow-md"
               >
                 <div className="flex items-center gap-2 mb-2">
                   <div className={cn('flex h-8 w-8 items-center justify-center rounded-lg flex-shrink-0', getAccent(meta.color).icon)}>
@@ -151,12 +155,14 @@ export function LessonClient({ lesson, track, moduleKey, prev, next, children }:
               </a>
             )
           })}
-        </div>
-      </section>
+          </div>
+        </section>
+      </Reveal>
 
       {/* Playground CTA */}
       {lesson.playground && (
-        <Card className="border-violet-500/20 bg-violet-500/5">
+        <Reveal>
+          <Card className="border-violet-500/20 bg-violet-500/5">
           <CardContent className="flex flex-col gap-4 pt-6 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-start gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-500/15 text-violet-500 flex-shrink-0">
@@ -172,8 +178,9 @@ export function LessonClient({ lesson, track, moduleKey, prev, next, children }:
                 Open Playground <ExternalLink className="ml-2 h-4 w-4" aria-hidden="true" />
               </Link>
             </Button>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        </Reveal>
       )}
 
       {/* Notes */}

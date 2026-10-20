@@ -8,6 +8,7 @@ import { Loader2, Plus, Rocket, Search, Share2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ProjectCard } from '@/components/community/project-card'
+import { Reveal } from '@/components/motion/reveal'
 import { ShareProjectDialog } from '@/components/community/share-project-dialog'
 import type { ProjectListItem } from '@/lib/community-types'
 import { cn } from '@/lib/utils'
@@ -190,8 +191,10 @@ export function ShowcaseClient() {
             {debouncedQuery ? ` matching “${debouncedQuery}”` : ''}
           </p>
           <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            {projects.map((project) => (
-              <ProjectCard key={project.id} project={project} />
+            {projects.map((project, index) => (
+              <Reveal key={project.id} className="h-full" delay={Math.min(index * 0.035, 0.2)} distance={12}>
+                <ProjectCard project={project} />
+              </Reveal>
             ))}
           </div>
           {nextCursor && (

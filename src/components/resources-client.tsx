@@ -179,7 +179,7 @@ export function ResourcesClient({ resources }: { resources: DirectoryResource[] 
                 href={resource.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="group flex flex-col rounded-xl border border-border/50 bg-card p-5 transition-all hover:border-border hover:shadow-md"
+                className="group flex flex-col rounded-xl border border-border/50 bg-card p-5 transition-all motion-safe:hover:-translate-y-0.5 hover:border-border hover:shadow-md"
               >
                 <div className="flex items-center gap-2 mb-3">
                   <div className={cn('flex h-9 w-9 items-center justify-center rounded-lg flex-shrink-0', getAccent(meta.color).icon)}>

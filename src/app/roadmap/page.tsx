@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
+import { Reveal } from '@/components/motion/reveal'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -189,7 +190,9 @@ export default function RoadmapPage() {
                   </p>
                 </div>
                 {beginnerRoadmap.map((phase, i) => (
-                  <RoadmapPhase key={phase.phase} phase={phase} index={i} color="emerald" />
+                  <Reveal key={phase.phase} delay={Math.min(i * 0.06, 0.24)}>
+                    <RoadmapPhase phase={phase} index={i} color="emerald" />
+                  </Reveal>
                 ))}
                 <div className="pt-6 text-center">
                   <Button asChild size="lg" className="gap-2">
@@ -207,7 +210,9 @@ export default function RoadmapPage() {
                   </p>
                 </div>
                 {developerRoadmap.map((phase, i) => (
-                  <RoadmapPhase key={phase.phase} phase={phase} index={i} color="violet" />
+                  <Reveal key={phase.phase} delay={Math.min(i * 0.06, 0.24)}>
+                    <RoadmapPhase phase={phase} index={i} color="violet" />
+                  </Reveal>
                 ))}
                 <div className="pt-6 text-center">
                   <Button asChild size="lg" className="gap-2">

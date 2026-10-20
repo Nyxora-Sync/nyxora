@@ -102,6 +102,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`} suppressHydrationWarning>
       <body className="min-h-full flex flex-col bg-background text-foreground">
+        <noscript>
+          <style>{'[data-motion-reveal]{opacity:1!important;transform:none!important}'}</style>
+        </noscript>
         <JsonLd data={siteSchema} />
         <Providers>{children}</Providers>
       </body>

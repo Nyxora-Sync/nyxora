@@ -2,6 +2,7 @@ import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
 import { Badge } from '@/components/ui/badge'
 import { ShowcaseClient } from '@/components/community/showcase-client'
+import { Reveal } from '@/components/motion/reveal'
 import { Rocket, Sparkles } from 'lucide-react'
 import { pageMetadata } from '@/lib/seo'
 
@@ -19,7 +20,7 @@ export default function ShowcasePage() {
       <Header />
       <main className="flex-1">
         <section className="border-b border-border/50 py-12 sm:py-16">
-          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <Badge variant="outline" className="mb-4">
               <Rocket className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
               Project Showcase
@@ -38,13 +39,13 @@ export default function ShowcasePage() {
               <Sparkles className="h-4 w-4 text-amber-500" aria-hidden="true" />
               Rough edges welcome — finished is a direction, not a requirement.
             </p>
-          </div>
+          </Reveal>
         </section>
 
         <section className="py-10 sm:py-12">
-          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <ShowcaseClient />
-          </div>
+          </Reveal>
         </section>
       </main>
       <Footer />

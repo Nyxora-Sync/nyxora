@@ -1,6 +1,7 @@
 import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
 import { ResourcesClient } from '@/components/resources-client'
+import { Reveal } from '@/components/motion/reveal'
 import { Badge } from '@/components/ui/badge'
 import { resourcesData } from '@/lib/resources-data'
 import { pageMetadata } from '@/lib/seo'
@@ -18,7 +19,7 @@ export default function ResourcesPage() {
       <Header />
       <main className="flex-1">
         <section className="py-12 sm:py-16 border-b border-border/50">
-          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 text-center">
+          <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 text-center">
             <Badge variant="outline" className="mb-4">{resourcesData.length} curated resources</Badge>
             <h1 className="text-3xl font-bold tracking-tight sm:text-4xl lg:text-5xl">
               Free Resource{' '}
@@ -29,13 +30,13 @@ export default function ResourcesPage() {
             <p className="mt-4 max-w-2xl mx-auto text-lg text-muted-foreground">
               Every resource here is 100% free forever. No trials, no paywalls, no affiliate links.
             </p>
-          </div>
+          </Reveal>
         </section>
 
         <section className="py-12 sm:py-16">
-          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <ResourcesClient resources={resourcesData} />
-          </div>
+          </Reveal>
         </section>
       </main>
       <Footer />

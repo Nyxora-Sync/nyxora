@@ -33,8 +33,8 @@ export default function AccessibilityPage() {
         <li>Text alternatives for meaningful icons and empty alt text for decorative images.</li>
         <li>Theme-aware color contrast designed against the WCAG AA thresholds for normal and large text.</li>
         <li>Layouts that reflow at 200% zoom and on narrow screens without requiring horizontal scrolling for prose.</li>
-        <li>No autoplaying audio or video, and no motion that plays indefinitely.</li>
-        <li>Reduced-motion support: animations and transitions are effectively disabled when your system asks for less motion.</li>
+        <li>No autoplaying audio or video. The homepage has a slow, low-contrast ambient visual that becomes a still image when reduced motion is requested.</li>
+        <li>Reduced-motion support: page transitions, reveal effects, and the homepage visual are removed or made static when your system asks for less motion.</li>
         <li>Code blocks that remain readable and copyable without a mouse.</li>
         <li>Forms that report errors in text, not color alone, and keep their labels associated with inputs.</li>
       </ul>

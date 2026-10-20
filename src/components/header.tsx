@@ -4,6 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { useSession, signOut } from 'next-auth/react'
+import { AnimatePresence, motion, useReducedMotion, useScroll, useSpring } from 'motion/react'
 import { Menu, X, Sun, Moon, User, LogOut, BookOpen, Trophy, Users, Code2, Rocket } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -22,30 +23,33 @@ const navigation = [
 export function Header() {
   const { data: session, status } = useSession()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const reduceMotion = useReducedMotion()
+  const { scrollYProgress } = useScroll()
+  const progress = useSpring(scrollYProgress, { stiffness: 140, damping: 30, mass: 0.2 })
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-border/50 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <nav className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8" aria-label="Main navigation">
         <div className="flex items-center gap-8">
-          <Link href="/" className="flex items-center gap-2" aria-label="MERN Learn Home">
+          <Link href="/" className="flex shrink-0 items-center gap-2" aria-label="MERN Learn Home">
             <Image
               src="/site-mark.png"
               alt=""
               width={36}
               height={36}
-              className="h-9 w-9 rounded-lg object-cover"
+              className="h-9 w-9 rounded-lg object-cover transition-transform duration-300 hover:scale-[1.03]"
               priority
             />
-            <span className="font-bold text-xl font-sans">MERN Learn</span>
+            <span className="whitespace-nowrap font-bold text-xl font-sans">MERN Learn</span>
           </Link>
 
-          <div className="hidden md:flex md:items-center md:gap-6">
+          <div className="hidden lg:flex lg:items-center lg:gap-6">
             {navigation.map((item) => (
               <Link
                 key={item.name}
                 href={item.href}
                 className={cn(
-                  'flex items-center gap-1.5 text-sm font-medium transition-colors hover:text-primary',
+                  `relative flex items-center gap-1.5 text-sm font-medium transition-colors after:absolute after:-bottom-1 after:left-0 after:h-px after:w-full after:origin-left after:scale-x-0 after:bg-primary after:transition-transform after:duration-200 after:content-[''] hover:text-primary hover:after:scale-x-100`,
                   session || !item.auth ? 'text-foreground' : 'text-muted-foreground'
                 )}
                 aria-current={item.href === '/learn' ? 'page' : undefined}
@@ -126,7 +130,7 @@ export function Header() {
           <Button
             variant="ghost"
             size="icon"
-            className="md:hidden"
+            className="lg:hidden"
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
             aria-expanded={mobileMenuOpen}
             aria-controls="mobile-menu"
@@ -137,36 +141,55 @@ export function Header() {
         </div>
       </nav>
 
-      {mobileMenuOpen && (
-        <div id="mobile-menu" className="border-t border-border/50 py-4 md:hidden">
-          <div className="mx-auto flex max-w-7xl flex-col items-start gap-4 px-4">
-            {navigation.map((item) => (
-              <Link
-                key={item.name}
-                href={item.href}
-                className={cn(
-                  'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-base font-medium transition-colors hover:bg-accent',
-                  session || !item.auth ? 'text-foreground' : 'text-muted-foreground'
-                )}
-                onClick={() => setMobileMenuOpen(false)}
-              >
-                <item.icon className="h-5 w-5" aria-hidden="true" />
-                {item.name}
-              </Link>
-            ))}
-            {!session && (
-              <div className="flex w-full flex-col gap-2 pt-4">
-                <Button variant="outline" asChild>
-                  <Link href="/auth/signin" onClick={() => setMobileMenuOpen(false)}>Sign in</Link>
-                </Button>
-                <Button asChild>
-                  <Link href="/auth/signin?callbackUrl=/learn" onClick={() => setMobileMenuOpen(false)}>Get Started</Link>
-                </Button>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      <AnimatePresence initial={false}>
+        {mobileMenuOpen && (
+          <motion.div
+            id="mobile-menu"
+            className="overflow-hidden border-t border-border/50 lg:hidden"
+            initial={reduceMotion ? false : { height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={reduceMotion ? { opacity: 0 } : { height: 0, opacity: 0 }}
+            transition={
+              reduceMotion
+                ? { duration: 0 }
+                : { duration: 0.24, ease: [0.22, 1, 0.36, 1] }
+            }
+          >
+            <div className="mx-auto flex max-w-7xl flex-col items-start gap-4 px-4 py-4">
+              {navigation.map((item) => (
+                <Link
+                  key={item.name}
+                  href={item.href}
+                  className={cn(
+                    'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-base font-medium transition-colors hover:bg-accent',
+                    session || !item.auth ? 'text-foreground' : 'text-muted-foreground'
+                  )}
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  <item.icon className="h-5 w-5" aria-hidden="true" />
+                  {item.name}
+                </Link>
+              ))}
+              {!session && (
+                <div className="flex w-full flex-col gap-2 pt-4">
+                  <Button variant="outline" asChild>
+                    <Link href="/auth/signin" onClick={() => setMobileMenuOpen(false)}>Sign in</Link>
+                  </Button>
+                  <Button asChild>
+                    <Link href="/auth/signin?callbackUrl=/learn" onClick={() => setMobileMenuOpen(false)}>Get Started</Link>
+                  </Button>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <motion.div
+        className="absolute inset-x-0 bottom-0 h-0.5 origin-left bg-gradient-to-r from-emerald-500 via-violet-500 to-amber-500"
+        style={{ scaleX: progress }}
+        aria-hidden="true"
+      />
     </header>
   )
 }

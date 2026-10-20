@@ -6,6 +6,8 @@ import { Code2, Database, Server, Globe, CheckCircle, ArrowRight, Users, Trophy,
 import { GithubIcon } from '@/components/icons/brand'
 import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
+import { HeroVisual } from '@/components/home/hero-visual'
+import { Reveal } from '@/components/motion/reveal'
 import { cn, getAccent } from '@/lib/utils'
 import { tracks as curriculumTracks } from '@/lib/curriculum'
 import { pageMetadata } from '@/lib/seo'
@@ -113,7 +115,8 @@ export default function HomePage() {
       <main className="flex-1">
         {/* Hero Section */}
         <section className="relative overflow-hidden py-20 sm:py-32 lg:pb-32 xl:pb-36">
-          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <HeroVisual />
+          <div className="relative mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <div className="text-center">
               <div className="inline-flex items-center gap-2 rounded-full bg-emerald-100/50 px-4 py-1.5 text-sm font-medium text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400 mb-6">
                 <span className="relative flex h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" aria-hidden="true" />
@@ -175,7 +178,7 @@ export default function HomePage() {
 
         {/* Choose Your Track */}
         <section className="py-20 sm:py-24 bg-muted/30">
-          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <div className="text-center max-w-3xl mx-auto mb-16">
               <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">Choose Your Learning Path</h2>
               <p className="mt-4 text-lg text-muted-foreground">
@@ -185,7 +188,7 @@ export default function HomePage() {
             <div className="grid gap-8 md:grid-cols-2">
               {tracks.map((track) => (
                 <Link key={track.key} href={`/learn/${track.key}`} className="group">
-                  <Card className="relative overflow-hidden transition-all hover:shadow-xl h-full border-border/50">
+                  <Card className="relative overflow-hidden transition-all motion-safe:hover:-translate-y-1 hover:shadow-xl h-full border-border/50">
                     <CardHeader>
                       <div className={cn('flex items-center gap-2 text-sm font-medium', getAccent(track.color).text)}>
                         <track.icon className="h-5 w-5" aria-hidden="true" />
@@ -228,12 +231,12 @@ export default function HomePage() {
                 </Link>
               ))}
             </div>
-          </div>
+          </Reveal>
         </section>
 
         {/* Features */}
         <section className="py-20 sm:py-24">
-          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <div className="text-center max-w-3xl mx-auto mb-16">
               <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">Everything You Need to Succeed</h2>
               <p className="mt-4 text-lg text-muted-foreground">
@@ -242,7 +245,7 @@ export default function HomePage() {
             </div>
             <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
               {features.map((feature) => (
-                <Card key={feature.title} className="group hover:shadow-lg transition-shadow">
+                <Card key={feature.title} className="group transition-all motion-safe:hover:-translate-y-0.5 hover:shadow-lg">
                   <CardHeader>
                     <div className={cn('mb-3 flex h-12 w-12 items-center justify-center rounded-xl', getAccent(feature.color).icon)}>
                       <feature.icon className="h-6 w-6" aria-hidden="true" />
@@ -255,12 +258,12 @@ export default function HomePage() {
                 </Card>
               ))}
             </div>
-          </div>
+          </Reveal>
         </section>
 
         {/* Curriculum Preview */}
         <section className="py-20 sm:py-24 bg-muted/30">
-          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <div className="text-center max-w-3xl mx-auto mb-16">
               <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">What You&apos;ll Learn</h2>
               <p className="mt-4 text-lg text-muted-foreground">
@@ -294,12 +297,12 @@ export default function HomePage() {
                 </Card>
               ))}
             </div>
-          </div>
+          </Reveal>
         </section>
 
         {/* CTA */}
         <section className="py-20 sm:py-24">
-          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <Card className="relative overflow-hidden bg-gradient-to-br from-emerald-500/10 via-violet-500/10 to-amber-500/10 border-border/50">
               <CardContent className="relative py-16 sm:py-24 text-center">
                 <div className="mx-auto max-w-2xl">
@@ -326,7 +329,7 @@ export default function HomePage() {
                 </div>
               </CardContent>
             </Card>
-          </div>
+          </Reveal>
         </section>
       </main>
       <Footer />

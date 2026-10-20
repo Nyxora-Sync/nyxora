@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
 import { Badge } from '@/components/ui/badge'
+import { Reveal } from '@/components/motion/reveal'
 import { FileText } from 'lucide-react'
 
 export function LegalPage({
@@ -34,7 +35,7 @@ export function LegalPage({
           </div>
         </section>
 
-        <div className="mx-auto max-w-3xl px-4 py-10 sm:px-6 lg:px-8">
+        <Reveal className="mx-auto max-w-3xl px-4 py-10 sm:px-6 lg:px-8">
           <article className="prose prose-neutral max-w-none dark:prose-invert prose-headings:scroll-mt-24 prose-headings:font-bold prose-headings:tracking-tight prose-h2:mt-10 prose-h2:text-2xl prose-h2:border-b prose-h2:border-border/50 prose-h2:pb-2 prose-h3:mt-8 prose-h3:text-xl prose-p:leading-relaxed prose-li:my-1 prose-a:text-primary prose-a:underline-offset-4 prose-strong:text-foreground">
             {children}
           </article>
@@ -46,7 +47,7 @@ export function LegalPage({
             </Link>
             .
           </p>
-        </div>
+        </Reveal>
       </main>
       <Footer />
     </div>

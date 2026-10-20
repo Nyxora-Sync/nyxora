@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useProgress } from '@/hooks/use-progress'
 import type { Lesson } from '@/lib/curriculum'
 import { Badge } from '@/components/ui/badge'
+import { Reveal } from '@/components/motion/reveal'
 import { CheckCircle2, Circle, Clock, Play, Zap, FileText, Code2, BookOpen, type LucideIcon } from 'lucide-react'
 import { cn, getDifficultyColor, getAccent } from '@/lib/utils'
 
@@ -29,20 +30,20 @@ export function ModuleLessonsClient({
 
   return (
     <div className="space-y-3">
-      {lessons.map((lesson) => {
+      {lessons.map((lesson, index) => {
         const completed = isLoaded && isCompleted(lesson.id)
         const difficultyColor = getDifficultyColor(lesson.difficulty)
         const resourceTypes = Array.from(new Set(lesson.resources.map((r) => r.type)))
 
         return (
-          <Link
-            key={lesson.id}
-            href={`/learn/${track}/${moduleKey}/${lesson.id}`}
-            className="group block"
-          >
+          <Reveal key={lesson.id} delay={Math.min(index * 0.035, 0.2)} distance={12}>
+            <Link
+              href={`/learn/${track}/${moduleKey}/${lesson.id}`}
+              className="group block"
+            >
             <div
               className={cn(
-                'flex items-start gap-4 rounded-xl border p-5 transition-all hover:shadow-md',
+                'flex items-start gap-4 rounded-xl border p-5 transition-all motion-safe:hover:-translate-y-0.5 hover:shadow-md',
                 completed
                   ? 'border-emerald-500/30 bg-emerald-500/5'
                   : 'border-border/50 bg-card hover:border-border'
@@ -106,7 +107,8 @@ export function ModuleLessonsClient({
                 </div>
               </div>
             </div>
-          </Link>
+            </Link>
+          </Reveal>
         )
       })}
     </div>

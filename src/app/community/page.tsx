@@ -5,6 +5,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { CommunityStats } from '@/components/community/community-stats'
+import { Reveal } from '@/components/motion/reveal'
 import {
   Users, MessageCircle, Rocket, Heart, Star,
   ArrowRight, ExternalLink, Code2, HandHeart,
@@ -101,18 +102,18 @@ export default function CommunityPage() {
 
         {/* Stats */}
         <section className="py-10 border-b border-border/50 bg-muted/30">
-          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <CommunityStats />
-          </div>
+          </Reveal>
         </section>
 
         {/* Channels */}
         <section className="py-12 sm:py-16">
-          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <h2 className="text-2xl font-bold tracking-tight mb-8">Where the community lives</h2>
             <div className="grid gap-6 sm:grid-cols-2">
               {channels.map((channel) => (
-                <Card key={channel.name} className="hover:shadow-lg transition-shadow">
+                <Card key={channel.name} className="transition-all motion-safe:hover:-translate-y-0.5 hover:shadow-lg">
                   <CardContent className="pt-6">
                     <div className="flex items-start gap-4">
                       <div
@@ -139,12 +140,12 @@ export default function CommunityPage() {
                 </Card>
               ))}
             </div>
-          </div>
+          </Reveal>
         </section>
 
         {/* Community Guidelines */}
         <section className="py-12 sm:py-16 bg-muted/30">
-          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <div className="max-w-2xl">
               <h2 className="text-2xl font-bold tracking-tight">Community Guidelines</h2>
               <p className="mt-3 text-muted-foreground">
@@ -159,12 +160,12 @@ export default function CommunityPage() {
                 </div>
               ))}
             </div>
-          </div>
+          </Reveal>
         </section>
 
         {/* Contribute */}
         <section className="py-12 sm:py-16">
-          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <div className="max-w-2xl mb-8">
               <h2 className="text-2xl font-bold tracking-tight flex items-center gap-2">
                 <Heart className="h-6 w-6 text-rose-500" aria-hidden="true" />
@@ -183,7 +184,7 @@ export default function CommunityPage() {
                   rel={way.href.startsWith('http') ? 'noopener noreferrer' : undefined}
                   className="group"
                 >
-                  <Card className="h-full transition-shadow group-hover:shadow-md">
+                  <Card className="h-full transition-all motion-safe:hover:-translate-y-0.5 group-hover:shadow-md">
                     <CardContent className="pt-6">
                       <div
                         className={cn('flex h-11 w-11 items-center justify-center rounded-xl mb-4', getAccent(way.color).icon)}
@@ -201,12 +202,12 @@ export default function CommunityPage() {
                 </Link>
               ))}
             </div>
-          </div>
+          </Reveal>
         </section>
 
         {/* CTA */}
         <section className="py-12 sm:py-16 bg-muted/30">
-          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 text-center">
+          <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 text-center">
             <h2 className="text-2xl font-bold tracking-tight">Ready to join?</h2>
             <p className="mt-3 text-muted-foreground max-w-xl mx-auto">
               Share what you built, ask the question you are stuck on, or help the next learner.
@@ -225,7 +226,7 @@ export default function CommunityPage() {
                 </Link>
               </Button>
             </div>
-          </div>
+          </Reveal>
         </section>
       </main>
       <Footer />

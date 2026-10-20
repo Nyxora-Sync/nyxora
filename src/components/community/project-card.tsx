@@ -18,7 +18,7 @@ const trackAccent: Record<string, string> = {
 
 export function ProjectCard({ project }: { project: ProjectListItem }) {
   return (
-    <article className="group flex h-full flex-col overflow-hidden rounded-xl border border-border/50 bg-card transition-all hover:border-border hover:shadow-lg">
+    <article className="group flex h-full flex-col overflow-hidden rounded-xl border border-border/50 bg-card transition-all motion-safe:hover:-translate-y-0.5 hover:border-border hover:shadow-lg">
       {project.imageUrl ? (
         <Link href={`/community/showcase/${project.id}`} className="block overflow-hidden bg-muted">
           <img
