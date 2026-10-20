@@ -1,8 +1,6 @@
 import { notFound } from 'next/navigation'
 import type { Metadata } from 'next'
 
-export const runtime = 'edge'
-
 import Link from 'next/link'
 import { getTrack, getModule, tracks } from '@/lib/curriculum'
 import { Header } from '@/components/header'
