@@ -8,6 +8,9 @@ export const metadata = pageMetadata({
   noIndex: true,
 })
 
+// Force dynamic rendering so DATABASE_URL is read at request time (available in Vercel runtime)
+export const dynamic = 'force-dynamic'
+
 export default function SignInPage() {
   const enabled = {
     github: Boolean(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET),

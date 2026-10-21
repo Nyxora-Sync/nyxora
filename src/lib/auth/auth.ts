@@ -5,8 +5,6 @@ import Google from 'next-auth/providers/google'
 import Email from 'next-auth/providers/email'
 import { prisma } from '@/lib/db'
 import { sendVerificationRequest } from '@/lib/auth/email'
-import { adminCredentials } from '@/lib/auth/admin-credentials'
-import { PrismaClient } from '@prisma/client'
 
 const providers: NextAuthConfig['providers'] = []
 
@@ -37,9 +35,6 @@ if (process.env.EMAIL_SERVER) {
     })
   )
 }
-
-// Admin credentials provider (always available when database is configured)
-providers.push(adminCredentials)
 
 const hasDatabase = Boolean(process.env.DATABASE_URL)
 
@@ -93,8 +88,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       // Always sync token with latest user data from database
       if (token.sub && process.env.DATABASE_URL) {
         try {
-          const prismaClient = new PrismaClient()
-          const dbUser = await prismaClient.user.findUnique({
+          const dbUser = await prisma.user.findUnique({
             where: { id: token.sub },
             select: { name: true, image: true, email: true },
           })

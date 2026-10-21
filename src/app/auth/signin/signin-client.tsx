@@ -75,7 +75,22 @@ function SignInContent({ enabled, hasDatabase }: { enabled: EnabledProviders; ha
     e.preventDefault()
     if (!adminUsername || !adminPassword) return
     setIsLoading('admin')
-    await signIn('admin', { username: adminUsername, password: adminPassword, callbackUrl })
+    const formData = new FormData()
+    formData.append('username', adminUsername)
+    formData.append('password', adminPassword)
+    formData.append('callbackUrl', callbackUrl)
+    const res = await fetch('/api/auth/admin-login', {
+      method: 'POST',
+      body: formData,
+      redirect: 'manual',
+    })
+    if (res.redirected) {
+      window.location.href = res.url
+    } else if (res.ok) {
+      window.location.href = callbackUrl
+    } else {
+      setIsLoading(null)
+    }
   }
 
   const handleEmailSignIn = async (e: React.FormEvent) => {
