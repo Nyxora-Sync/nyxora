@@ -8,6 +8,7 @@ import {
   sinceMinutes,
 } from '@/lib/community'
 import { actorName } from '@/lib/social'
+import { notifyFollowRequest } from '@/lib/realtime/notify'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -85,6 +86,9 @@ export async function POST(_request: Request, { params }: RouteContext) {
         href: '/settings?tab=profile',
       },
     })
+
+    // Send real-time notification
+    notifyFollowRequest(userId, id).catch(console.error)
 
     return Response.json({ data: { status: 'pending_outgoing', requestId: follow.id } })
   } catch (error) {

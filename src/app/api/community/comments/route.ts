@@ -9,6 +9,7 @@ import {
   publicUserSelect,
   sinceMinutes,
 } from '@/lib/community'
+import { notifyCommentCreated, notifyCommentReply } from '@/lib/realtime/notify'
 
 
 
@@ -133,6 +134,13 @@ export async function POST(request: Request) {
     data: { userId, targetType, targetId, body: commentBody, parentId: parentId ?? null },
     include: { user: { select: publicUserSelect } },
   })
+
+  // Send real-time notifications (fire and forget)
+  if (parentId) {
+    notifyCommentReply(comment.id, parentId, userId).catch(console.error)
+  } else {
+    notifyCommentCreated(comment.id, targetType, targetId, userId).catch(console.error)
+  }
 
   return Response.json(
     {

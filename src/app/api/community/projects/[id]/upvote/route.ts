@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client'
 import { auth } from '@/lib/auth/auth'
 import { prisma } from '@/lib/db'
 import { COMMUNITY_DISABLED, communityEnabled, jsonError } from '@/lib/community'
+import { notifyProjectUpvote } from '@/lib/realtime/notify'
 
 
 
@@ -56,6 +57,11 @@ export async function POST(request: Request, { params }: RouteContext) {
     where: { id },
     select: { upvotes: true },
   })
+
+  // Send real-time notification on upvote (not on remove)
+  if (upvoted) {
+    notifyProjectUpvote(id, userId).catch(console.error)
+  }
 
   return Response.json({ data: { upvoted, upvotes: updated?.upvotes ?? 0 } })
 }
