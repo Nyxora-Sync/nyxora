@@ -15,25 +15,56 @@ import {
 
 type RouteContext = { params: Promise<{ id: string }> }
 
+/**
+ * Resolve a user by either their CUID (id) or username.
+ * Returns the user's actual database id.
+ */
+export async function resolveUserId(identifier: string): Promise<string | null> {
+  // First try exact ID match (could be CUID or shortened id like "admin")
+  const byId = await prisma.user.findUnique({
+    where: { id: identifier },
+    select: { id: true },
+  })
+  if (byId) return byId.id
+
+  // Then try username match (case-insensitive)
+  if (identifier.length >= 3 && identifier.length <= 30) {
+    const byUsername = await prisma.user.findUnique({
+      where: { username: identifier.toLowerCase() },
+      select: { id: true },
+    })
+    if (byUsername) return byUsername.id
+  }
+
+  return null
+}
+
 export async function GET(request: Request, { params }: RouteContext) {
   if (!communityEnabled()) {
     return jsonError(COMMUNITY_DISABLED.status, COMMUNITY_DISABLED.code, COMMUNITY_DISABLED.message)
   }
 
-  const { id } = await params
+  const { id: identifier } = await params
+  const userId = await resolveUserId(identifier)
+
+  if (!userId) {
+    return jsonError(404, 'NOT_FOUND', 'Profile not found.')
+  }
+
   const session = await auth()
   const viewerId = session?.user?.id ?? null
 
   const user = await prisma.user.findUnique({
-    where: { id },
+    where: { id: userId },
     select: {
       ...publicUserSelect,
+      username: true,
       preferences: { select: { showProgress: true } },
     },
   })
 
   if (!user) return jsonError(404, 'NOT_FOUND', 'Profile not found.')
-  if (!user.name && !user.bio && !user.image && viewerId !== id) {
+  if (!user.name && !user.bio && !user.image && viewerId !== user.id) {
     // Providers are allowed to omit names; avoid publishing empty shells.
     // The viewer can always open their own profile to fill it in.
     return jsonError(404, 'NOT_FOUND', 'Profile not found.')
@@ -90,6 +121,7 @@ export async function GET(request: Request, { params }: RouteContext) {
     {
       data: {
         id: user.id,
+        username: user.username,
         name: user.name,
         image: user.image,
         bio: user.bio,
