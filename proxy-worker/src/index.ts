@@ -41,6 +41,24 @@ const proxy = {
       }
     }
 
+    // Rewrite Set-Cookie headers to use the public origin domain
+    const setCookieHeaders = responseHeaders.getSetCookie()
+    if (setCookieHeaders.length > 0) {
+      responseHeaders.delete('set-cookie')
+      for (const cookie of setCookieHeaders) {
+        // Rewrite domain from upstream to incoming origin
+        let rewrittenCookie = cookie.replace(
+          new RegExp(`Domain=${upstream.hostname}(;|$)`, 'i'),
+          `Domain=${incoming.hostname}$1`
+        )
+        // Also handle cookies without explicit domain (host-only) by adding the public domain
+        if (!/Domain=/i.test(cookie)) {
+          rewrittenCookie += `; Domain=${incoming.hostname}`
+        }
+        responseHeaders.append('set-cookie', rewrittenCookie)
+      }
+    }
+
     return new Response(response.body, {
       status: response.status,
       statusText: response.statusText,

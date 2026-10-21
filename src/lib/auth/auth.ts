@@ -1,4 +1,4 @@
-import NextAuth, { type NextAuthConfig } from 'next-auth'
+import NextAuth, { type NextAuthConfig, type Session } from 'next-auth'
 import { PrismaAdapter } from '@auth/prisma-adapter'
 import GitHub from 'next-auth/providers/github'
 import Google from 'next-auth/providers/google'
@@ -6,6 +6,7 @@ import Email from 'next-auth/providers/email'
 import { prisma } from '@/lib/db'
 import { sendVerificationRequest } from '@/lib/auth/email'
 import { adminCredentials } from '@/lib/auth/admin-credentials'
+import { PrismaClient } from '@prisma/client'
 
 const providers: NextAuthConfig['providers'] = []
 
@@ -55,14 +56,64 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   ...(hasDatabase ? { adapter: PrismaAdapter(prisma) } : {}),
   session: { strategy: 'jwt' as const },
   providers,
+  cookies: {
+    csrfToken: {
+      name: 'authjs.csrf-token',
+      options: {
+        httpOnly: true,
+        sameSite: 'none',
+        path: '/',
+        secure: true,
+      },
+    },
+  },
   callbacks: {
-    async session({ session, user, token }) {
+    async session({ session, token }): Promise<Session> {
       if (session.user) {
-        session.user.id = user?.id ?? (token?.sub as string)
-        const userEmail = user?.email ?? token?.email
-        session.user.isAdmin = userEmail === 'admin@nyxora.local'
+        const user = {
+          ...session.user,
+          id: (token?.sub as string) ?? '',
+          name: token?.name ?? null,
+          email: token?.email ?? '',
+          image: token?.picture ?? null,
+          isAdmin: token?.email === 'admin@nyxora.local',
+        }
+        session.user = user
       }
       return session
+    },
+    async jwt({ token, user, trigger, session }) {
+      if (user) {
+        token.sub = user.id
+        if (user.name != null) token.name = user.name
+        if (user.email != null) token.email = user.email
+        if (user.image != null) token.picture = user.image
+      }
+
+      // Always sync token with latest user data from database
+      if (token.sub && process.env.DATABASE_URL) {
+        try {
+          const prismaClient = new PrismaClient()
+          const dbUser = await prismaClient.user.findUnique({
+            where: { id: token.sub },
+            select: { name: true, image: true, email: true },
+          })
+          if (dbUser) {
+            token.name = dbUser.name
+            token.image = dbUser.image
+            token.email = dbUser.email
+          }
+        } catch {
+          // Ignore DB errors, keep existing token
+        }
+      }
+
+      if (trigger === 'update' && session && typeof session === 'object') {
+        const updateData = session as { name?: string | null; image?: string | null }
+        if (updateData.name != null) token.name = updateData.name
+        if (updateData.image != null) token.picture = updateData.image
+      }
+      return token
     },
     async redirect({ url, baseUrl }) {
       if (url.startsWith('/')) return `${baseUrl}${url}`

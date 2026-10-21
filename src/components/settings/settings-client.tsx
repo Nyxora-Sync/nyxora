@@ -254,7 +254,10 @@ export function SettingsClient() {
             }
           : current
       )
-      await updateSession().catch(() => {})
+      await updateSession({
+        name: form.name.trim() || null,
+        image: profile?.image ?? null,
+      }).catch(() => {})
       setSaved(true)
     } catch (err) {
       setSaveError(
@@ -289,7 +292,7 @@ export function SettingsClient() {
       setProfile((current) =>
         current ? { ...current, image: payload.data.image } : current
       )
-      await updateSession().catch(() => {})
+      await updateSession({ image: payload.data.image }).catch(() => {})
     } catch (err) {
       setAvatarError(
         err instanceof Error ? err.message : 'Could not upload that image.'
@@ -315,7 +318,7 @@ export function SettingsClient() {
         current ? { ...current, image: null } : current
       )
       setConfirmRemoveAvatar(false)
-      await updateSession().catch(() => {})
+      await updateSession({ image: null }).catch(() => {})
     } catch (err) {
       setAvatarError(
         err instanceof Error ? err.message : 'Could not remove your photo.'
