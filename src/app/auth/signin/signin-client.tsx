@@ -82,12 +82,14 @@ function SignInContent({ enabled, hasDatabase }: { enabled: EnabledProviders; ha
     const res = await fetch('/api/auth/admin-login', {
       method: 'POST',
       body: formData,
-      redirect: 'manual',
     })
-    if (res.redirected) {
-      window.location.href = res.url
-    } else if (res.ok) {
-      window.location.href = callbackUrl
+    if (res.ok) {
+      const data = await res.json()
+      if (data.redirectUrl) {
+        window.location.href = data.redirectUrl
+      } else {
+        window.location.href = callbackUrl
+      }
     } else {
       setIsLoading(null)
     }

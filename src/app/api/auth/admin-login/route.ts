@@ -2,7 +2,7 @@ import { prisma } from '@/lib/db'
 import { compareSync } from 'bcrypt-ts'
 import { encode as jwtEncode } from '@auth/core/jwt'
 import { cookies } from 'next/headers'
-import { redirect } from 'next/navigation'
+import { NextResponse } from 'next/server'
 
 const JWT_SECRET = process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET || 'fallback-secret-change-in-production'
 const COOKIE_NAME = '__Secure-authjs.session-token'
@@ -14,7 +14,7 @@ export async function POST(request: Request) {
   const callbackUrl = (formData.get('callbackUrl') as string) || '/'
 
   if (!username || !password) {
-    return redirect('/auth/signin?error=MissingCredentials')
+    return NextResponse.json({ error: 'MissingCredentials' }, { status: 400 })
   }
 
   const adminUser = await prisma.user.findUnique({
@@ -22,12 +22,12 @@ export async function POST(request: Request) {
   })
 
   if (!adminUser || !adminUser.passwordHash) {
-    return redirect('/auth/signin?error=InvalidCredentials')
+    return NextResponse.json({ error: 'InvalidCredentials' }, { status: 401 })
   }
 
   const isValid = compareSync(password, adminUser.passwordHash)
   if (!isValid) {
-    return redirect('/auth/signin?error=InvalidCredentials')
+    return NextResponse.json({ error: 'InvalidCredentials' }, { status: 401 })
   }
 
   // Create NextAuth-compatible encrypted JWT session token
@@ -44,9 +44,9 @@ export async function POST(request: Request) {
     maxAge: 60 * 60 * 24 * 30, // 30 days
   })
 
-  // Set session cookie
-  const cookieStore = await cookies()
-  cookieStore.set('__Secure-authjs.session-token', token, {
+  // Create response with session cookie
+  const response = NextResponse.json({ redirectUrl: callbackUrl }, { status: 200 })
+  response.cookies.set('__Secure-authjs.session-token', token, {
     httpOnly: true,
     secure: true,
     sameSite: 'lax',
@@ -54,9 +54,9 @@ export async function POST(request: Request) {
     maxAge: 60 * 60 * 24 * 30, // 30 days
   })
 
-  return redirect(callbackUrl)
+  return response
 }
 
-export async function GET() {
-  return redirect('/auth/signin')
+export async function GET(request: Request) {
+  return NextResponse.redirect(new URL('/auth/signin', request.url))
 }
