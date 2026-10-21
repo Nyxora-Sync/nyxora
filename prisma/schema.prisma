@@ -18,6 +18,7 @@ model User {
   emailVerified DateTime?
   name          String?
   image         String?
+  passwordHash  String?
   // Public community profile. All optional; the UI falls back gracefully.
   bio           String?   @db.Text
   website       String?

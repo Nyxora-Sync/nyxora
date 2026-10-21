@@ -7,7 +7,7 @@ import { usePathname } from 'next/navigation'
 import { useSession, signOut } from 'next-auth/react'
 import { useTheme } from 'next-themes'
 import { AnimatePresence, motion, useReducedMotion, useScroll, useSpring } from 'motion/react'
-import { Menu, X, Sun, Moon, User, LogOut, BookOpen, Trophy, Users, Code2, Rocket, Search, Layers, ChevronDown, CircleUser } from 'lucide-react'
+import { Menu, X, Sun, Moon, User, LogOut, BookOpen, Trophy, Users, Code2, Rocket, Search, Layers, ChevronDown, CircleUser, ShieldCheck } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { NotificationBell } from '@/components/notification-bell'
@@ -226,6 +226,14 @@ export function Header() {
                     Settings
                   </Link>
                 </DropdownMenuItem>
+                {session.user.isAdmin && (
+                  <DropdownMenuItem asChild>
+                    <Link href="/admin/messages" className="flex items-center gap-2">
+                      <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+                      Admin
+                    </Link>
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => signOut({ callbackUrl: '/' })} className="flex items-center gap-2 text-destructive focus:text-destructive">
                   <LogOut className="h-4 w-4" aria-hidden="true" />

@@ -14,6 +14,7 @@ export default function SignInPage() {
     google: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
     email: Boolean(process.env.EMAIL_SERVER),
   }
+  const hasDatabase = Boolean(process.env.DATABASE_URL)
 
-  return <SignInClient enabled={enabled} />
+  return <SignInClient enabled={enabled} hasDatabase={hasDatabase} />
 }

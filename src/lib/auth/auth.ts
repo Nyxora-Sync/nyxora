@@ -5,6 +5,7 @@ import Google from 'next-auth/providers/google'
 import Email from 'next-auth/providers/email'
 import { prisma } from '@/lib/db'
 import { sendVerificationRequest } from '@/lib/auth/email'
+import { adminCredentials } from '@/lib/auth/admin-credentials'
 
 const providers: NextAuthConfig['providers'] = []
 
@@ -36,6 +37,9 @@ if (process.env.EMAIL_SERVER) {
   )
 }
 
+// Admin credentials provider (always available when database is configured)
+providers.push(adminCredentials)
+
 const hasDatabase = Boolean(process.env.DATABASE_URL)
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
@@ -46,15 +50,17 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     error: '/auth/error',
     verifyRequest: '/auth/verify-request',
   },
-  // Only attach the Prisma adapter when a database is configured.
-  // Without one, auth falls back to JWT sessions (and the app's core
-  // learning experience still works fully via localStorage).
-  ...(hasDatabase ? { adapter: PrismaAdapter(prisma) } : { session: { strategy: 'jwt' as const } }),
+  // Use JWT sessions for all providers. The Prisma adapter is still used for
+  // account linking and user management when a database is configured.
+  ...(hasDatabase ? { adapter: PrismaAdapter(prisma) } : {}),
+  session: { strategy: 'jwt' as const },
   providers,
   callbacks: {
     async session({ session, user, token }) {
       if (session.user) {
         session.user.id = user?.id ?? (token?.sub as string)
+        const userEmail = user?.email ?? token?.email
+        session.user.isAdmin = userEmail === 'admin@nyxora.local'
       }
       return session
     },

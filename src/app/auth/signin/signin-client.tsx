@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
-import { Loader2, BookOpen, ShieldCheck, Mail, Globe } from 'lucide-react'
+import { Loader2, BookOpen, ShieldCheck, Mail, Globe, UserCog } from 'lucide-react'
 import { GithubIcon } from '@/components/icons/brand'
 import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
@@ -26,10 +26,10 @@ const oauthProviders = [
   { id: 'google', name: 'Google', icon: Globe },
 ]
 
-export function SignInClient({ enabled }: { enabled: EnabledProviders }) {
+export function SignInClient({ enabled, hasDatabase }: { enabled: EnabledProviders; hasDatabase: boolean }) {
   return (
     <Suspense fallback={<SignInFallback />}>
-      <SignInContent enabled={enabled} />
+      <SignInContent enabled={enabled} hasDatabase={hasDatabase} />
     </Suspense>
   )
 }
@@ -48,18 +48,22 @@ function SignInFallback() {
   )
 }
 
-function SignInContent({ enabled }: { enabled: EnabledProviders }) {
+function SignInContent({ enabled, hasDatabase }: { enabled: EnabledProviders; hasDatabase: boolean }) {
   const searchParams = useSearchParams()
   const callbackUrl = searchParams.get('callbackUrl') || '/learn'
   const error = searchParams.get('error')
   const [isLoading, setIsLoading] = useState<string | null>(null)
   const [email, setEmail] = useState('')
+  const [adminUsername, setAdminUsername] = useState('')
+  const [adminPassword, setAdminPassword] = useState('')
+  const [showAdminForm, setShowAdminForm] = useState(false)
 
   const availableOAuth = oauthProviders.filter(
     (p) => enabled[p.id as 'github' | 'google']
   )
-  const hasAnyProvider = availableOAuth.length > 0 || enabled.email
-  const singleOAuthOnly = availableOAuth.length === 1 && !enabled.email
+  const availableAdmin = hasDatabase
+  const hasAnyProvider = availableOAuth.length > 0 || enabled.email || availableAdmin
+  const singleOAuthOnly = availableOAuth.length === 1 && !enabled.email && !availableAdmin
   const singleProviderName = availableOAuth[0]?.name ?? 'GitHub'
 
   const handleOAuthSignIn = (provider: string) => {
@@ -67,11 +71,149 @@ function SignInContent({ enabled }: { enabled: EnabledProviders }) {
     signIn(provider, { callbackUrl })
   }
 
+  const handleAdminSignIn = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!adminUsername || !adminPassword) return
+    setIsLoading('admin')
+    await signIn('admin', { username: adminUsername, password: adminPassword, callbackUrl })
+  }
+
   const handleEmailSignIn = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!email) return
     setIsLoading('email')
     await signIn('email', { email, callbackUrl })
+  }
+
+  const renderProviders = () => {
+    if (showAdminForm) {
+      return (
+        <form onSubmit={handleAdminSignIn} className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="username">Username</Label>
+            <Input
+              id="username"
+              type="text"
+              placeholder="nyx"
+              value={adminUsername}
+              onChange={(e) => setAdminUsername(e.target.value)}
+              disabled={isLoading !== null}
+              required
+              autoComplete="username"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="password">Password</Label>
+            <Input
+              id="password"
+              type="password"
+              placeholder="••••••••"
+              value={adminPassword}
+              onChange={(e) => setAdminPassword(e.target.value)}
+              disabled={isLoading !== null}
+              required
+              autoComplete="current-password"
+            />
+          </div>
+          <Button type="submit" className="w-full gap-2" disabled={isLoading !== null || !adminUsername || !adminPassword}>
+            {isLoading === 'admin' ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                Signing in...
+              </>
+            ) : (
+              <>
+                <UserCog className="h-4 w-4" aria-hidden="true" />
+                Admin Sign In
+              </>
+            )}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            className="w-full"
+            onClick={() => setShowAdminForm(false)}
+            disabled={isLoading !== null}
+          >
+            Back to options
+          </Button>
+        </form>
+      )
+    }
+
+    return (
+      <>
+        {availableOAuth.length > 0 && (
+          <div className={availableOAuth.length > 1 ? 'grid gap-3 sm:grid-cols-2' : 'mx-auto w-full max-w-xs'}>
+            {availableOAuth.map((provider) => (
+              <Button
+                key={provider.id}
+                variant="outline"
+                className={availableOAuth.length === 1 ? 'w-full gap-2' : 'gap-2'}
+                onClick={() => handleOAuthSignIn(provider.id)}
+                disabled={isLoading !== null}
+              >
+                {isLoading === provider.id ? (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  <provider.icon className="h-4 w-4" aria-hidden="true" />
+                )}
+                {provider.name}
+              </Button>
+            ))}
+          </div>
+        )}
+
+        {availableAdmin && (
+          <>
+            {(availableOAuth.length > 0 || enabled.email) && <Separator className="my-4" />}
+            <Button
+              variant="outline"
+              className="w-full max-w-xs mx-auto gap-2"
+              onClick={() => setShowAdminForm(true)}
+              disabled={isLoading !== null}
+            >
+              <UserCog className="h-4 w-4" aria-hidden="true" />
+              Admin Login
+            </Button>
+          </>
+        )}
+
+        {enabled.email && (
+          <>
+            {(availableOAuth.length > 0 || availableAdmin) && <Separator className="my-4" />}
+            <form onSubmit={handleEmailSignIn} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="email">Email address</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  placeholder="you@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  disabled={isLoading !== null}
+                  required
+                  autoComplete="email"
+                />
+              </div>
+              <Button type="submit" className="w-full gap-2" disabled={isLoading !== null || !email}>
+                {isLoading === 'email' ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                    Sending...
+                  </>
+                ) : (
+                  <>
+                    <Mail className="h-4 w-4" aria-hidden="true" />
+                    Send Magic Link
+                  </>
+                )}
+              </Button>
+            </form>
+          </>
+        )}
+      </>
+    )
   }
 
   return (
@@ -110,7 +252,9 @@ function SignInContent({ enabled }: { enabled: EnabledProviders }) {
                   : hasAnyProvider
                     ? enabled.email
                       ? 'All free. No passwords. Magic links or OAuth.'
-                      : `All free. No passwords. Use your ${availableOAuth.map(p => p.name).join(' or ')} account.`
+                      : availableAdmin
+                        ? 'All free. No passwords. Use your GitHub, Google, or Admin account.'
+                        : `All free. No passwords. Use your ${availableOAuth.map(p => p.name).join(' or ')} account.`
                     : 'No sign-in provider is configured on this deployment yet.'}
               </CardDescription>
             </CardHeader>
@@ -143,60 +287,7 @@ function SignInContent({ enabled }: { enabled: EnabledProviders }) {
                 </div>
               )}
 
-              {availableOAuth.length > 0 && (
-                <div className={availableOAuth.length > 1 ? 'grid gap-3 sm:grid-cols-2' : 'mx-auto w-full max-w-xs'}>
-                  {availableOAuth.map((provider) => (
-                    <Button
-                      key={provider.id}
-                      variant="outline"
-                      className={availableOAuth.length === 1 ? 'w-full gap-2' : 'gap-2'}
-                      onClick={() => handleOAuthSignIn(provider.id)}
-                      disabled={isLoading !== null}
-                    >
-                      {isLoading === provider.id ? (
-                        <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                      ) : (
-                        <provider.icon className="h-4 w-4" aria-hidden="true" />
-                      )}
-                      {provider.name}
-                    </Button>
-                  ))}
-                </div>
-              )}
-
-              {enabled.email && (
-                <>
-                  {availableOAuth.length > 0 && <Separator className="my-4" />}
-                  <form onSubmit={handleEmailSignIn} className="space-y-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="email">Email address</Label>
-                      <Input
-                        id="email"
-                        type="email"
-                        placeholder="you@example.com"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        disabled={isLoading !== null}
-                        required
-                        autoComplete="email"
-                      />
-                    </div>
-                    <Button type="submit" className="w-full gap-2" disabled={isLoading !== null || !email}>
-                      {isLoading === 'email' ? (
-                        <>
-                          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                          Sending...
-                        </>
-                      ) : (
-                        <>
-                          <Mail className="h-4 w-4" aria-hidden="true" />
-                          Send Magic Link
-                        </>
-                      )}
-                    </Button>
-                  </form>
-                </>
-              )}
+              {renderProviders()}
 
               {hasAnyProvider && (
                 <p className="text-center text-xs text-muted-foreground">
