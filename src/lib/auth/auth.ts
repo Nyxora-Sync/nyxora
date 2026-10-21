@@ -3,8 +3,10 @@ import { PrismaAdapter } from '@auth/prisma-adapter'
 import GitHub from 'next-auth/providers/github'
 import Google from 'next-auth/providers/google'
 import Email from 'next-auth/providers/email'
+import Credentials from 'next-auth/providers/credentials'
 import { prisma } from '@/lib/db'
 import { sendVerificationRequest } from '@/lib/auth/email'
+import { compareSync } from 'bcrypt-ts'
 
 const providers: NextAuthConfig['providers'] = []
 
@@ -35,6 +37,37 @@ if (process.env.EMAIL_SERVER) {
     })
   )
 }
+
+// Admin credentials provider
+providers.push(
+  Credentials({
+    id: 'admin',
+    name: 'Admin',
+    credentials: {
+      username: { label: 'Username', type: 'text' },
+      password: { label: 'Password', type: 'password' },
+    },
+    async authorize(credentials) {
+      if (!credentials?.username || !credentials?.password) return null
+
+      const adminUser = await prisma.user.findUnique({
+        where: { email: 'admin@nyxora.local' },
+      })
+
+      if (!adminUser || !adminUser.passwordHash) return null
+
+      const isValid = compareSync(credentials.password as string, adminUser.passwordHash)
+      if (!isValid) return null
+
+      return {
+        id: adminUser.id,
+        name: adminUser.name ?? 'nyx',
+        email: adminUser.email,
+        image: adminUser.image,
+      }
+    },
+  })
+)
 
 const hasDatabase = Boolean(process.env.DATABASE_URL)
 
