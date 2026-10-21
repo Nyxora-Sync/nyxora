@@ -3,16 +3,24 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
+import { useSession } from 'next-auth/react'
 import {
   ArrowLeft,
   Award,
   BookOpen,
+  Check,
+  Clock,
   ExternalLink,
+  Eye,
   Flame,
+  Loader2,
   MessageSquare,
   Pencil,
   Rocket,
   ThumbsUp,
+  UserPlus,
+  Users,
   Zap,
 } from 'lucide-react'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -35,6 +43,23 @@ interface ProfileResponse {
   twitterUrl: string | null
   createdAt: string
   isSelf: boolean
+  followers: number
+  following: number
+  relationship: {
+    status:
+      | 'self'
+      | 'none'
+      | 'following'
+      | 'pending_outgoing'
+      | 'pending_incoming'
+    requestId: string | null
+  }
+  viewCounts: {
+    allTime: number
+    month: number
+    week: number
+    day: number
+  } | null
   progress: {
     xp: number
     streakCurrent: number
@@ -62,9 +87,17 @@ function displayName(user: { name: string | null }): string {
 }
 
 export function ProfileClient({ id }: { id: string }) {
+  const router = useRouter()
+  const { status: sessionStatus } = useSession()
   const [profile, setProfile] = useState<ProfileResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [relationship, setRelationship] = useState<ProfileResponse['relationship'] | null>(null)
+  const [followers, setFollowers] = useState(0)
+  const [following, setFollowing] = useState(0)
+  const [followBusy, setFollowBusy] = useState(false)
+  const [followError, setFollowError] = useState<string | null>(null)
+  const [followNotice, setFollowNotice] = useState<string | null>(null)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -80,7 +113,11 @@ export function ProfileClient({ id }: { id: string }) {
         if (!response.ok) {
           throw new Error(payload?.error?.message ?? 'Could not load this profile.')
         }
-        setProfile(payload.data as ProfileResponse)
+        const data = payload.data as ProfileResponse
+        setProfile(data)
+        setRelationship(data.relationship)
+        setFollowers(data.followers)
+        setFollowing(data.following)
       } catch (err) {
         if ((err as Error).name === 'AbortError') return
         setError(err instanceof Error ? err.message : 'Could not load this profile.')
@@ -92,6 +129,79 @@ export function ProfileClient({ id }: { id: string }) {
     load()
     return () => controller.abort()
   }, [id])
+
+  async function toggleFollow() {
+    if (!profile || !relationship || followBusy) return
+    if (sessionStatus !== 'authenticated') {
+      const callbackUrl = encodeURIComponent(`/community/people/${profile.id}`)
+      router.push(`/auth/signin?callbackUrl=${callbackUrl}`)
+      return
+    }
+
+    setFollowBusy(true)
+    setFollowError(null)
+    setFollowNotice(null)
+
+    try {
+      if (relationship.status === 'pending_incoming' && relationship.requestId) {
+        const response = await fetch(
+          `/api/community/follow-requests/${relationship.requestId}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'accept' }),
+          }
+        )
+        const payload = await response.json().catch(() => null)
+        if (!response.ok) {
+          throw new Error(payload?.error?.message ?? 'Could not accept that request.')
+        }
+        // Accepting their request makes them follow you; it does not make you
+        // follow them, so their follower count is unchanged.
+        setFollowing((current) => current + 1)
+        setRelationship({ status: 'none', requestId: null })
+        setFollowNotice('Follow request accepted. You can follow them back if you like.')
+        return
+      }
+
+      if (
+        relationship.status === 'following' ||
+        relationship.status === 'pending_outgoing'
+      ) {
+        const response = await fetch(`/api/community/people/${profile.id}/follow`, {
+          method: 'DELETE',
+        })
+        const payload = await response.json().catch(() => null)
+        if (!response.ok) {
+          throw new Error(payload?.error?.message ?? 'Could not update your follow.')
+        }
+        if (relationship.status === 'following') {
+          setFollowers((current) => Math.max(0, current - 1))
+        }
+        setRelationship({ status: 'none', requestId: null })
+        return
+      }
+
+      const response = await fetch(`/api/community/people/${profile.id}/follow`, {
+        method: 'POST',
+      })
+      const payload = await response.json().catch(() => null)
+      if (!response.ok) {
+        throw new Error(payload?.error?.message ?? 'Could not send that follow request.')
+      }
+      setRelationship({
+        status: 'pending_outgoing',
+        requestId: payload?.data?.requestId ?? null,
+      })
+      setFollowNotice('Follow request sent. They will be notified.')
+    } catch (err) {
+      setFollowError(
+        err instanceof Error ? err.message : 'Could not update your follow.'
+      )
+    } finally {
+      setFollowBusy(false)
+    }
+  }
 
   if (loading) {
     return (
@@ -126,6 +236,16 @@ export function ProfileClient({ id }: { id: string }) {
     profile.twitterUrl && { href: profile.twitterUrl, label: 'Twitter', icon: ExternalLink },
   ].filter(Boolean) as { href: string; label: string; icon: React.ComponentType<{ className?: string }> }[]
 
+  const relationshipStatus = relationship?.status ?? profile.relationship.status
+  const followLabel =
+    relationshipStatus === 'following'
+      ? 'Following'
+      : relationshipStatus === 'pending_outgoing'
+        ? 'Requested'
+        : relationshipStatus === 'pending_incoming'
+          ? 'Accept request'
+          : 'Follow'
+
   return (
     <div className="space-y-8">
       <Card className="overflow-hidden">
@@ -140,15 +260,64 @@ export function ProfileClient({ id }: { id: string }) {
               <div className="pb-1">
                 <h1 className="text-2xl font-bold tracking-tight">{name}</h1>
                 <p className="text-sm text-muted-foreground">Joined {shortDate(profile.createdAt)}</p>
+                {relationshipStatus === 'pending_incoming' && (
+                  <Badge variant="secondary" className="mt-1.5">
+                    Requested to follow you
+                  </Badge>
+                )}
               </div>
             </div>
-            {profile.isSelf && (
+            {profile.isSelf ? (
               <Button asChild variant="outline" size="sm" className="gap-2">
                 <Link href="/settings">
                   <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
                   Edit profile
                 </Link>
               </Button>
+            ) : (
+              <div className="flex flex-col items-start gap-1.5">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={
+                    relationshipStatus === 'following' ||
+                    relationshipStatus === 'pending_outgoing'
+                      ? 'outline'
+                      : 'default'
+                  }
+                  className="gap-2"
+                  disabled={followBusy || sessionStatus === 'loading'}
+                  onClick={toggleFollow}
+                  title={
+                    relationshipStatus === 'following'
+                      ? 'Unfollow'
+                      : relationshipStatus === 'pending_outgoing'
+                        ? 'Cancel follow request'
+                        : undefined
+                  }
+                >
+                  {followBusy ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                  ) : relationshipStatus === 'following' ? (
+                    <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                  ) : relationshipStatus === 'pending_outgoing' ? (
+                    <Clock className="h-3.5 w-3.5" aria-hidden="true" />
+                  ) : (
+                    <UserPlus className="h-3.5 w-3.5" aria-hidden="true" />
+                  )}
+                  {followLabel}
+                </Button>
+                {followNotice && (
+                  <p className="max-w-xs text-xs text-emerald-600 dark:text-emerald-400" role="status">
+                    {followNotice}
+                  </p>
+                )}
+                {followError && (
+                  <p className="max-w-xs text-xs text-destructive" role="alert">
+                    {followError}
+                  </p>
+                )}
+              </div>
             )}
           </div>
 
@@ -177,6 +346,14 @@ export function ProfileClient({ id }: { id: string }) {
 
           <div className="mt-6 flex flex-wrap gap-5 border-t border-border/50 pt-4 text-sm">
             <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+              <Users className="h-4 w-4" aria-hidden="true" />
+              <strong className="text-foreground">{followers}</strong> followers
+            </span>
+            <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+              <UserPlus className="h-4 w-4" aria-hidden="true" />
+              <strong className="text-foreground">{following}</strong> following
+            </span>
+            <span className="inline-flex items-center gap-1.5 text-muted-foreground">
               <Rocket className="h-4 w-4" aria-hidden="true" />
               <strong className="text-foreground">{profile.contributions.projects}</strong> projects
             </span>
@@ -189,6 +366,20 @@ export function ProfileClient({ id }: { id: string }) {
               <strong className="text-foreground">{profile.contributions.upvotes}</strong> upvotes given
             </span>
           </div>
+
+          {profile.isSelf && profile.viewCounts && (
+            <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-border/50 bg-muted/20 px-3 py-2.5 text-sm">
+              <span className="inline-flex items-center gap-1.5 font-medium">
+                <Eye className="h-4 w-4 text-emerald-500" aria-hidden="true" />
+                {profile.viewCounts.allTime.toLocaleString()} profile visitors
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {profile.viewCounts.month.toLocaleString()} this month ·{' '}
+                {profile.viewCounts.week.toLocaleString()} last 7 days ·{' '}
+                {profile.viewCounts.day.toLocaleString()} last 24h
+              </span>
+            </div>
+          )}
         </CardContent>
       </Card>
 

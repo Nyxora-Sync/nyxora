@@ -1,5 +1,5 @@
 import type { MetadataRoute } from 'next'
-import { tracks } from '@/lib/curriculum'
+import { tracks, trackCategories } from '@/lib/curriculum'
 import { NEWSLETTER_ENABLED } from '@/lib/newsletter-feature'
 import { absoluteUrl, canonicalLearnPath } from '@/lib/seo'
 
@@ -13,6 +13,7 @@ const staticPages: Array<{
   { path: '/', priority: 1, changeFrequency: 'weekly' },
   { path: '/learn', priority: 0.9, changeFrequency: 'weekly' },
   { path: '/learn/languages', priority: 0.9, changeFrequency: 'weekly' },
+  { path: '/categories', priority: 0.9, changeFrequency: 'weekly' },
   { path: '/roadmap', priority: 0.8, changeFrequency: 'monthly' },
   { path: '/resources', priority: 0.7, changeFrequency: 'monthly' },
   { path: '/playground', priority: 0.6, changeFrequency: 'monthly' },
@@ -42,6 +43,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
 
   for (const page of staticPages) {
     add(page.path, page.priority, page.changeFrequency)
+  }
+
+  for (const category of trackCategories) {
+    if (tracks.some((track) => track.category === category.id)) {
+      add(`/categories/${category.id}`, 0.8, 'weekly')
+    }
   }
 
   if (NEWSLETTER_ENABLED) {

@@ -1,5 +1,3 @@
-import nodemailer from 'nodemailer'
-
 interface ContactMessageInput {
   name: string | null
   email: string
@@ -15,6 +13,9 @@ export async function sendContactNotification(input: ContactMessageInput): Promi
   const host = process.env.EMAIL_SERVER_HOST
   if (!host) return
 
+  // Load nodemailer only when email is actually configured. Keeping it out of
+  // the module graph lets the app run on Cloudflare Workers without SMTP.
+  const { default: nodemailer } = await import('nodemailer')
   const port = Number(process.env.EMAIL_SERVER_PORT || 587)
   const transporter = nodemailer.createTransport({
     host,

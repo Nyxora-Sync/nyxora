@@ -68,7 +68,7 @@ export default function CategoriesPage() {
                 return (
                   <Link
                     key={category.id}
-                    href={`/learn?category=${category.id}`}
+                    href={`/categories/${category.id}`}
                     className="group relative block"
                   >
                     <Card className="relative h-full overflow-hidden transition-all motion-safe:hover:-translate-y-1 hover:shadow-xl border-border/50">

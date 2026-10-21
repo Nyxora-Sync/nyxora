@@ -5,10 +5,9 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "build:cf": "npm run build && npx @cloudflare/next-on-pages",
-    "preview:cf": "npx wrangler pages dev .vercel/output/static",
-    "deploy:cf": "npm run build:cf && npx wrangler pages deploy .vercel/output/static --project-name=nyxora-sync",
     "start": "next start",
+    "deploy:web": "npx vercel --prod",
+    "deploy:proxy": "wrangler deploy --config proxy-worker/wrangler.jsonc",
     "lint": "eslint",
     "postinstall": "prisma generate",
     "db:generate": "prisma generate",
@@ -59,7 +58,6 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@cloudflare/next-on-pages": "^1.13.0",
     "@cloudflare/workers-types": "^4.20250109.0",
     "@tailwindcss/turbopack": "^4",
     "@tailwindcss/typography": "^0.5.20",

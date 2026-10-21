@@ -6,8 +6,12 @@ import {
   jsonError,
   publicUserSelect,
 } from '@/lib/community'
-
-export const runtime = 'edge'
+import {
+  getFollowCounts,
+  getFollowRelationship,
+  getProfileViewCounts,
+  recordProfileView,
+} from '@/lib/social'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -35,9 +39,21 @@ export async function GET(request: Request, { params }: RouteContext) {
     return jsonError(404, 'NOT_FOUND', 'Profile not found.')
   }
 
-  const canSeeProgress = viewerId === user.id || (user.preferences?.showProgress ?? true)
+  const isSelf = viewerId === user.id
+  const canSeeProgress = isSelf || (user.preferences?.showProgress ?? true)
 
-  const [stats, completedCount, badges, projects, projectCount, commentCount, upvoteCount] = await Promise.all([
+  const [
+    stats,
+    completedCount,
+    badges,
+    projects,
+    projectCount,
+    commentCount,
+    upvoteCount,
+    followCounts,
+    relationship,
+    viewCounts,
+  ] = await Promise.all([
     prisma.userStats.findUnique({
       where: { userId: user.id },
       select: { xp: true, streakCurrent: true, streakLongest: true },
@@ -64,6 +80,10 @@ export async function GET(request: Request, { params }: RouteContext) {
     prisma.project.count({ where: { userId: user.id } }),
     prisma.comment.count({ where: { userId: user.id } }),
     prisma.projectUpvote.count({ where: { userId: user.id } }),
+    getFollowCounts(user.id),
+    getFollowRelationship(viewerId, user.id),
+    isSelf ? getProfileViewCounts(user.id) : Promise.resolve(null),
+    recordProfileView(request, user.id, viewerId),
   ])
 
   return Response.json(
@@ -77,7 +97,11 @@ export async function GET(request: Request, { params }: RouteContext) {
         githubUrl: user.githubUrl,
         twitterUrl: user.twitterUrl,
         createdAt: user.createdAt.toISOString(),
-        isSelf: viewerId === user.id,
+        isSelf,
+        followers: followCounts.followers,
+        following: followCounts.following,
+        relationship,
+        viewCounts,
         progress: canSeeProgress
           ? {
               xp: stats?.xp ?? 0,

@@ -9,7 +9,7 @@ import {
   publicUserSelect,
 } from '@/lib/community'
 
-export const runtime = 'edge'
+
 
 type RouteContext = { params: Promise<{ id: string }> }
 

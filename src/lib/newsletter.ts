@@ -1,4 +1,3 @@
-import nodemailer from 'nodemailer'
 import type SMTPPool from 'nodemailer/lib/smtp-pool'
 import type SMTPTransport from 'nodemailer/lib/smtp-transport'
 
@@ -170,9 +169,13 @@ function fromAddress(): string {
   return process.env.EMAIL_FROM || 'Nyxora Sync <noreply@localhost>'
 }
 
-function createTransport(pool = false) {
+async function createTransport(pool = false) {
   const config = smtpConfig()
   if (!config) throw new Error('Email is not configured')
+
+  // Loaded lazily so the Worker bundle stays free of SMTP code unless the
+  // newsletter feature is actually configured.
+  const { default: nodemailer } = await import('nodemailer')
 
   if (pool) {
     const options: SMTPPool.Options = {
@@ -254,7 +257,7 @@ export async function sendNewsletterConfirmation({
   if (!token) throw new Error('Newsletter token secret is not configured')
 
   const confirmUrl = actionUrl(origin, '/newsletter/confirm', token)
-  const transport = createTransport()
+  const transport = await createTransport()
 
   try {
     await transport.sendMail({
@@ -299,7 +302,7 @@ export async function sendNewsletterBroadcast({
   origin: string
   testTo?: string
 }): Promise<{ sent: number; failed: number }> {
-  const transport = createTransport(true)
+  const transport = await createTransport(true)
   const htmlBody = `<div style="margin:0;font-size:15px;line-height:1.75;color:#3f3f46;white-space:pre-wrap;">${escapeHtml(body)}</div>`
 
   async function sendOne(

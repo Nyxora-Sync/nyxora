@@ -1,0 +1,40 @@
+# Cloudflare proxy deployment
+# The dynamic Next.js app runs on Vercel. This workflow only deploys the thin
+# public-origin proxy Worker that keeps sync.nyxora.workers.dev stable.
+
+name: Deploy Cloudflare proxy
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'proxy-worker/**'
+      - '.github/workflows/cloudflare-workers.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  deployments: write
+
+jobs:
+  deploy:
+    name: Deploy proxy Worker
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Deploy proxy Worker
+        run: npx wrangler deploy --config proxy-worker/wrangler.jsonc
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

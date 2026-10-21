@@ -10,7 +10,7 @@ import {
   sinceMinutes,
 } from '@/lib/community'
 
-export const runtime = 'edge'
+
 
 async function getComments(targetType: string, targetId: string) {
 

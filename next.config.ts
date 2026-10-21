@@ -2,15 +2,15 @@ import type { NextConfig } from "next";
 import createMDX from "@next/mdx";
 
 const nextConfig: NextConfig = {
-  /* Cloudflare Pages requires these settings */
-  output: 'standalone',
   reactStrictMode: true,
+
+  // Keep Prisma's generated client external so Next does not bundle the
+  // query engine into the serverless function.
+  serverExternalPackages: ["@prisma/client", ".prisma/client"],
 
   images: {
     formats: ["image/avif", "image/webp"],
     minimumCacheTTL: 60 * 60 * 24 * 7,
-    loader: 'custom',
-    loaderFile: './src/lib/image-loader.ts',
   },
 
   pageExtensions: ["js", "jsx", "ts", "tsx", "md", "mdx"],
@@ -26,12 +26,6 @@ const nextConfig: NextConfig = {
 
   async headers() {
     return [
-      {
-        source: "/:path*",
-        headers: [
-          { key: "Cache-Control", value: "public, max-age=0, must-revalidate" },
-        ],
-      },
       {
         source: "/_next/static/:path*",
         headers: [

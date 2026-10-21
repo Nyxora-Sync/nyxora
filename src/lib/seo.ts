@@ -1,10 +1,18 @@
 import type { Metadata } from 'next'
 
+// Static output (sitemap, canonical links, Open Graph URLs) is generated at
+// build time. Fall back to the production Worker origin when no explicit
+// public URL is supplied, while keeping local development on localhost.
+const fallbackUrl =
+  process.env.NODE_ENV === 'production'
+    ? 'https://sync.nyxora.workers.dev'
+    : 'http://localhost:3000'
+
 const configuredUrl =
   process.env.NEXT_PUBLIC_SITE_URL ||
   (process.env.VERCEL_PROJECT_PRODUCTION_URL
     ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
-    : 'http://localhost:3000')
+    : fallbackUrl)
 
 export const siteUrl = configuredUrl.replace(/\/+$/, '')
 export const siteName = 'Nyxora Sync'

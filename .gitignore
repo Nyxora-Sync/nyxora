@@ -50,3 +50,7 @@ prisma/migrations/
 
 # Turbopack
 .turbo/
+
+# Cloudflare proxy
+.dev.vars
+cloudflare-env.d.ts

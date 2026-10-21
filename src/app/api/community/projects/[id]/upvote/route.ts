@@ -3,7 +3,7 @@ import { auth } from '@/lib/auth/auth'
 import { prisma } from '@/lib/db'
 import { COMMUNITY_DISABLED, communityEnabled, jsonError } from '@/lib/community'
 
-export const runtime = 'edge'
+
 
 type RouteContext = { params: Promise<{ id: string }> }
 

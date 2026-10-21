@@ -7,9 +7,10 @@ import { usePathname } from 'next/navigation'
 import { useSession, signOut } from 'next-auth/react'
 import { useTheme } from 'next-themes'
 import { AnimatePresence, motion, useReducedMotion, useScroll, useSpring } from 'motion/react'
-import { Menu, X, Sun, Moon, User, LogOut, BookOpen, Trophy, Users, Code2, Rocket, Search, Layers, ChevronDown } from 'lucide-react'
+import { Menu, X, Sun, Moon, User, LogOut, BookOpen, Trophy, Users, Code2, Rocket, Search, Layers, ChevronDown, CircleUser } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { NotificationBell } from '@/components/notification-bell'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
@@ -110,7 +111,7 @@ export function Header() {
                           return (
                             <DropdownMenuItem key={cat.id} asChild>
                               <Link
-                                href={`/learn?category=${cat.id}`}
+                                href={`/categories/${cat.id}`}
                                 className="flex items-center gap-2"
                               >
                                 <Icon className="h-4 w-4" aria-hidden="true" />
@@ -182,6 +183,8 @@ export function Header() {
             </Tooltip>
           </TooltipProvider>
 
+          <NotificationBell />
+
           {status === 'loading' ? (
             <div className="h-10 w-10 animate-pulse rounded-full bg-muted" aria-hidden="true" />
           ) : session ? (
@@ -202,6 +205,15 @@ export function Header() {
                   </div>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
+                <DropdownMenuItem asChild>
+                  <Link
+                    href={`/community/people/${session.user.id}`}
+                    className="flex items-center gap-2"
+                  >
+                    <CircleUser className="h-4 w-4" aria-hidden="true" />
+                    My Profile
+                  </Link>
+                </DropdownMenuItem>
                 <DropdownMenuItem asChild>
                   <Link href="/dashboard" className="flex items-center gap-2">
                     <Trophy className="h-4 w-4" aria-hidden="true" />

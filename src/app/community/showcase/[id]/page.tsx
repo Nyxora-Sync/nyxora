@@ -3,7 +3,7 @@ import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
 import { ProjectDetailClient } from '@/components/community/project-detail-client'
 
-export const runtime = 'edge'
+
 
 export const metadata: Metadata = {
   title: 'Project',

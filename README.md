@@ -9,13 +9,13 @@
 </p>
 
 <p align="center">
-  <a href="https://nyxora-sync.nyxora.workers.dev/learn"><strong>Start learning →</strong></a>
+  <a href="https://sync.nyxora.workers.dev/learn"><strong>Start learning →</strong></a>
   &nbsp;·&nbsp;
-  <a href="https://nyxora-sync.nyxora.workers.dev/roadmap">Roadmap</a>
+  <a href="https://sync.nyxora.workers.dev/roadmap">Roadmap</a>
   &nbsp;·&nbsp;
-  <a href="https://nyxora-sync.nyxora.workers.dev/resources">Resources</a>
+  <a href="https://sync.nyxora.workers.dev/resources">Resources</a>
   &nbsp;·&nbsp;
-  <a href="https://nyxora-sync.nyxora.workers.dev/community">Community</a>
+  <a href="https://sync.nyxora.workers.dev/community">Community</a>
 </p>
 
 <p align="center">
@@ -78,9 +78,9 @@ If you want your progress on another device, sign in with GitHub. Your completed
 ## Community
 
 - Ask questions and share notes in lesson discussions
-- Browse real projects in the [showcase](https://nyxora-sync.nyxora.workers.dev/community/showcase)
+- Browse real projects in the [showcase](https://sync.nyxora.workers.dev/community/showcase)
 - Meet other learners through public profiles
-- Report bugs, suggest resources, or improve a lesson through the [contribution guide](https://nyxora-sync.nyxora.workers.dev/contribute)
+- Report bugs, suggest resources, or improve a lesson through the [contribution guide](https://sync.nyxora.workers.dev/contribute)
 
 ## Contributing
 
@@ -92,7 +92,48 @@ Nyxora Sync is open source and welcomes contributions:
 - Share a project for the showcase
 - Help with translations or design improvements
 
-Open a [GitHub issue](https://github.com/Nyxora-Sync/nyxora-sync/issues) or submit a pull request. Read the [contribution guide](https://nyxora-sync.nyxora.workers.dev/contribute) and [Code of Conduct](https://nyxora-sync.nyxora.workers.dev/code-of-conduct) first.
+Open a [GitHub issue](https://github.com/Nyxora-Sync/nyxora-sync/issues) or submit a pull request. Read the [contribution guide](https://sync.nyxora.workers.dev/contribute) and [Code of Conduct](https://sync.nyxora.workers.dev/code-of-conduct) first.
+
+## Deployment
+
+Production: https://sync.nyxora.workers.dev
+
+The public URL is served by a thin Cloudflare Worker proxy. The Next.js app itself runs on **Vercel**, because the Workers Free plan caps CPU at 10 ms per request and authenticated Next.js + Prisma routes exceed that limit (Cloudflare error 1102). The proxy streams requests to Vercel, preserves the original URL, and rewrites upstream redirects back to `sync.nyxora.workers.dev`.
+
+### App (Vercel)
+
+```bash
+npx vercel login
+npx vercel link --scope miyazaki-akis-projects --project nyxora-sync
+npm run deploy:web
+```
+
+The project is `miyazaki-akis-projects/nyxora-sync`. Set these environment variables for Production:
+
+- `DATABASE_URL` and `DIRECT_URL` (Neon)
+- `AUTH_SECRET`, `AUTH_TRUST_HOST=true`
+- `AUTH_URL=https://sync.nyxora.workers.dev`
+- `NEXTAUTH_URL=https://sync.nyxora.workers.dev`
+- `NEXT_PUBLIC_SITE_URL=https://sync.nyxora.workers.dev`
+- `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`
+- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
+
+`AUTH_URL`, `NEXTAUTH_URL`, and `NEXT_PUBLIC_SITE_URL` must all be the public origin. Vercel is configured for the `iad1` region so functions run next to the Neon database. Disable **Deployment Protection → Vercel Authentication** for production; the public proxy cannot pass Vercel's SSO challenge. Connecting the GitHub repository in the Vercel dashboard enables automatic deploys; otherwise run `npm run deploy:web`.
+
+### Public URL proxy (Cloudflare)
+
+```bash
+npm run deploy:proxy
+```
+
+The proxy configuration lives in `proxy-worker/wrangler.jsonc`. Set `UPSTREAM_ORIGIN` there to the Vercel production URL. The proxy has no KV or database bindings; it only forwards HTTP requests and responses.
+
+OAuth callback URLs (set these in the provider consoles):
+
+- GitHub: `https://sync.nyxora.workers.dev/api/auth/callback/github`
+- Google: `https://sync.nyxora.workers.dev/api/auth/callback/google`
+
+The old `NEXT_INC_CACHE_KV` namespace is no longer used by the live site. The CI workflow deploys only the proxy; it needs a Cloudflare API token with **Workers Scripts: Edit**.
 
 ## License
 

@@ -2,7 +2,7 @@
 // Run: npx prisma migrate dev --name init
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
   previewFeatures = ["driverAdapters"]
 }
 
@@ -35,6 +35,77 @@ model User {
   preferences    UserPreferences?
   comments       Comment[]
   projectUpvotes ProjectUpvote[]
+  avatar         UserAvatar?
+
+  followers          Follow[]       @relation("FollowTarget")
+  following          Follow[]       @relation("FollowSource")
+  notifications      Notification[] @relation("NotificationRecipient")
+  actorNotifications Notification[] @relation("NotificationActor")
+  profileViews       ProfileView[]  @relation("ProfileViewTarget")
+  viewedProfiles     ProfileView[]  @relation("ProfileViewViewer")
+}
+
+// Uploaded profile photo. Kept out of User so session/adapter queries never
+// load the image bytes; User.image points at /api/community/avatar/<id>.
+model UserAvatar {
+  userId    String   @id
+  mime      String
+  data      String   @db.Text
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// Follow requests are pending until the target accepts or rejects them.
+model Follow {
+  id          String   @id @default(cuid())
+  followerId  String
+  followingId String
+  status      String   @default("pending") // pending, accepted, rejected
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  follower  User @relation("FollowSource", fields: [followerId], references: [id], onDelete: Cascade)
+  following User @relation("FollowTarget", fields: [followingId], references: [id], onDelete: Cascade)
+
+  @@unique([followerId, followingId])
+  @@index([followingId, status, createdAt])
+  @@index([followerId, status])
+}
+
+// In-app notification for follow requests and their outcomes.
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  actorId   String?
+  type      String // follow_request, follow_accepted, follow_rejected
+  message   String?   @db.Text
+  href      String?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user  User  @relation("NotificationRecipient", fields: [userId], references: [id], onDelete: Cascade)
+  actor User? @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([userId, readAt, createdAt])
+  @@index([actorId])
+}
+
+// One row per unique visitor per profile per UTC day. viewerKey is a stable
+// hash for anonymous visitors, so no raw IP address is stored.
+model ProfileView {
+  id            String   @id @default(cuid())
+  profileUserId String
+  viewerId      String?
+  viewerKey     String
+  viewDate      DateTime @db.Date
+  viewedAt      DateTime @default(now())
+
+  profile User  @relation("ProfileViewTarget", fields: [profileUserId], references: [id], onDelete: Cascade)
+  viewer  User? @relation("ProfileViewViewer", fields: [viewerId], references: [id], onDelete: SetNull)
+
+  @@unique([profileUserId, viewerKey, viewDate])
+  @@index([profileUserId, viewedAt])
+  @@index([viewDate])
 }
 
 model Account {
@@ -73,31 +144,31 @@ model VerificationToken {
 }
 
 model UserPreferences {
-  id              String   @id @default(cuid())
-  userId          String   @unique
-  theme           String   @default("system") // light, dark, system
-  track           String   @default("beginner") // beginner, developer
-  emailUpdates    Boolean  @default(false)
-  showProgress    Boolean  @default(true)
+  id                   String  @id @default(cuid())
+  userId               String  @unique
+  theme                String  @default("system") // light, dark, system
+  track                String  @default("beginner") // beginner, developer
+  emailUpdates         Boolean @default(false)
+  showProgress         Boolean @default(true)
   anonymizeLeaderboard Boolean @default(true)
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user                 User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 // Learning Progress Tracking
 model UserProgress {
-  id        String   @id @default(cuid())
-  userId    String
+  id          String    @id @default(cuid())
+  userId      String
   // Curriculum lesson id (e.g. "foundations-html-basics"). Curriculum content
   // lives in the app, so this is a stable string key rather than a foreign key.
-  lessonKey String
-  completed Boolean  @default(false)
-  notes     String?  @db.Text
-  xpEarned  Int      @default(0)
+  lessonKey   String
+  completed   Boolean   @default(false)
+  notes       String?   @db.Text
+  xpEarned    Int       @default(0)
   completedAt DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, lessonKey])
   @@index([userId])
@@ -107,44 +178,44 @@ model UserProgress {
 
 // Aggregate learning state that doesn't map to a single lesson
 model UserStats {
-  id                String   @id @default(cuid())
-  userId            String   @unique
-  xp                Int      @default(0)
-  streakCurrent     Int      @default(0)
-  streakLongest     Int      @default(0)
+  id                String    @id @default(cuid())
+  userId            String    @unique
+  xp                Int       @default(0)
+  streakCurrent     Int       @default(0)
+  streakLongest     Int       @default(0)
   streakLastActive  DateTime?
-  bookmarks         String[] @default([])
+  bookmarks         String[]  @default([])
   lastVisitedTrack  String?
   lastVisitedModule String?
   lastVisitedLesson String?
   lastVisitedAt     DateTime?
-  updatedAt         DateTime @updatedAt
+  updatedAt         DateTime  @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 // Gamification - Badges
 model Badge {
-  id          String   @id @default(cuid())
-  key         String   @unique // e.g., "first-api", "react-hooks-master"
+  id          String      @id @default(cuid())
+  key         String      @unique // e.g., "first-api", "react-hooks-master"
   name        String
   description String
-  icon        String   // lucide icon name
-  category    String   // milestone, skill, streak, special
-  xpReward    Int      @default(0)
-  criteria    Json     // { type: "lesson_complete", count: 5, track: "developer" }
-  createdAt   DateTime @default(now())
+  icon        String // lucide icon name
+  category    String // milestone, skill, streak, special
+  xpReward    Int         @default(0)
+  criteria    Json // { type: "lesson_complete", count: 5, track: "developer" }
+  createdAt   DateTime    @default(now())
   userBadges  UserBadge[]
 }
 
 model UserBadge {
-  id        String   @id @default(cuid())
-  userId    String
-  badgeId   String
-  earnedAt  DateTime @default(now())
+  id       String   @id @default(cuid())
+  userId   String
+  badgeId  String
+  earnedAt DateTime @default(now())
 
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  badge     Badge    @relation(fields: [badgeId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  badge Badge @relation(fields: [badgeId], references: [id], onDelete: Cascade)
 
   @@unique([userId, badgeId])
   @@index([userId])
@@ -159,15 +230,15 @@ model Project {
   githubUrl   String?
   demoUrl     String?
   imageUrl    String?
-  track       String   // beginner, developer
+  track       String // beginner, developer
   modules     String[] // which modules this project covers
   tags        String[]
   upvotes     Int      @default(0)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  upvoteRows  ProjectUpvote[]
+  user       User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  upvoteRows ProjectUpvote[]
 
   @@index([userId])
   @@index([track])
@@ -199,8 +270,8 @@ model ProjectUpvote {
 model Comment {
   id         String   @id @default(cuid())
   userId     String
-  targetType String   // "lesson" | "project"
-  targetId   String   // lesson id or project id
+  targetType String // "lesson" | "project"
+  targetId   String // lesson id or project id
   parentId   String?
   body       String   @db.Text
   createdAt  DateTime @default(now())
@@ -226,50 +297,50 @@ model Track {
 }
 
 model Module {
-  id          String   @id @default(cuid())
-  trackId     String
-  key         String   // e.g., "node-express", "mongodb", "react"
-  name        String
-  description String   @db.Text
-  order       Int      @default(0)
-  estimatedHours Int   @default(0)
-  track       Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
-  lessons     Lesson[]
+  id             String   @id @default(cuid())
+  trackId        String
+  key            String // e.g., "node-express", "mongodb", "react"
+  name           String
+  description    String   @db.Text
+  order          Int      @default(0)
+  estimatedHours Int      @default(0)
+  track          Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  lessons        Lesson[]
 
   @@unique([trackId, key])
   @@index([trackId])
 }
 
 model Lesson {
-  id          String   @id @default(cuid())
-  moduleId    String
-  key         String   // e.g., "express-routing", "mongoose-schemas"
-  title       String
-  description String   @db.Text
-  content     String?  @db.Text // MDX content or reference to file
-  order       Int      @default(0)
-  estimatedMinutes Int  @default(0)
-  difficulty  String   @default("beginner") // beginner, intermediate, advanced
-  xpReward    Int      @default(10)
-  module      Module   @relation(fields: [moduleId], references: [id], onDelete: Cascade)
-  resources   Resource[]
+  id               String     @id @default(cuid())
+  moduleId         String
+  key              String // e.g., "express-routing", "mongoose-schemas"
+  title            String
+  description      String     @db.Text
+  content          String?    @db.Text // MDX content or reference to file
+  order            Int        @default(0)
+  estimatedMinutes Int        @default(0)
+  difficulty       String     @default("beginner") // beginner, intermediate, advanced
+  xpReward         Int        @default(10)
+  module           Module     @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  resources        Resource[]
 
   @@unique([moduleId, key])
   @@index([moduleId])
 }
 
 model Resource {
-  id          String   @id @default(cuid())
+  id          String  @id @default(cuid())
   lessonId    String
-  type        String   // video, article, docs, interactive, project, cheatsheet
+  type        String // video, article, docs, interactive, project, cheatsheet
   title       String
   url         String
-  description String?  @db.Text
-  duration    String?  // e.g., "15 min", "2 hours"
-  provider    String?  // freeCodeCamp, Net Ninja, Official Docs, etc.
-  isVerified  Boolean  @default(false) // official docs get this badge
-  order       Int      @default(0)
-  lesson      Lesson   @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  description String? @db.Text
+  duration    String? // e.g., "15 min", "2 hours"
+  provider    String? // freeCodeCamp, Net Ninja, Official Docs, etc.
+  isVerified  Boolean @default(false) // official docs get this badge
+  order       Int     @default(0)
+  lesson      Lesson  @relation(fields: [lessonId], references: [id], onDelete: Cascade)
 
   @@index([lessonId])
 }

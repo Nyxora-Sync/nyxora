@@ -3,7 +3,7 @@ import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
 import { ProfileClient } from '@/components/community/profile-client'
 
-export const runtime = 'edge'
+
 
 export const metadata: Metadata = {
   title: 'Learner Profile',

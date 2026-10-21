@@ -55,7 +55,7 @@ export async function generateMetadata({ params }: CategoryPageProps): Promise<M
   return pageMetadata({
     title: `${catInfo.name} | Nyxora Sync`,
     description: `${catInfo.description} ${totalLessons} lessons across ${categoryTracks.length} learning paths.`,
-    path: `/learn/${category}`,
+    path: `/categories/${category}`,
   })
 }
 

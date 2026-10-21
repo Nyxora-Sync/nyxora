@@ -1,5 +1,3 @@
-import nodemailer from 'nodemailer'
-
 export async function sendVerificationRequest(params: {
   identifier: string
   url: string
@@ -7,6 +5,8 @@ export async function sendVerificationRequest(params: {
 }) {
   const { identifier: email, url, provider } = params
   const from = provider.from || process.env.EMAIL_FROM || 'Nyxora Sync <noreply@localhost>'
+
+  const { default: nodemailer } = await import('nodemailer')
 
   const transporter = nodemailer.createTransport({
     host: process.env.EMAIL_SERVER_HOST,

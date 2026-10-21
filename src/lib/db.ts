@@ -1,37 +1,41 @@
 import { PrismaClient } from '@prisma/client'
 import { PrismaPg } from '@prisma/adapter-pg'
-import { Pool } from 'pg'
 
+// Vercel reuses a warm function instance for multiple requests, so a single
+// Prisma client (and its pg pool) should be shared instead of reconnecting on
+// every invocation. The module cache is enough in production; the global is
+// for local development hot reloads.
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined
-  pool: Pool | undefined
 }
 
-// Create a connection pool for the HTTP adapter (edge-compatible)
-function createPool() {
-  if (!process.env.DATABASE_URL) return undefined
-  return new Pool({ connectionString: process.env.DATABASE_URL })
-}
-
-// Create Prisma client with appropriate adapter
 function createPrismaClient() {
-  const pool = createPool()
-  
-  if (pool) {
-    // Edge-compatible: use HTTP adapter via pg
-    const adapter = new PrismaPg(pool)
-    return new PrismaClient({ adapter })
+  const connectionString = process.env.DATABASE_URL
+
+  if (connectionString) {
+    return new PrismaClient({
+      adapter: new PrismaPg({ connectionString }),
+      log:
+        process.env.NODE_ENV === 'development'
+          ? ['query', 'error', 'warn']
+          : ['error'],
+    })
   }
-  
-  // Fallback: standard client (for local development)
+
+  // Local fallback when no database is configured. The app's core learning
+  // experience works without auth/community persistence.
   return new PrismaClient({
-    log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
+    log:
+      process.env.NODE_ENV === 'development'
+        ? ['query', 'error', 'warn']
+        : ['error'],
   })
 }
 
-export const prisma =
-  globalForPrisma.prisma ?? createPrismaClient()
+export const prisma = globalForPrisma.prisma ?? createPrismaClient()
 
-if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma
+if (process.env.NODE_ENV !== 'production') {
+  globalForPrisma.prisma = prisma
+}
 
 export default prisma

@@ -110,7 +110,7 @@ export default function LearnPage() {
                   return (
                     <Link
                       key={category.id}
-                      href={`/learn?category=${category.id}`}
+                      href={`/categories/${category.id}`}
                       className="group relative block"
                     >
                       <Card className="relative h-full overflow-hidden transition-all motion-safe:hover:-translate-y-1 hover:shadow-xl border-border/50">
@@ -164,7 +164,7 @@ export default function LearnPage() {
                 </p>
               </div>
               <Button asChild variant="outline" className="gap-2 self-start sm:self-auto">
-                <Link href="/learn?category=web-development">
+                <Link href="/categories/web-development">
                   View all web tracks
                   <ArrowRight className="h-4 w-4" aria-hidden="true" />
                 </Link>
@@ -272,7 +272,7 @@ export default function LearnPage() {
                 </p>
               </div>
               <Button asChild variant="outline" className="gap-2 self-start sm:self-auto">
-                <Link href="/learn?category=embedded-systems">
+                <Link href="/categories/embedded-systems">
                   View embedded tracks
                   <ArrowRight className="h-4 w-4" aria-hidden="true" />
                 </Link>

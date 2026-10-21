@@ -1,7 +1,7 @@
 import { prisma } from '@/lib/db'
 import { COMMUNITY_DISABLED, communityEnabled, jsonError } from '@/lib/community'
 
-export const runtime = 'edge'
+
 
 async function getCommunityStats() {
   try {

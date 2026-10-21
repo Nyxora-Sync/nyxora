@@ -39,6 +39,13 @@ if (process.env.EMAIL_SERVER) {
 const hasDatabase = Boolean(process.env.DATABASE_URL)
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
+  trustHost: true,
+  // Use the app's own auth screens instead of NextAuth's default /api/auth ones.
+  pages: {
+    signIn: '/auth/signin',
+    error: '/auth/error',
+    verifyRequest: '/auth/verify-request',
+  },
   // Only attach the Prisma adapter when a database is configured.
   // Without one, auth falls back to JWT sessions (and the app's core
   // learning experience still works fully via localStorage).
@@ -55,29 +62,6 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (url.startsWith('/')) return `${baseUrl}${url}`
       if (new URL(url).origin === baseUrl) return url
       return `${baseUrl}/learn`
-    },
-  },
-  pages: {
-    signIn: '/auth/signin',
-    error: '/auth/error',
-    verifyRequest: '/auth/verify-request',
-  },
-  events: {
-    async createUser({ user }) {
-      if (!user.id) return
-      try {
-        // Create default preferences for new users. Never block sign-in if this
-        // fails (e.g. a transient database hiccup).
-        await prisma.userPreferences.create({
-          data: {
-            userId: user.id,
-            theme: 'system',
-            track: 'beginner',
-          },
-        })
-      } catch (error) {
-        console.error('Failed to create default user preferences:', error)
-      }
     },
   },
   debug: process.env.NODE_ENV === 'development',
