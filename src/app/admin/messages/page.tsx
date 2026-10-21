@@ -82,7 +82,7 @@ export default async function ContactInboxPage({
   return (
     <div className="flex min-h-screen flex-col">
       <Header />
-      <main id="main-content" tabIndex={-1} className="flex-1 py-10 sm:py-14">
+      <main id="main-content" tabIndex={-1} className="flex-1 py-10 sm:py-14 pb-20 sm:pb-0">
         <div className="mx-auto max-w-5xl space-y-8 px-4 sm:px-6 lg:px-8">
           <div className="space-y-3">
             <Badge variant="outline" className="gap-1.5">

@@ -14,7 +14,7 @@ export default function SettingsPage() {
   return (
     <div className="flex min-h-screen flex-col">
       <Header />
-      <main id="main-content" tabIndex={-1} className="flex-1 py-10 sm:py-14">
+      <main id="main-content" tabIndex={-1} className="flex-1 py-10 sm:py-14 pb-20 sm:pb-0">
         <div className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8">
           <div className="mb-8">
             <h1 className="text-3xl font-bold tracking-tight">Settings</h1>

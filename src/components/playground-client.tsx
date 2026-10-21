@@ -254,7 +254,7 @@ ${debouncedJs}
         </div>
         <p className="mt-3 text-xs text-muted-foreground">
           Tip: The preview re-runs automatically as you type (with a short delay).
-          Use <kbd className="rounded border border-border px-1 text-[10px]">Re-run</kbd> to force a refresh.
+          Use <kbd className="rounded border border-border px-1 text-xs sm:text-[10px]">Re-run</kbd> to force a refresh.
         </p>
       </div>
 
@@ -285,7 +285,7 @@ ${debouncedJs}
                     <p className="mt-1 text-sm text-muted-foreground">{env.description}</p>
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {env.tags.map((tag) => (
-                        <Badge key={tag} variant="secondary" className="text-[10px]">{tag}</Badge>
+                        <Badge key={tag} variant="secondary" className="text-xs sm:text-[10px]">{tag}</Badge>
                       ))}
                     </div>
                     <Button size="sm" className="mt-4 gap-2" asChild>

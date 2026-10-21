@@ -459,7 +459,7 @@ export function ProfileClient({ id }: { id: string }) {
               <Card key={project.id} className="transition-shadow hover:shadow-md">
                 <CardContent className="pt-5">
                   <div className="flex items-center gap-2">
-                    <Badge variant="outline" className="text-[10px] capitalize">
+                    <Badge variant="outline" className="text-xs capitalize sm:text-[10px]">
                       {project.track}
                     </Badge>
                     <span className="text-xs text-muted-foreground">{timeAgo(project.createdAt)}</span>

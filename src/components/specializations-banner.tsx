@@ -43,7 +43,7 @@ export function SpecializationsBanner({ className }: { className?: string }) {
               {track.modules.map((module) => (
                 <Link key={module.id} href={`/learn/${track.key}/${module.key}`} className="group block">
                   <div className="h-full rounded-xl border border-border/60 bg-card p-4 transition-all motion-safe:hover:-translate-y-0.5 hover:border-border hover:shadow-md">
-                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground sm:text-[11px]">
                       Specialization {module.order}
                     </p>
                     <h3 className="mt-1 font-semibold group-hover:text-primary transition-colors">

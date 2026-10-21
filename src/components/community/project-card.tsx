@@ -37,11 +37,11 @@ export const ProjectCard = memo(function ProjectCard({ project }: { project: Pro
 
       <div className="flex flex-1 flex-col p-5">
         <div className="mb-2 flex flex-wrap items-center gap-1.5">
-          <Badge variant="outline" className={cn('text-[10px] capitalize', getAccent(getTrackColor(project.track)).text)}>
+          <Badge variant="outline" className={cn('text-xs capitalize sm:text-[10px]', getAccent(getTrackColor(project.track)).text)}>
             {project.track}
           </Badge>
           {project.tags.slice(0, 3).map((tag) => (
-            <Badge key={tag} variant="secondary" className="text-[10px] font-normal">
+            <Badge key={tag} variant="secondary" className="text-xs font-normal sm:text-[10px]">
               {tag}
             </Badge>
           ))}

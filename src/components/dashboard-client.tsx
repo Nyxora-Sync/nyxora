@@ -289,7 +289,7 @@ export function DashboardClient() {
                   <p className="font-semibold text-sm">{badge.name}</p>
                   <p className="text-xs text-muted-foreground mt-1">{badge.description}</p>
                   {earned && (
-                    <Badge className="mt-3 text-[10px] bg-amber-500/15 text-amber-600 border-amber-500/20 hover:bg-amber-500/15">
+                    <Badge className="mt-3 text-xs sm:text-[10px] bg-amber-500/15 text-amber-600 border-amber-500/20 hover:bg-amber-500/15">
                       ✓ Earned
                     </Badge>
                   )}

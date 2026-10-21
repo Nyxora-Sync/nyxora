@@ -79,7 +79,7 @@ export function Header() {
               className="h-9 w-9 rounded-lg object-cover transition-transform duration-300 hover:scale-[1.03]"
               priority
             />
-            <span className="whitespace-nowrap font-bold text-xl font-sans">Nyxora Sync</span>
+            <span className="font-bold text-xl font-sans truncate">Nyxora Sync</span>
           </Link>
 
           <div className="hidden lg:flex lg:items-center lg:gap-6">

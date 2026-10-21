@@ -41,12 +41,12 @@ const ResourceCard = memo(function ResourceCard({ resource }: { resource: Direct
         <div className={cn('flex h-9 w-9 items-center justify-center rounded-lg flex-shrink-0', getAccent(meta.color).icon)}>
           <Icon className="h-4.5 w-4.5" aria-hidden="true" />
         </div>
-        <Badge variant="outline" className="text-[10px] uppercase tracking-wide">
+        <Badge variant="outline" className="text-xs uppercase tracking-wide sm:text-[10px]">
           {meta.label}
         </Badge>
         <Badge
           variant="outline"
-          className={cn('text-[10px]', getAccent(levelColor).borderSoft, getAccent(levelColor).text)}
+          className={cn('text-xs sm:text-[10px]', getAccent(levelColor).borderSoft, getAccent(levelColor).text)}
         >
           {resource.level}
         </Badge>

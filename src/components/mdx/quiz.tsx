@@ -48,7 +48,7 @@ export function Quiz({
             >
               <span
                 className={cn(
-                  'flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[11px] font-semibold',
+                  'flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-xs font-semibold sm:text-[11px]',
                   answered && isAnswer
                     ? 'border-emerald-500 bg-emerald-500 text-white'
                     : answered && isSelected

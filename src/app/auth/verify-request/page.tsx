@@ -28,7 +28,7 @@ function VerifyRequestContent() {
   return (
     <div className="flex min-h-screen flex-col">
       <Header />
-      <main id="main-content" tabIndex={-1} className="flex-1 flex items-center justify-center px-4 py-12">
+      <main id="main-content" tabIndex={-1} className="flex-1 flex items-center justify-center px-4 py-12 pb-20 sm:pb-0">
         <div className="w-full max-w-md text-center">
           <Card>
             <CardHeader>

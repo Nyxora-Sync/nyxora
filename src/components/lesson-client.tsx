@@ -126,11 +126,11 @@ export function LessonClient({ lesson, track, moduleKey, prev, next, children }:
                     <Icon className="h-4 w-4" aria-hidden="true" />
                   </div>
                   <div className="flex items-center gap-1.5 flex-wrap">
-                    <Badge variant="outline" className="text-[10px] uppercase tracking-wide">
+                    <Badge variant="outline" className="text-xs uppercase tracking-wide sm:text-[10px]">
                       {meta.label}
                     </Badge>
                     {resource.isVerified && (
-                      <Badge className="text-[10px] bg-emerald-500/15 text-emerald-600 border-emerald-500/20 hover:bg-emerald-500/15">
+                      <Badge className="text-xs sm:text-[10px] bg-emerald-500/15 text-emerald-600 border-emerald-500/20 hover:bg-emerald-500/15">
                         ✓ Verified
                       </Badge>
                     )}
