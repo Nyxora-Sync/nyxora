@@ -1,5 +1,6 @@
 import type SMTPPool from 'nodemailer/lib/smtp-pool'
 import type SMTPTransport from 'nodemailer/lib/smtp-transport'
+import { isAdmin } from '@/lib/admin'
 
 const DAY_SECONDS = 24 * 60 * 60
 const CONFIRM_TTL_SECONDS = 2 * DAY_SECONDS
@@ -157,12 +158,7 @@ export function newsletterEmailConfigured(): boolean {
 }
 
 export function isNewsletterAdmin(email: string | null | undefined): boolean {
-  if (!email) return false
-  const admins = (process.env.ADMIN_EMAILS || '')
-    .split(',')
-    .map((value) => value.trim().toLowerCase())
-    .filter(Boolean)
-  return admins.includes(email.trim().toLowerCase())
+  return isAdmin(email)
 }
 
 function fromAddress(): string {

@@ -17,9 +17,11 @@ import {
   Clock,
   Eye,
   Flame,
+  Inbox,
   Loader2,
   LogIn,
   Save,
+  ShieldCheck,
   Trash2,
   Trophy,
   UserCog,
@@ -64,6 +66,7 @@ interface NotificationItem {
 
 interface SettingsResponse {
   id: string
+  isAdmin: boolean
   name: string | null
   email: string
   image: string | null
@@ -906,7 +909,7 @@ export function SettingsClient() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="privacy" className="mt-0">
+        <TabsContent value="privacy" className="mt-0 space-y-6">
           <Card>
             <CardHeader>
               <CardTitle>{NEWSLETTER_ENABLED ? 'Privacy & updates' : 'Privacy'}</CardTitle>
@@ -949,6 +952,28 @@ export function SettingsClient() {
               )}
             </CardContent>
           </Card>
+
+          {profile.isAdmin && (
+            <Card className="border-dashed">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <ShieldCheck className="h-4 w-4 text-emerald-500" aria-hidden="true" />
+                  Maintainer tools
+                </CardTitle>
+                <CardDescription>
+                  Read and manage private messages sent through the contact form.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Button asChild variant="outline" className="gap-2">
+                  <Link href="/admin/messages">
+                    <Inbox className="h-4 w-4" aria-hidden="true" />
+                    Open contact inbox
+                  </Link>
+                </Button>
+              </CardContent>
+            </Card>
+          )}
         </TabsContent>
       </Tabs>
 

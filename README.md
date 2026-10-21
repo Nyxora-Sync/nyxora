@@ -117,8 +117,15 @@ The project is `miyazaki-akis-projects/nyxora-sync`. Set these environment varia
 - `NEXT_PUBLIC_SITE_URL=https://sync.nyxora.workers.dev`
 - `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
+- `ADMIN_EMAILS` (comma-separated maintainer emails; gates `/admin/messages` and `/admin/newsletter`)
 
 `AUTH_URL`, `NEXTAUTH_URL`, and `NEXT_PUBLIC_SITE_URL` must all be the public origin. Vercel is configured for the `iad1` region so functions run next to the Neon database. Disable **Deployment Protection → Vercel Authentication** for production; the public proxy cannot pass Vercel's SSO challenge. Connecting the GitHub repository in the Vercel dashboard enables automatic deploys; otherwise run `npm run deploy:web`.
+
+### Contact inbox
+
+The floating contact button opens `/contact`. Each submission is stored in the `ContactMessage` table before an email notification is attempted. Maintainers listed in `ADMIN_EMAILS` can read messages, reply by email, and mark them handled at `/admin/messages`. The same page is linked from **Settings → Privacy → Maintainer tools**.
+
+Email notifications are optional. Set `EMAIL_SERVER_*`, `EMAIL_FROM`, and `CONTACT_INBOX` to also receive a copy; without SMTP, the admin inbox is still the source of truth.
 
 ### Public URL proxy (Cloudflare)
 

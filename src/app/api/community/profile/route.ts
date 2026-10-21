@@ -1,5 +1,6 @@
 import type { Prisma } from '@prisma/client'
 import { auth } from '@/lib/auth/auth'
+import { isAdmin } from '@/lib/admin'
 import { prisma } from '@/lib/db'
 import {
   COMMUNITY_DISABLED,
@@ -81,6 +82,7 @@ export async function GET() {
   return Response.json({
     data: {
       id: user.id,
+      isAdmin: isAdmin(session.user.email),
       name: user.name,
       email: user.email,
       image: user.image,
