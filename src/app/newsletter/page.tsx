@@ -53,7 +53,7 @@ export default function NewsletterPage() {
 
         <section className="py-12 sm:py-16">
           <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-            <div className="grid gap-8 lg:grid-cols-[1fr_380px]">
+            <div className="grid grid-cols-1 gap-8 lg:grid-cols-[1fr_380px]">
               <Card>
                 <CardContent className="pt-6">
                   <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-500">

@@ -3,8 +3,16 @@
 import Link from 'next/link'
 import { useState } from 'react'
 import { useSession } from 'next-auth/react'
-import { useProgress, type ProgressState } from '@/hooks/use-progress'
+import { useProgress } from '@/hooks/use-progress'
+import { useCommunityStats } from '@/hooks/use-community-stats'
 import { tracks, type Lesson } from '@/lib/curriculum'
+import {
+  badgeDefinitions,
+  getEarnedBadges,
+  sortBadgesByEarned,
+  TOTAL_LESSON_COUNT,
+} from '@/lib/badges'
+import { BadgeGrid } from '@/components/badge-grid'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
@@ -17,33 +25,17 @@ import {
 } from 'lucide-react'
 import { calculateLevel, cn } from '@/lib/utils'
 
-// Badge definitions (mirrors prisma seed, but computed client-side)
-const badgeDefinitions: {
-  key: string
-  name: string
-  icon: string
-  description: string
-  check: (s: ProgressState) => boolean
-}[] = [
-  { key: 'first-lesson', name: 'First Steps', icon: '🎯', description: 'Complete your first lesson', check: (s) => Object.values(s.lessons).some((l) => l.completed) },
-  { key: 'five-lessons', name: 'Getting Warmed Up', icon: '🔥', description: 'Complete 5 lessons', check: (s) => Object.values(s.lessons).filter((l) => l.completed).length >= 5 },
-  { key: 'ten-lessons', name: 'Committed', icon: '💪', description: 'Complete 10 lessons', check: (s) => Object.values(s.lessons).filter((l) => l.completed).length >= 10 },
-  { key: 'twenty-lessons', name: 'Halfway Hero', icon: '🚀', description: 'Complete 20 lessons', check: (s) => Object.values(s.lessons).filter((l) => l.completed).length >= 20 },
-  { key: 'streak-3', name: 'On Fire', icon: '🔥', description: '3-day learning streak', check: (s) => s.streak.longest >= 3 },
-  { key: 'streak-7', name: 'Unstoppable', icon: '⚡', description: '7-day learning streak', check: (s) => s.streak.longest >= 7 },
-  { key: 'xp-100', name: 'Century Club', icon: '💯', description: 'Earn 100 XP', check: (s) => s.xp >= 100 },
-  { key: 'xp-500', name: 'XP Hunter', icon: '🏆', description: 'Earn 500 XP', check: (s) => s.xp >= 500 },
-  { key: 'xp-1000', name: 'MERN Master', icon: '👑', description: 'Earn 1000 XP', check: (s) => s.xp >= 1000 },
-]
+const DASHBOARD_BADGE_PREVIEW = 9
 
 export function DashboardClient() {
   const { state, isLoaded, xp, streak, resetProgress, bookmarks } = useProgress()
   const { data: session } = useSession()
+  const { stats: community } = useCommunityStats()
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false)
 
   if (!isLoaded) {
     return (
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4">
         {Array.from({ length: 4 }).map((_, i) => (
           <Card key={i}>
             <CardContent className="pt-6">
@@ -56,13 +48,16 @@ export function DashboardClient() {
   }
 
   const completedLessons = Object.values(state.lessons).filter((l) => l.completed).length
-  const totalLessons = new Set(
-    tracks.flatMap((track) =>
-      track.modules.flatMap((module) => module.lessons.map((lesson) => lesson.id))
-    )
-  ).size
+  const totalLessons = TOTAL_LESSON_COUNT
   const { level, xpForNext, progress: levelProgress } = calculateLevel(xp)
-  const earnedBadges = badgeDefinitions.filter((b) => b.check(state))
+  const earnedBadges = getEarnedBadges({ state, ...community })
+  const earnedBadgeKeys = new Set(earnedBadges.map((badge) => badge.key))
+  const earnedPreview = sortBadgesByEarned(
+    badgeDefinitions.filter((badge) => earnedBadgeKeys.has(badge.key)),
+    earnedBadgeKeys
+  )
+  const nextBadges = badgeDefinitions.filter((badge) => !earnedBadgeKeys.has(badge.key))
+  const previewBadges = [...earnedPreview, ...nextBadges].slice(0, DASHBOARD_BADGE_PREVIEW)
 
   // Find continue learning target
   let continueTarget: { track: string; module: string; lesson: string; title: string } | null = null
@@ -134,7 +129,7 @@ export function DashboardClient() {
       </div>
 
       {/* Stats Grid */}
-      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
@@ -244,7 +239,7 @@ export function DashboardClient() {
       {/* Track Progress */}
       <div>
         <h2 className="text-2xl font-bold tracking-tight mb-4">Track Progress</h2>
-        <div className="grid gap-6 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
           {trackStats.map(({ track, done, total, percentage }) => (
             <Card key={track.key}>
               <CardHeader>
@@ -272,32 +267,21 @@ export function DashboardClient() {
 
       {/* Badges */}
       <div>
-        <h2 className="text-2xl font-bold tracking-tight mb-4">Badges</h2>
-        <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
-          {badgeDefinitions.map((badge) => {
-            const earned = earnedBadges.some((b) => b.key === badge.key)
-            return (
-              <Card
-                key={badge.key}
-                className={cn(
-                  'text-center transition-all',
-                  earned ? 'border-amber-500/40 bg-amber-500/5' : 'opacity-50 grayscale'
-                )}
-              >
-                <CardContent className="pt-6">
-                  <div className="text-4xl mb-2" aria-hidden="true">{badge.icon}</div>
-                  <p className="font-semibold text-sm">{badge.name}</p>
-                  <p className="text-xs text-muted-foreground mt-1">{badge.description}</p>
-                  {earned && (
-                    <Badge className="mt-3 text-xs sm:text-[10px] bg-amber-500/15 text-amber-600 border-amber-500/20 hover:bg-amber-500/15">
-                      ✓ Earned
-                    </Badge>
-                  )}
-                </CardContent>
-              </Card>
-            )
-          })}
+        <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 className="text-2xl font-bold tracking-tight">Badges</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {earnedBadges.length} of {badgeDefinitions.length} unlocked. Showing {DASHBOARD_BADGE_PREVIEW}.
+            </p>
+          </div>
+          <Button asChild variant="outline" size="sm" className="gap-2">
+            <Link href="/badges">
+              See all badges
+              <ArrowRight className="h-4 w-4" aria-hidden="true" />
+            </Link>
+          </Button>
         </div>
+        <BadgeGrid badges={previewBadges} earnedKeys={earnedBadgeKeys} />
       </div>
 
       {/* Bookmarks */}

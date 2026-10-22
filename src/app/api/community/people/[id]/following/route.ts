@@ -1,4 +1,3 @@
-import { auth } from '@/lib/auth/auth'
 import { prisma } from '@/lib/db'
 import {
   COMMUNITY_DISABLED,

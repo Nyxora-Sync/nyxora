@@ -111,7 +111,7 @@ export default function CommunityPage() {
         <section className="py-12 sm:py-16">
           <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <h2 className="text-2xl font-bold tracking-tight mb-8">Where the community lives</h2>
-            <div className="grid gap-6 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
               {channels.map((channel) => (
                 <Card key={channel.name} className="transition-all motion-safe:hover:-translate-y-0.5 hover:shadow-lg">
                   <CardContent className="pt-6">
@@ -175,7 +175,7 @@ export default function CommunityPage() {
                 Nyxora Sync is 100% open source and community-driven. Every contribution helps.
               </p>
             </div>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
               {waysToContribute.map((way) => (
                 <Link
                   key={way.title}

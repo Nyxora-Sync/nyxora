@@ -250,7 +250,7 @@ export function ResourcesClient({ resources }: { resources: DirectoryResource[] 
         </div>
       ) : (
         <>
-          <div id="resource-grid" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div id="resource-grid" className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {visibleResources.map((resource) => (
               <ResourceCard key={resource.id} resource={resource} />
             ))}

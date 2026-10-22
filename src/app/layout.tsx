@@ -4,8 +4,8 @@ import { Providers } from '@/components/providers'
 import { JsonLd } from '@/components/structured-data'
 import { CookieNotice } from '@/components/site/cookie-notice'
 import { FloatingActions } from '@/components/site/floating-actions'
-import { OutboundUtm } from '@/components/site/outbound-utm'
 import { absoluteUrl, defaultDescription, siteName, siteUrl } from '@/lib/seo'
+import { SpeedInsights } from '@vercel/speed-insights/next'
 import './globals.css'
 import './print.css'
 
@@ -123,8 +123,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           {children}
           <FloatingActions />
           <CookieNotice />
-          <OutboundUtm />
         </Providers>
+        <SpeedInsights />
       </body>
     </html>
   )

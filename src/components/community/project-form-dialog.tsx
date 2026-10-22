@@ -1,8 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Loader2, Save, Send } from 'lucide-react'
+import { ImageUp, Loader2, Save, Send } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -93,9 +93,48 @@ function ProjectForm({
   const [form, setForm] = useState(() => formFromProject(project))
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [uploadingImage, setUploadingImage] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  const imageInputRef = useRef<HTMLInputElement>(null)
 
   function update<K extends keyof typeof form>(key: K, value: string) {
     setForm((current) => ({ ...current, [key]: value }))
+  }
+
+  async function handleImageUpload(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file || uploadingImage) return
+
+    if (!file.type.startsWith('image/')) {
+      setUploadError('Choose an image file.')
+      return
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setUploadError('Choose an image smaller than 5 MB.')
+      return
+    }
+
+    setUploadingImage(true)
+    setUploadError(null)
+
+    try {
+      const body = new FormData()
+      body.append('file', file)
+      const response = await fetch('/api/community/uploads', {
+        method: 'POST',
+        body,
+      })
+      const payload = await response.json().catch(() => null)
+      if (!response.ok) {
+        throw new Error(payload?.error?.message ?? 'Could not upload that image.')
+      }
+      update('imageUrl', payload.data.url)
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : 'Could not upload that image.')
+    } finally {
+      setUploadingImage(false)
+    }
   }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -182,7 +221,7 @@ function ProjectForm({
         </p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="space-y-1.5">
           <Label htmlFor="project-track">Track</Label>
           <select
@@ -210,7 +249,7 @@ function ProjectForm({
         </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="space-y-1.5">
           <Label htmlFor="project-github">GitHub URL</Label>
           <Input
@@ -234,18 +273,52 @@ function ProjectForm({
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="project-image">Screenshot URL</Label>
-        <Input
-          id="project-image"
-          type="url"
-          value={form.imageUrl}
-          onChange={(event) => update('imageUrl', event.target.value)}
-          placeholder="https://.../screenshot.png"
-        />
+        <Label htmlFor="project-image">Screenshot</Label>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Input
+            id="project-image"
+            type="url"
+            value={form.imageUrl}
+            onChange={(event) => update('imageUrl', event.target.value)}
+            placeholder="https://.../screenshot.png"
+          />
+          <input
+            ref={imageInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp,image/gif,image/avif"
+            className="sr-only"
+            onChange={handleImageUpload}
+            tabIndex={-1}
+          />
+          <Button
+            type="button"
+            variant="outline"
+            className="gap-2 sm:shrink-0"
+            disabled={uploadingImage}
+            onClick={() => imageInputRef.current?.click()}
+          >
+            {uploadingImage ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <ImageUp className="h-4 w-4" aria-hidden="true" />
+            )}
+            {uploadingImage ? 'Uploading...' : 'Upload'}
+          </Button>
+        </div>
         <p className="text-xs text-muted-foreground">
-          Optional. A direct image link (16:9 works best). If the screenshot is on your computer,
-          upload it first, then paste the direct image URL here.
+          Optional. Upload an image up to 5 MB, or paste a direct image URL (16:9 works best).
         </p>
+        {uploadError && (
+          <p className="text-xs text-destructive" role="alert">
+            {uploadError}
+          </p>
+        )}
+        {form.imageUrl && (
+          <div className="mt-2 overflow-hidden rounded-lg border border-border/50 bg-muted">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={form.imageUrl} alt="Screenshot preview" className="max-h-44 w-full object-cover" />
+          </div>
+        )}
         <details className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-xs">
           <summary className="cursor-pointer font-medium">How do I get a screenshot URL?</summary>
           <div className="mt-2 space-y-2 text-muted-foreground">

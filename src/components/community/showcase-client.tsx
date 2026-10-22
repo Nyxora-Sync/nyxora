@@ -154,7 +154,7 @@ export function ShowcaseClient() {
       </div>
 
       {loading ? (
-        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3" aria-busy="true" aria-label="Loading projects">
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3" aria-busy="true" aria-label="Loading projects">
           {Array.from({ length: 6 }).map((_, index) => (
             <div key={index} className="h-80 animate-pulse rounded-xl border border-border/50 bg-muted/40" />
           ))}
@@ -195,7 +195,7 @@ export function ShowcaseClient() {
             {projects.length} project{projects.length === 1 ? '' : 's'}
             {debouncedQuery ? ` matching “${debouncedQuery}”` : ''}
           </p>
-          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {projects.map((project, index) => (
               <Reveal key={project.id} className="h-full" delay={Math.min(index * 0.035, 0.2)} distance={12}>
                 <ProjectCard project={project} />

@@ -10,7 +10,7 @@ export default function Loading() {
         <Skeleton className="h-3 w-48" />
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <Card>
           <CardContent className="pt-6">
             <Skeleton className="h-6 w-32 mb-4" />
@@ -44,7 +44,7 @@ export default function Loading() {
         ))}
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <Card>
           <CardContent className="pt-6">
             <Skeleton className="h-6 w-32 mb-4" />

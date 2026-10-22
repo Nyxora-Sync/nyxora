@@ -9,6 +9,13 @@ import {
   profileSchema,
 } from '@/lib/community'
 import { getFollowCounts, getProfileViewCounts } from '@/lib/social'
+import {
+  earnedFromData,
+  getPersistedBadges,
+  loadBadgeData,
+  syncUserBadges,
+  type EarnedBadge,
+} from '@/lib/badge-awards'
 
 
 export async function GET() {
@@ -28,6 +35,7 @@ export async function GET() {
     viewCounts,
     followRequests,
     notifications,
+    persistedBadges,
   ] = await Promise.all([
     prisma.user.findUnique({
       where: { id: userId },
@@ -75,9 +83,21 @@ export async function GET() {
         actor: { select: { id: true, name: true, image: true } },
       },
     }),
+    getPersistedBadges(userId),
   ])
 
   if (!user) return jsonError(404, 'NOT_FOUND', 'Account not found.')
+
+  // Existing accounts may predate persisted badges. Backfill once when they
+  // open settings so the pin picker has data to show.
+  let badges: EarnedBadge[] = persistedBadges
+  if (badges.length === 0) {
+    try {
+      badges = (await syncUserBadges(userId)).earned
+    } catch (error) {
+      console.error('Failed to backfill badges for settings', error)
+    }
+  }
 
   return Response.json({
     data: {
@@ -95,12 +115,23 @@ export async function GET() {
         showProgress: user.preferences?.showProgress ?? true,
         emailUpdates: user.preferences?.emailUpdates ?? false,
         track: user.preferences?.track ?? 'beginner',
+        featuredBadges: user.preferences?.featuredBadges ?? [],
       },
       progress: {
         xp: stats?.xp ?? 0,
         streakCurrent: stats?.streakCurrent ?? 0,
         streakLongest: stats?.streakLongest ?? 0,
         lessonsCompleted: completedCount,
+        featuredBadges: user.preferences?.featuredBadges ?? [],
+        badges: badges.map((badge) => ({
+          key: badge.key,
+          name: badge.name,
+          description: badge.description,
+          icon: badge.icon,
+          category: badge.category,
+          tier: badge.tier,
+          earnedAt: badge.earnedAt,
+        })),
       },
       followers: followCounts.followers,
       following: followCounts.following,
@@ -146,7 +177,15 @@ export async function PATCH(request: Request) {
     )
   }
 
-  const { showProgress, emailUpdates, ...profile } = parsed.data
+  const { showProgress, emailUpdates, featuredBadges, ...profile } = parsed.data
+
+  if (featuredBadges) {
+    const earnedKeys = new Set(earnedFromData(await loadBadgeData(userId)).map((badge) => badge.key))
+    const invalid = featuredBadges.filter((key) => !earnedKeys.has(key))
+    if (invalid.length > 0) {
+      return jsonError(422, 'INVALID_BADGE', 'You can only pin badges you have earned.')
+    }
+  }
 
   const userData: Prisma.UserUpdateInput = {}
   if (profile.name !== undefined) userData.name = profile.name
@@ -159,10 +198,15 @@ export async function PATCH(request: Request) {
     await prisma.user.update({ where: { id: userId }, data: userData })
   }
 
-  if (showProgress !== undefined || emailUpdates !== undefined) {
+  if (
+    showProgress !== undefined ||
+    emailUpdates !== undefined ||
+    featuredBadges !== undefined
+  ) {
     const preferences = {
       ...(showProgress !== undefined ? { showProgress } : {}),
       ...(emailUpdates !== undefined ? { emailUpdates } : {}),
+      ...(featuredBadges !== undefined ? { featuredBadges } : {}),
     }
     await prisma.userPreferences.upsert({
       where: { userId },

@@ -1,6 +1,9 @@
+import { after } from 'next/server'
 import { z } from 'zod'
 import { auth } from '@/lib/auth/auth'
 import { prisma } from '@/lib/db'
+import { syncUserBadges } from '@/lib/badge-awards'
+import { syncUserCertificates } from '@/lib/certificates'
 import { tracks } from '@/lib/curriculum'
 import type { ProgressState } from '@/lib/progress-state'
 
@@ -48,6 +51,78 @@ function toDate(value?: string | null): Date | null {
   if (!value) return null
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? null : date
+}
+
+const TRANSIENT_DB_CODES = new Set(['P1001', 'P1017', 'P2002', 'P2028', 'P2034'])
+
+function isTransientDbError(error: unknown): boolean {
+  return Boolean(
+    error &&
+      typeof error === 'object' &&
+      'code' in error &&
+      typeof (error as { code?: unknown }).code === 'string' &&
+      TRANSIENT_DB_CODES.has((error as { code: string }).code)
+  )
+}
+
+async function replaceProgress(
+  userId: string,
+  entries: [string, z.infer<typeof lessonProgressSchema>][],
+  statsData: {
+    xp: number
+    streakCurrent: number
+    streakLongest: number
+    streakLastActive: Date | null
+    bookmarks: string[]
+    lastVisitedTrack: string | null
+    lastVisitedModule: string | null
+    lastVisitedLesson: string | null
+    lastVisitedAt: Date | null
+  }
+) {
+  // Two tabs can save at the same time. A transaction-scoped advisory lock
+  // serializes replacement per learner, so delete + bulk insert cannot race
+  // into a unique-constraint failure on (userId, lessonKey).
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await prisma.$transaction(
+        async (tx) => {
+          await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${userId}))::text AS lock`
+
+          await tx.userProgress.deleteMany({ where: { userId } })
+
+          if (entries.length > 0) {
+            await tx.userProgress.createMany({
+              data: entries.map(([lessonKey, progress]) => ({
+                userId,
+                lessonKey,
+                completed: progress.completed,
+                notes: progress.notes?.trim() ? progress.notes : null,
+                xpEarned: progress.completed ? (xpByLesson.get(lessonKey) ?? 0) : 0,
+                completedAt: progress.completed
+                  ? toDate(progress.completedAt) ?? new Date()
+                  : null,
+              })),
+            })
+          }
+
+          await tx.userStats.upsert({
+            where: { userId },
+            create: { userId, ...statsData },
+            update: statsData,
+          })
+        },
+        { maxWait: 10_000, timeout: 30_000 }
+      )
+      return
+    } catch (error) {
+      if (attempt < 2 && isTransientDbError(error)) {
+        await new Promise((resolve) => setTimeout(resolve, 150 * (attempt + 1)))
+        continue
+      }
+      throw error
+    }
+  }
 }
 
 export async function GET() {
@@ -143,41 +218,16 @@ export async function PUT(request: Request) {
 
   const streakLastActive = toDate(payload.streak.lastActiveDate)
 
-  await prisma.$transaction(async (tx) => {
-    // PUT replaces the learner's saved progress. Replacing the rows in two
-    // statements avoids one upsert round-trip per lesson.
-    await tx.userProgress.deleteMany({ where: { userId } })
+  const statsData = {
+    xp,
+    streakCurrent: payload.streak.current,
+    streakLongest: payload.streak.longest,
+    streakLastActive,
+    bookmarks: Array.from(new Set(payload.bookmarks)),
+    ...lastVisited,
+  }
 
-    if (entries.length > 0) {
-      await tx.userProgress.createMany({
-        data: entries.map(([lessonKey, progress]) => ({
-          userId,
-          lessonKey,
-          completed: progress.completed,
-          notes: progress.notes?.trim() ? progress.notes : null,
-          xpEarned: progress.completed ? (xpByLesson.get(lessonKey) ?? 0) : 0,
-          completedAt: progress.completed
-            ? toDate(progress.completedAt) ?? new Date()
-            : null,
-        })),
-      })
-    }
-
-    const statsData = {
-      xp,
-      streakCurrent: payload.streak.current,
-      streakLongest: payload.streak.longest,
-      streakLastActive,
-      bookmarks: Array.from(new Set(payload.bookmarks)),
-      ...lastVisited,
-    }
-
-    await tx.userStats.upsert({
-      where: { userId },
-      create: { userId, ...statsData },
-      update: statsData,
-    })
-  })
+  await replaceProgress(userId, entries, statsData)
 
   const sanitizedLessons: ProgressState['lessons'] = {}
   for (const [lessonKey, progress] of entries) {
@@ -199,6 +249,16 @@ export async function PUT(request: Request) {
       ? { ...payload.lastVisited, timestamp: toDate(payload.lastVisited.timestamp)?.toISOString() ?? new Date().toISOString() }
       : null,
   }
+
+  // Persist earned badges after the response has been sent so saving progress
+  // stays fast. The client toast still unlocks instantly from local state.
+  after(async () => {
+    try {
+      await Promise.all([syncUserBadges(userId), syncUserCertificates(userId)])
+    } catch (error) {
+      console.error('Failed to sync badges or certificates after progress update', error)
+    }
+  })
 
   return Response.json({ state })
 }

@@ -80,7 +80,7 @@ export function NewsletterAdminForm({
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-4 sm:grid-cols-[1fr_auto] sm:items-end">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-[1fr_auto] sm:items-end">
         <div className="space-y-1.5">
           <Label htmlFor="newsletter-subject">Subject</Label>
           <Input

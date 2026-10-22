@@ -167,7 +167,7 @@ function LanguageRoadmap({
                 </div>
               </div>
               <p className="mt-3 text-sm text-muted-foreground">{module.description}</p>
-              <div className="mt-4 grid gap-2 sm:grid-cols-2">
+              <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
                 {module.lessons.map((lesson) => (
                   <Link
                     key={lesson.id}
@@ -223,7 +223,7 @@ function RoadmapPhase({ phase, index, color }: { phase: typeof beginnerRoadmap[0
                 <h3 className="text-lg font-bold">{phase.phase}</h3>
                 <Badge variant="outline" className="text-xs">{phase.weeks}</Badge>
               </div>
-              <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
                 {phase.steps.map((step, si) => (
                   <div
                     key={si}
@@ -376,7 +376,7 @@ export default function RoadmapPage() {
             </div>
             {specializationTrack && (
               <>
-                <div className="grid gap-6 sm:grid-cols-2">
+                <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
                   {specializationTrack.modules.map((spec) => {
                     const Icon = specializationIcons[spec.icon] ?? Atom
                     return (

@@ -45,7 +45,7 @@ const lesson = (
   isProject: id.includes('project') || id.includes('capstone'),
 })
 
-const module = (
+const moduleDef = (
   id: string,
   name: string,
   description: string,
@@ -105,7 +105,7 @@ const cDocs = {
 }
 
 const cModules: Module[] = [
-  module(
+  moduleDef(
     'c-foundations',
     'C Foundations',
     'From the compiler and first program to types, control flow, functions, arrays, strings, and a complete command-line project.',
@@ -179,7 +179,7 @@ const cModules: Module[] = [
       ),
     ]
   ),
-  module(
+  moduleDef(
     'c-systems',
     'Systems Programming in C',
     'Pointers, ownership, dynamic memory, files, debugging tools, and a persistent contact-book project.',
@@ -253,7 +253,7 @@ const cModules: Module[] = [
       ),
     ]
   ),
-  module(
+  moduleDef(
     'c-mastery',
     'C Mastery',
     'Bit-level reasoning, concurrency, portable builds, and a socket-based HTTP server capstone.',
@@ -334,7 +334,7 @@ const cModules: Module[] = [
 // ---------------------------------------------------------------------------
 
 const cAdvancedModules: Module[] = [
-  module(
+  moduleDef(
     'c-advanced-systems',
     'Advanced Systems Programming',
     'Deep dive into Linux internals, memory management, virtual filesystems, kernel modules, and eBPF for observability and networking.',
@@ -408,7 +408,7 @@ const cAdvancedModules: Module[] = [
       ),
     ]
   ),
-  module(
+  moduleDef(
     'c-kernel-drivers',
     'Kernel & Driver Development',
     'Character and block device drivers, interrupt handling, DMA, device trees, and the modern driver model with sysfs and udev integration.',
@@ -482,7 +482,7 @@ const cAdvancedModules: Module[] = [
       ),
     ]
   ),
-  module(
+  moduleDef(
     'c-rtos-embedded',
     'RTOS & Embedded Systems',
     'Real-time scheduling, FreeRTOS and Zephyr primitives, memory-constrained programming, deterministic I/O, and certification-aware coding.',
@@ -556,7 +556,7 @@ const cAdvancedModules: Module[] = [
       ),
     ]
   ),
-  module(
+  moduleDef(
     'c-security-hardening',
     'Security & Hardening',
     'Secure coding, exploit mitigation, capability-based sandboxing, seccomp filters, SELinux/AppArmor policies, and supply-chain integrity.',
@@ -630,7 +630,7 @@ const cAdvancedModules: Module[] = [
       ),
     ]
   ),
-  module(
+  moduleDef(
     'c-advanced-topics',
     'Advanced Topics & Emerging Areas',
     'Userspace drivers with io_uring, DPDK for packet processing, WebAssembly with WASI, and cross-compilation for heterogeneous targets.',
@@ -753,7 +753,7 @@ const cppDocs = {
 }
 
 const cppModules: Module[] = [
-  module(
+  moduleDef(
     'cpp-foundations',
     'Modern C++ Foundations',
     'A modern starting point: toolchain, references, classes, RAII, the STL, and a multi-file inventory project.',
@@ -827,7 +827,7 @@ const cppModules: Module[] = [
       ),
     ]
   ),
-  module(
+  moduleDef(
     'cpp-engineering',
     'C++ Engineering',
     'Templates, ownership, move semantics, testing, CMake, and a task-scheduler project.',
@@ -901,7 +901,7 @@ const cppModules: Module[] = [
       ),
     ]
   ),
-  module(
+  moduleDef(
     'cpp-mastery',
     'C++ Mastery',
     'Ranges, concurrency, performance, ABI awareness, and a multithreaded HTTP server capstone.',
@@ -982,7 +982,7 @@ const cppModules: Module[] = [
 // ---------------------------------------------------------------------------
 
 const cppAdvancedModules: Module[] = [
-  module(
+  moduleDef(
     'cpp-template-metaprogramming',
     'Template Metaprogramming & Concepts',
     'Advanced template techniques, SFINAE, concepts, type traits, constexpr programming, and compile-time data structures.',
@@ -1056,7 +1056,7 @@ const cppAdvancedModules: Module[] = [
       ),
     ]
   ),
-  module(
+  moduleDef(
     'cpp-coroutines',
     'Coroutines & Asynchronous C++',
     'Stackless coroutines, awaitable types, structured concurrency, async generators, and integration with executors and I/O frameworks.',
@@ -1130,7 +1130,7 @@ const cppAdvancedModules: Module[] = [
       ),
     ]
   ),
-  module(
+  moduleDef(
     'cpp-simd-vectorization',
     'SIMD, Vectorization & Hardware Acceleration',
     'Explicit SIMD with std::simd, compiler auto-vectorization, intrinsic programming, and GPU offloading with SYCL/OpenMP.',
@@ -1204,7 +1204,7 @@ const cppAdvancedModules: Module[] = [
       ),
     ]
   ),
-  module(
+  moduleDef(
     'cpp-modules-build',
     'C++ Modules & Modern Build Systems',
     'C++20 modules, module partitions, header units, BMI caching, and scaling builds with CMake, Bazel, and distributed compilation.',
@@ -1278,7 +1278,7 @@ const cppAdvancedModules: Module[] = [
       ),
     ]
   ),
-  module(
+  moduleDef(
     'cpp-advanced-concurrency',
     'Advanced Concurrency & Parallelism',
     'std::execution/senders-receivers, hazard pointers, RCU, lock-free data structures, and scalable synchronization patterns.',
@@ -1402,7 +1402,7 @@ const csharpDocs = {
 }
 
 const csharpModules: Module[] = [
-  module(
+  moduleDef(
     'csharp-foundations',
     '.NET Foundations',
     'The .NET toolchain, object-oriented C#, collections, LINQ, async, and a console expense tracker.',
@@ -1476,7 +1476,7 @@ const csharpModules: Module[] = [
       ),
     ]
   ),
-  module(
+  moduleDef(
     'csharp-professional',
     'C# Application Development',
     'EF Core, ASP.NET Core, automated testing, logging, configuration, and a REST API project.',
@@ -1550,7 +1550,7 @@ const csharpModules: Module[] = [
       ),
     ]
   ),
-  module(
+  moduleDef(
     'csharp-mastery',
     'C# Mastery',
     'Async streams, channels, performance, architecture, and a production-shaped API capstone.',
@@ -1631,7 +1631,7 @@ const csharpModules: Module[] = [
 // ---------------------------------------------------------------------------
 
 const csharpAdvancedModules: Module[] = [
-  module(
+  moduleDef(
     'csharp-source-generators',
     'Source Generators & Compiler Extensibility',
     'Build incremental source generators, analyze syntax trees, emit code at compile time, and integrate with the Roslyn pipeline for AOT-ready libraries.',
@@ -1705,7 +1705,7 @@ const csharpAdvancedModules: Module[] = [
       ),
     ]
   ),
-  module(
+  moduleDef(
     'csharp-maui-blazor',
     'Cross-Platform UI: MAUI & Blazor',
     'Build native mobile/desktop apps with .NET MAUI and interactive web UIs with Blazor WebAssembly and Server, sharing logic via Razor components.',
@@ -1779,7 +1779,7 @@ const csharpAdvancedModules: Module[] = [
       ),
     ]
   ),
-  module(
+  moduleDef(
     'csharp-grpc-cloud',
     'Cloud Native: gRPC, Dapr & Kubernetes',
     'Build polyglot microservices with gRPC/Protobuf, implement resilient patterns with Dapr, and deploy to Kubernetes with .NET Aspire.',
@@ -1853,7 +1853,7 @@ const csharpAdvancedModules: Module[] = [
       ),
     ]
   ),
-  module(
+  moduleDef(
     'csharp-orleans-distributed',
     'Distributed Systems: Orleans, Actors & Real-Time',
     'Virtual actors with Orleans, grain persistence, clustering, streams, and real-time messaging with SignalR for scalable stateful services.',
@@ -1927,7 +1927,7 @@ const csharpAdvancedModules: Module[] = [
       ),
     ]
   ),
-  module(
+  moduleDef(
     'csharp-advanced-architecture',
     'Advanced Architecture: Modularity, Testing & Evolution',
     'Modular monoliths, vertical slice architecture, contract testing, API versioning, and evolutionary architecture practices.',
@@ -2062,7 +2062,7 @@ const pythonDocs = {
 }
 
 const pythonModules: Module[] = [
-  module(
+  moduleDef(
     'python-foundations',
     'Python Foundations',
     'The interpreter, collections, functions, modules, files, errors, and a persistent command-line project.',
@@ -2136,7 +2136,7 @@ const pythonModules: Module[] = [
       ),
     ]
   ),
-  module(
+  moduleDef(
     'python-professional',
     'Python Professional',
     'Typed object-oriented design, pytest, async HTTP clients, and a FastAPI service project.',
@@ -2210,7 +2210,7 @@ const pythonModules: Module[] = [
       ),
     ]
   ),
-  module(
+  moduleDef(
     'python-mastery',
     'Python Mastery',
     'Packaging, profiling, concurrency, production automation, and a data-pipeline capstone.',
@@ -2291,7 +2291,7 @@ const pythonModules: Module[] = [
 // ---------------------------------------------------------------------------
 
 const pythonAdvancedModules: Module[] = [
-  module(
+  moduleDef(
     'python-c-extensions',
     'C Extensions & Performance',
     'Write high-performance extensions with the C API, Cython, pybind11, and nanobind; manage the GIL, memory, and ABI compatibility.',
@@ -2365,7 +2365,7 @@ const pythonAdvancedModules: Module[] = [
       ),
     ]
   ),
-  module(
+  moduleDef(
     'python-ml-ops',
     'ML Ops: Experiment Tracking, Pipelines & Deployment',
     'End-to-end ML lifecycle with MLflow, DVC, Kubeflow, and scikit-learn; reproducible experiments, model registry, and production serving.',
@@ -2439,7 +2439,7 @@ const pythonAdvancedModules: Module[] = [
       ),
     ]
   ),
-  module(
+  moduleDef(
     'python-distributed-systems',
     'Distributed Systems: Ray, Dask, Celery & Kafka',
     'Scale Python workloads with Ray and Dask, build resilient task queues with Celery, and process event streams with Kafka.',
@@ -2513,7 +2513,7 @@ const pythonAdvancedModules: Module[] = [
       ),
     ]
   ),
-  module(
+  moduleDef(
     'python-advanced-async',
     'Advanced Async Patterns: Trio, AnyIO, gRPC & Structured Concurrency',
     'Modern async with Trio/AnyIO, structured concurrency nurseries, gRPC async services, and async database drivers.',
@@ -2587,7 +2587,7 @@ const pythonAdvancedModules: Module[] = [
       ),
     ]
   ),
-  module(
+  moduleDef(
     'python-advanced-topics',
     'Advanced Topics: WASM, Packaging, Security & Performance',
     'Python in WebAssembly (Pyodide), advanced packaging with Hatch/PDM, supply chain security, and interpreter internals.',

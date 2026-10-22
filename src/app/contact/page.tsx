@@ -53,7 +53,7 @@ export default function ContactPage() {
 
         <section className="py-12 sm:py-16">
           <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-            <div className="grid gap-8 lg:grid-cols-[1fr_360px]">
+            <div className="grid grid-cols-1 gap-8 lg:grid-cols-[1fr_360px]">
               <Card>
                 <CardContent className="pt-6">
                   <h2 className="text-xl font-semibold">Send a private message</h2>

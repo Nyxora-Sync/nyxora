@@ -9,13 +9,13 @@
 </p>
 
 <p align="center">
-  <a href="https://sync.nyxora.workers.dev/learn"><strong>Start learning →</strong></a>
+  <a href="https://nyxora-sync.tech/learn"><strong>Start learning →</strong></a>
   &nbsp;·&nbsp;
-  <a href="https://sync.nyxora.workers.dev/roadmap">Roadmap</a>
+  <a href="https://nyxora-sync.tech/roadmap">Roadmap</a>
   &nbsp;·&nbsp;
-  <a href="https://sync.nyxora.workers.dev/resources">Resources</a>
+  <a href="https://nyxora-sync.tech/resources">Resources</a>
   &nbsp;·&nbsp;
-  <a href="https://sync.nyxora.workers.dev/community">Community</a>
+  <a href="https://nyxora-sync.tech/community">Community</a>
 </p>
 
 <p align="center">
@@ -29,11 +29,12 @@ Nyxora Sync is built for people who want to learn by reading, practicing, and bu
 
 Everything you need is on the live site:
 
-- **113 written lessons** across web development and programming language paths
+- **194 unique written lessons** across web development, specializations, and programming language paths
 - **Free, curated resources** in every lesson, with optional "go deeper" links
 - **Interactive playgrounds** for HTML, CSS, JavaScript, React, Node, and Express
 - **Progress tracking** with XP, levels, streaks, badges, notes, and bookmarks
-- **Lesson discussions**, a project showcase, and public learner profiles
+- **Verifiable track certificates** with public verification links and print-ready pages
+- **Lesson discussions**, a project showcase, public learner profiles, and moderation tools
 
 No paywalls. No ads. No account required to start.
 
@@ -73,14 +74,15 @@ Four complete paths from beginner to mastery. Each path has three levels (Founda
 
 You can use the entire curriculum without signing in. Progress is saved in your browser automatically.
 
-If you want your progress on another device, sign in with GitHub. Your completed lessons, XP, streaks, notes, and bookmarks sync to your account. You can keep your profile private or make your progress public from Settings.
+If you want your progress on another device, sign in with GitHub. Your completed lessons, XP, streaks, notes, bookmarks, badges, and certificates sync to your account. You can keep your profile private or make your progress public from Settings. Up to three earned badges can be pinned to your public profile.
 
 ## Community
 
 - Ask questions and share notes in lesson discussions
-- Browse real projects in the [showcase](https://sync.nyxora.workers.dev/community/showcase)
+- Browse real projects in the [showcase](https://nyxora-sync.tech/community/showcase)
 - Meet other learners through public profiles
-- Report bugs, suggest resources, or improve a lesson through the [contribution guide](https://sync.nyxora.workers.dev/contribute)
+- Report bugs, suggest resources, or improve a lesson through the [contribution guide](https://nyxora-sync.tech/contribute)
+- Report projects, comments, or profiles from the UI; maintainers review them at `/admin/reports`
 
 ## Contributing
 
@@ -92,13 +94,13 @@ Nyxora Sync is open source and welcomes contributions:
 - Share a project for the showcase
 - Help with translations or design improvements
 
-Open a [GitHub issue](https://github.com/Nyxora-Sync/nyxora-sync/issues) or submit a pull request. Read the [contribution guide](https://sync.nyxora.workers.dev/contribute) and [Code of Conduct](https://sync.nyxora.workers.dev/code-of-conduct) first.
+Open a [GitHub issue](https://github.com/Nyxora-Sync/nyxora-sync/issues) or submit a pull request. Read the [contribution guide](https://nyxora-sync.tech/contribute) and [Code of Conduct](https://nyxora-sync.tech/code-of-conduct) first.
 
 ## Deployment
 
-Production: https://sync.nyxora.workers.dev
+Production: https://nyxora-sync.tech
 
-The public URL is served by a thin Cloudflare Worker proxy. The Next.js app itself runs on **Vercel**, because the Workers Free plan caps CPU at 10 ms per request and authenticated Next.js + Prisma routes exceed that limit (Cloudflare error 1102). The proxy streams requests to Vercel, preserves the original URL, and rewrites upstream redirects back to `sync.nyxora.workers.dev`.
+The public URL is served by the custom domain `nyxora-sync.tech` pointing directly to Vercel (bypassing the Cloudflare Worker proxy for POST support). The Next.js app runs on **Vercel** in the `iad1` region, co-located with the Neon database in `us-east-1`.
 
 ### App (Vercel)
 
@@ -108,18 +110,38 @@ npx vercel link --scope miyazaki-akis-projects --project nyxora-sync
 npm run deploy:web
 ```
 
-The project is `miyazaki-akis-projects/nyxora-sync`. Set these environment variables for Production:
+The project is `miyazaki-akis-projects/nyxora-sync`. Production builds apply pending Prisma migrations via the Vercel build command, guarded by `VERCEL_ENV=production`; preview builds run `npm run build` without touching the database. The old `postbuild` `prisma db push --accept-data-loss` step has been removed.
+
+Set these environment variables for Production:
 
 - `DATABASE_URL` and `DIRECT_URL` (Neon)
 - `AUTH_SECRET`, `AUTH_TRUST_HOST=true`
-- `AUTH_URL=https://sync.nyxora.workers.dev`
-- `NEXTAUTH_URL=https://sync.nyxora.workers.dev`
-- `NEXT_PUBLIC_SITE_URL=https://sync.nyxora.workers.dev`
+- `AUTH_URL=https://nyxora-sync.tech`
+- `NEXTAUTH_URL=https://nyxora-sync.tech`
+- `NEXT_PUBLIC_SITE_URL=https://nyxora-sync.tech`
 - `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
-- `ADMIN_EMAILS` (comma-separated maintainer emails; gates `/admin/messages` and `/admin/newsletter`)
+- `ADMIN_EMAILS` (comma-separated maintainer emails; gates `/admin/messages`, `/admin/newsletter`, and `/admin/reports`)
+- `BLOB_READ_WRITE_TOKEN` (enables project screenshot uploads through Vercel Blob; the `nyxora-uploads` store is connected to Production and Preview. Pull it with `vercel env pull` when testing uploads locally.)
 
-`AUTH_URL`, `NEXTAUTH_URL`, and `NEXT_PUBLIC_SITE_URL` must all be the public origin. Vercel is configured for the `iad1` region so functions run next to the Neon database. Disable **Deployment Protection → Vercel Authentication** for production; the public proxy cannot pass Vercel's SSO challenge. Connecting the GitHub repository in the Vercel dashboard enables automatic deploys; otherwise run `npm run deploy:web`.
+`AUTH_URL`, `NEXTAUTH_URL`, and `NEXT_PUBLIC_SITE_URL` must all be the public origin (`https://nyxora-sync.tech`). The apex domain is the canonical host; `www.nyxora-sync.tech` permanently redirects to it. Vercel is configured for the `iad1` region so functions run next to the Neon database. Disable **Deployment Protection → Vercel Authentication** for production. Connecting the GitHub repository in the Vercel dashboard enables automatic deploys; otherwise run `npm run deploy:web`.
+
+### Health and monitoring
+
+`GET /api/health` checks database connectivity and returns `200` with `{ status: "ok" }` or `503` when degraded. Point an uptime monitor at it. Vercel Speed Insights and function logs cover performance and server errors; set up a Sentry DSN only if you need long-retention client error traces.
+
+### Tests and CI
+
+```bash
+npm run typecheck   # TypeScript
+npm run lint:ci     # ESLint (warnings allowed, errors fail)
+npm test            # Vitest unit tests
+npx playwright install chromium
+npm run build
+npm run test:e2e    # Playwright smoke + mobile overflow checks
+```
+
+GitHub Actions runs typecheck, lint, unit tests, a production build, and Playwright against a fresh build. Add `DATABASE_URL` and `DIRECT_URL` repository secrets so database-backed build checks can connect.
 
 ### Contact inbox
 
@@ -137,8 +159,8 @@ The proxy configuration lives in `proxy-worker/wrangler.jsonc`. Set `UPSTREAM_OR
 
 OAuth callback URLs (set these in the provider consoles):
 
-- GitHub: `https://sync.nyxora.workers.dev/api/auth/callback/github`
-- Google: `https://sync.nyxora.workers.dev/api/auth/callback/google`
+- GitHub: `https://nyxora-sync.tech/api/auth/callback/github`
+- Google: `https://nyxora-sync.tech/api/auth/callback/google`
 
 The old `NEXT_INC_CACHE_KV` namespace is no longer used by the live site. The CI workflow deploys only the proxy; it needs a Cloudflare API token with **Workers Scripts: Edit**.
 

@@ -1,8 +1,10 @@
+import { after } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { auth } from '@/lib/auth/auth'
 import { prisma } from '@/lib/db'
 import { COMMUNITY_DISABLED, communityEnabled, jsonError } from '@/lib/community'
 import { notifyProjectUpvote } from '@/lib/realtime/notify'
+import { syncUserBadges } from '@/lib/badge-awards'
 
 
 
@@ -58,10 +60,14 @@ export async function POST(request: Request, { params }: RouteContext) {
     select: { upvotes: true },
   })
 
-  // Send real-time notification on upvote (not on remove)
-  if (upvoted) {
-    notifyProjectUpvote(id, userId).catch(console.error)
-  }
+  after(async () => {
+    try {
+      if (upvoted) await notifyProjectUpvote(id, userId)
+      await syncUserBadges(userId)
+    } catch (error) {
+      console.error('Failed to finish upvote side effects', error)
+    }
+  })
 
   return Response.json({ data: { upvoted, upvotes: updated?.upvotes ?? 0 } })
 }

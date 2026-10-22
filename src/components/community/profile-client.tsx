@@ -29,9 +29,10 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import type { ProjectListItem } from '@/lib/community-types'
+import { tierIcons, tierOrder, type BadgeTier } from '@/lib/badge-meta'
 import { shortDate, timeAgo } from '@/lib/time'
-import { getAccent } from '@/lib/utils'
 import { GithubIcon } from '@/components/icons/brand'
+import { ReportButton } from '@/components/community/report-button'
 
 interface ProfileResponse {
   id: string
@@ -65,13 +66,15 @@ interface ProfileResponse {
     streakCurrent: number
     streakLongest: number
     lessonsCompleted: number
+    featuredBadges: string[]
     badges: {
       key: string
       name: string
       description: string
       icon: string
       category: string
-      earnedAt: string
+      tier: BadgeTier
+      earnedAt: string | null
     }[]
   } | null
   projects: ProjectListItem[]
@@ -246,6 +249,20 @@ export function ProfileClient({ id }: { id: string }) {
           ? 'Accept request'
           : 'Follow'
 
+  const badgeByKey = new Map(
+    (profile.progress?.badges ?? []).map((badge) => [badge.key, badge])
+  )
+  const pinnedBadges = (profile.progress?.featuredBadges ?? [])
+    .map((key) => badgeByKey.get(key))
+    .filter((badge): badge is NonNullable<typeof badge> => Boolean(badge))
+  const showcaseBadges =
+    pinnedBadges.length > 0
+      ? pinnedBadges
+      : (profile.progress?.badges ?? [])
+          .slice()
+          .sort((a, b) => tierOrder[a.tier] - tierOrder[b.tier])
+          .slice(0, 3)
+
   return (
     <div className="space-y-8">
       <Card className="overflow-hidden">
@@ -317,6 +334,7 @@ export function ProfileClient({ id }: { id: string }) {
                     {followError}
                   </p>
                 )}
+                <ReportButton targetType="profile" targetId={profile.id} />
               </div>
             )}
           </div>
@@ -407,29 +425,47 @@ export function ProfileClient({ id }: { id: string }) {
             </div>
           </section>
 
-          {profile.progress.badges.length > 0 && (
+          {showcaseBadges.length > 0 && (
             <section aria-labelledby="badges-heading">
-              <h2 id="badges-heading" className="mb-4 flex items-center gap-2 text-xl font-bold tracking-tight">
-                <Award className="h-5 w-5 text-amber-500" aria-hidden="true" />
-                Badges
-              </h2>
-              <div className="flex flex-wrap gap-3">
-                {profile.progress.badges.map((badge) => (
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <h2 id="badges-heading" className="flex items-center gap-2 text-xl font-bold tracking-tight">
+                  <Award className="h-5 w-5 text-amber-500" aria-hidden="true" />
+                  Badge showcase
+                </h2>
+                <span className="text-xs text-muted-foreground">
+                  {profile.progress.badges.length}{' '}
+                  {profile.progress.badges.length === 1 ? 'badge' : 'badges'} earned
+                </span>
+              </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                {showcaseBadges.map((badge) => (
                   <div
                     key={badge.key}
-                    className="flex items-center gap-3 rounded-xl border border-border/50 bg-card px-4 py-3"
+                    className="rounded-xl border border-border/50 bg-card p-4"
                     title={badge.description}
                   >
-                    <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${getAccent('amber').icon}`}>
-                      <Award className="h-4 w-4" aria-hidden="true" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-semibold">{badge.name}</p>
-                      <p className="text-xs text-muted-foreground">Earned {timeAgo(badge.earnedAt)}</p>
+                    <div className="flex items-start gap-3">
+                      <span className="text-3xl leading-none" aria-hidden="true">{badge.icon}</span>
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold">{badge.name}</p>
+                        <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+                          {badge.description}
+                        </p>
+                        <p className="mt-2 text-[10px] font-medium capitalize text-muted-foreground">
+                          {tierIcons[badge.tier]} {badge.tier}
+                        </p>
+                      </div>
                     </div>
                   </div>
                 ))}
               </div>
+              {profile.isSelf && (
+                <div className="mt-3 flex justify-end">
+                  <Button asChild variant="outline" size="sm" className="gap-2">
+                    <Link href="/badges">View all badges</Link>
+                  </Button>
+                </div>
+              )}
             </section>
           )}
         </>
@@ -454,7 +490,7 @@ export function ProfileClient({ id }: { id: string }) {
             No projects shared yet.
           </p>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             {profile.projects.map((project) => (
               <Card key={project.id} className="transition-shadow hover:shadow-md">
                 <CardContent className="pt-5">

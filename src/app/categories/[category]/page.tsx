@@ -7,7 +7,7 @@ import { Reveal } from '@/components/motion/reveal'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { Button } from '@/components/ui/button'
-import { ArrowRight, Code2 as Code2Icon, CheckCircle, Clock, Trophy, Globe, Cpu, Smartphone, Brain, Cloud, Gamepad2, Monitor, Code2 } from 'lucide-react'
+import { ArrowRight, Code2 as Code2Icon, Globe, Cpu, Smartphone, Brain, Cloud, Gamepad2, Monitor, Code2 } from 'lucide-react'
 import { trackCategories, tracks as curriculumTracks } from '@/lib/curriculum'
 import { cn, getAccent } from '@/lib/utils'
 import { pageMetadata } from '@/lib/seo'
@@ -126,7 +126,7 @@ export default async function CategoryPage({ params }: CategoryPageProps) {
         {/* Tracks in this category */}
         <section className="py-16 sm:py-20">
           <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-            <div className="grid gap-8 lg:grid-cols-2">
+            <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
               {tracks.map((track) => (
                 <Link key={track.key} href={`/learn/${track.key}`} className="group">
                   <Card className="relative overflow-hidden transition-all motion-safe:hover:-translate-y-1 hover:shadow-xl h-full border-border/50">

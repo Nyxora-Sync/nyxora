@@ -1,9 +1,8 @@
-import { Skeleton } from '@/components/ui/skeleton'
 
 export default function Loading() {
   return (
     <div className="space-y-6">
-      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3" aria-busy="true" aria-label="Loading projects">
+      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3" aria-busy="true" aria-label="Loading projects">
         {Array.from({ length: 6 }).map((_, index) => (
           <div key={index} className="h-80 animate-pulse rounded-xl border border-border/50 bg-muted/40" />
         ))}

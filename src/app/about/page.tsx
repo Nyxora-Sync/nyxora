@@ -176,7 +176,7 @@ export default function AboutPage() {
 
         <section className="py-12 sm:py-16">
           <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-            <div className="grid gap-10 lg:grid-cols-[1fr_380px]">
+            <div className="grid grid-cols-1 gap-10 lg:grid-cols-[1fr_380px]">
               <div>
                 <h2 className="text-2xl font-bold tracking-tight">Why this exists</h2>
                 <div className="mt-4 space-y-4 text-muted-foreground">
@@ -301,7 +301,7 @@ export default function AboutPage() {
 
         <section className="py-12 sm:py-16">
           <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-            <div className="grid gap-10 lg:grid-cols-2">
+            <div className="grid grid-cols-1 gap-10 lg:grid-cols-2">
               <div>
                 <h2 className="text-2xl font-bold tracking-tight">Built with</h2>
                 <p className="mt-2 text-muted-foreground">

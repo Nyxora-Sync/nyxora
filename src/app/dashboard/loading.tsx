@@ -8,7 +8,7 @@ export default function Loading() {
       <Skeleton className="h-24 rounded-xl border" />
 
       {/* Stats Grid */}
-      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
         {Array.from({ length: 4 }).map((_, i) => (
           <Card key={i}>
             <CardContent className="pt-6">
@@ -24,7 +24,7 @@ export default function Loading() {
       <Skeleton className="h-28 rounded-xl border" />
 
       {/* Track Progress */}
-      <div className="grid gap-6 md:grid-cols-2">
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
         {Array.from({ length: 2 }).map((_, i) => (
           <Card key={i}>
             <Skeleton className="h-8 w-32 mb-4" />
@@ -35,7 +35,7 @@ export default function Loading() {
       </div>
 
       {/* Badges */}
-      <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
+      <div className="grid grid-cols-1 gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
         {Array.from({ length: 10 }).map((_, i) => (
           <Card key={i}>
             <CardContent className="pt-6">

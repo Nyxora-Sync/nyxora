@@ -23,6 +23,7 @@ import { UserChip } from '@/components/community/user-chip'
 import { UpvoteButton } from '@/components/community/upvote-button'
 import { CommentThread } from '@/components/community/comment-thread'
 import { ProjectFormDialog } from '@/components/community/project-form-dialog'
+import { ReportButton } from '@/components/community/report-button'
 import type { ProjectDetail } from '@/lib/community-types'
 import { shortDate, timeAgo } from '@/lib/time'
 import { getAccent, getTrackColor } from '@/lib/utils'
@@ -124,7 +125,7 @@ export function ProjectDetailClient({ id }: { id: string }) {
         All projects
       </Link>
 
-      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="min-w-0">
           <div className="mb-3 flex flex-wrap items-center gap-2">
             <Badge
@@ -216,6 +217,10 @@ export function ProjectDetailClient({ id }: { id: string }) {
                   </div>
                 )}
               </div>
+
+              {!project.isOwner && (
+                <ReportButton targetType="project" targetId={project.id} className="w-full justify-start" />
+              )}
 
               {project.isOwner && (
                 <>

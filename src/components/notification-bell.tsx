@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useSession } from 'next-auth/react'
-import { Bell, CheckCheck, Loader2, UserPlus, Wifi } from 'lucide-react'
+import { Bell, CheckCheck, Loader2, UserPlus } from 'lucide-react'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import {
@@ -12,7 +12,6 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { timeAgo } from '@/lib/time'
-import { useNotifications, RealtimeNotification } from '@/hooks/useNotifications'
 
 interface NotificationItem {
   id: string
@@ -31,67 +30,51 @@ export function NotificationBell() {
   const [loading, setLoading] = useState(false)
   const [marking, setMarking] = useState(false)
 
-  // Real-time notifications
-  const {
-    connected,
-    unreadCount: realtimeUnread,
-    notifications: realtimeNotifications,
-    markAsRead: markRealtimeRead,
-  } = useNotifications({
-    onNotification: (notification) => {
-      // Convert realtime notification to our format
-      const newNotif: NotificationItem = {
-        id: notification.notificationId,
-        type: notification.type,
-        message: notification.message,
-        href: notification.href,
-        readAt: null,
-        createdAt: notification.timestamp,
-        actor: {
-          id: notification.actorId,
-          name: notification.actorName,
-          image: notification.actorImage,
-        },
+  const load = useCallback(
+    async (silent = false) => {
+      if (status !== 'authenticated') return
+      if (!silent) setLoading(true)
+      try {
+        const response = await fetch('/api/notifications', { cache: 'no-store' })
+        if (!response.ok) return
+        const payload = await response.json().catch(() => null)
+        setNotifications(payload?.data?.notifications ?? [])
+        setUnread(payload?.data?.unread ?? 0)
+      } catch {
+        // The bell is supplementary; a failed refresh should stay quiet.
+      } finally {
+        if (!silent) setLoading(false)
       }
-      setNotifications(prev => [newNotif, ...prev])
-      setUnread(prev => prev + 1)
     },
-    enabled: status === 'authenticated',
-  })
-
-  const load = useCallback(async () => {
-    if (status !== 'authenticated') return
-    setLoading(true)
-    try {
-      const response = await fetch('/api/notifications', { cache: 'no-store' })
-      if (!response.ok) return
-      const payload = await response.json().catch(() => null)
-      setNotifications(payload?.data?.notifications ?? [])
-      setUnread(payload?.data?.unread ?? 0)
-    } catch {
-      // The bell is supplementary; a failed refresh should stay quiet.
-    } finally {
-      setLoading(false)
-    }
-  }, [status])
+    [status]
+  )
 
   useEffect(() => {
     if (status !== 'authenticated') return
 
-    const initialLoad = window.setTimeout(load, 0)
-    const timer = window.setInterval(load, 5 * 60_000)
+    const initialLoad = window.setTimeout(() => load(), 0)
+
+    // Polling works across serverless instances, unlike the old in-memory SSE
+    // stream. Refresh when the tab becomes visible/focused and otherwise every
+    // 45 seconds while it is open.
+    const refreshIfVisible = () => {
+      if (document.visibilityState === 'visible') void load(true)
+    }
+    const timer = window.setInterval(refreshIfVisible, 45_000)
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') refreshIfVisible()
+    }
+
+    window.addEventListener('focus', refreshIfVisible)
+    document.addEventListener('visibilitychange', onVisibilityChange)
+
     return () => {
       window.clearTimeout(initialLoad)
       window.clearInterval(timer)
+      window.removeEventListener('focus', refreshIfVisible)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
     }
   }, [status, load])
-
-  // Sync real-time unread count
-  useEffect(() => {
-    if (connected && realtimeUnread > 0) {
-      setUnread(realtimeUnread)
-    }
-  }, [connected, realtimeUnread])
 
   if (status !== 'authenticated') return null
 
@@ -106,9 +89,6 @@ export function NotificationBell() {
       )
       setUnread((current) => Math.max(0, current - 1))
     }
-
-    // Also mark in real-time if it was a realtime notification
-    markRealtimeRead(notification.id)
 
     await fetch('/api/notifications/read', {
       method: 'POST',
@@ -132,8 +112,6 @@ export function NotificationBell() {
           current.map((item) => ({ ...item, readAt: item.readAt ?? now }))
         )
         setUnread(0)
-        // Also clear real-time notifications
-        realtimeNotifications.forEach(n => markRealtimeRead(n.notificationId))
       }
     } finally {
       setMarking(false)
@@ -156,9 +134,6 @@ export function NotificationBell() {
             <span className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-emerald-500 px-1 text-xs font-bold leading-none text-white sm:text-[10px]">
               {unread > 9 ? '9+' : unread}
             </span>
-          )}
-          {connected && (
-            <span className="absolute -bottom-1 -right-1 h-2 w-2 rounded-full bg-emerald-500" aria-label="Live notifications active" />
           )}
         </Button>
       </DropdownMenuTrigger>

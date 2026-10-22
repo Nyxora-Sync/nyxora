@@ -1,3 +1,4 @@
+import { after } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { auth } from '@/lib/auth/auth'
 import { prisma } from '@/lib/db'
@@ -7,8 +8,8 @@ import {
   jsonError,
   sinceMinutes,
 } from '@/lib/community'
-import { actorName } from '@/lib/social'
 import { notifyFollowRequest } from '@/lib/realtime/notify'
+import { syncUserBadges } from '@/lib/badge-awards'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -25,10 +26,10 @@ export async function POST(_request: Request, { params }: RouteContext) {
   const { id } = await params
   if (id === userId) return jsonError(400, 'INVALID_REQUEST', 'You cannot follow yourself.')
 
-  const [target, actor] = await Promise.all([
-    prisma.user.findUnique({ where: { id }, select: { id: true } }),
-    prisma.user.findUnique({ where: { id: userId }, select: { name: true } }),
-  ])
+  const target = await prisma.user.findUnique({
+    where: { id },
+    select: { id: true },
+  })
   if (!target) return jsonError(404, 'NOT_FOUND', 'Profile not found.')
 
   const [existing, reverse] = await Promise.all([
@@ -77,18 +78,11 @@ export async function POST(_request: Request, { params }: RouteContext) {
       select: { id: true },
     })
 
-    await prisma.notification.create({
-      data: {
-        userId: id,
-        actorId: userId,
-        type: 'follow_request',
-        message: `${actorName(actor?.name)} sent you a follow request.`,
-        href: '/settings?tab=profile',
-      },
-    })
-
-    // Send real-time notification
-    notifyFollowRequest(userId, id).catch(console.error)
+    try {
+      await notifyFollowRequest(userId, id)
+    } catch (error) {
+      console.error('Failed to create follow request notification', error)
+    }
 
     return Response.json({ data: { status: 'pending_outgoing', requestId: follow.id } })
   } catch (error) {
@@ -119,6 +113,13 @@ export async function DELETE(_request: Request, { params }: RouteContext) {
 
   if (existing) {
     await prisma.follow.delete({ where: { id: existing.id } })
+    after(async () => {
+      try {
+        await syncUserBadges(id)
+      } catch (error) {
+        console.error('Failed to sync follower badges after unfollow', error)
+      }
+    })
   }
 
   return Response.json({ data: { status: 'none' } })

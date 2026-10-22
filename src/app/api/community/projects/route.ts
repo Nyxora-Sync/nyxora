@@ -1,7 +1,9 @@
+import { after } from 'next/server'
 import type { Prisma } from '@prisma/client'
 import { auth } from '@/lib/auth/auth'
 import { prisma } from '@/lib/db'
 import { serializeProject } from '@/lib/community-project'
+import { syncUserBadges } from '@/lib/badge-awards'
 import { tracks } from '@/lib/curriculum'
 import {
   COMMUNITY_DISABLED,
@@ -125,6 +127,14 @@ export async function POST(request: Request) {
       user: { select: publicUserSelect },
       upvoteRows: { where: { userId }, select: { id: true } },
     },
+  })
+
+  after(async () => {
+    try {
+      await syncUserBadges(userId)
+    } catch (error) {
+      console.error('Failed to sync badges after project creation', error)
+    }
   })
 
   return Response.json(

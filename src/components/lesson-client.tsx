@@ -77,7 +77,7 @@ export function LessonClient({ lesson, track, moduleKey, prev, next, children }:
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <ul className="grid gap-2 sm:grid-cols-2" role="list">
+            <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2" role="list">
               {lesson.keyTakeaways.map((takeaway, i) => (
                 <li key={i} className="flex items-start gap-2 text-sm">
                   <CheckCircle2 className="h-4 w-4 text-emerald-500 flex-shrink-0 mt-0.5" aria-hidden="true" />
@@ -109,7 +109,7 @@ export function LessonClient({ lesson, track, moduleKey, prev, next, children }:
         <p className="text-sm text-muted-foreground mb-5">
           Optional supplementary material — videos, articles, and docs to reinforce what you just read.
         </p>
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {lesson.resources.map((resource, i) => {
             const meta = resourceTypeMeta[resource.type] || resourceTypeMeta.article
             const Icon = meta.icon

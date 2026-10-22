@@ -55,8 +55,8 @@ export function ProgressSync() {
         // Account-scoped edits win; guest progress only fills gaps.
         const merged = mergeProgressStates(mergeProgressStates(accountLocal, remote), guest)
 
-        switchProgressScope(userId)
         suppressBroadcast.current = true
+        switchProgressScope(userId)
         saveProgressState(merged, userId)
         suppressBroadcast.current = false
         latest.current = merged

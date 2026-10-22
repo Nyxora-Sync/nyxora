@@ -184,7 +184,7 @@ export default function ContributePage() {
 
         <section className="border-y border-border/50 bg-muted/30 py-12 sm:py-16">
           <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-            <div className="grid gap-10 lg:grid-cols-[1fr_360px]">
+            <div className="grid grid-cols-1 gap-10 lg:grid-cols-[1fr_360px]">
               <div>
                 <h2 className="text-2xl font-bold tracking-tight">How a lesson contribution works</h2>
                 <ol className="mt-6 space-y-5">
@@ -224,7 +224,7 @@ export default function ContributePage() {
 
         <section className="py-12 sm:py-16">
           <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-            <div className="grid gap-6 md:grid-cols-2">
+            <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
               <Card id="translate">
                 <CardContent className="pt-6">
                   <h2 className="flex items-center gap-2 text-lg font-semibold">

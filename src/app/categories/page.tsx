@@ -3,7 +3,7 @@ import Link from 'next/link'
 import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
 import { Reveal } from '@/components/motion/reveal'
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { ArrowRight, Globe, Code2, Cpu, Smartphone, Brain, Cloud, Gamepad2, Monitor } from 'lucide-react'
 import { trackCategories } from '@/lib/curriculum'
@@ -62,7 +62,7 @@ export default function CategoriesPage() {
         {/* Categories Grid */}
         <section className="py-16 sm:py-20">
           <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
               {categoriesWithTracks.map(({ category, totalLessons, totalTracks }) => {
                 const Icon = categoryIcons[category.id] ?? Globe
                 return (

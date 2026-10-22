@@ -9,7 +9,7 @@ export default function Loading() {
         <Skeleton className="h-4 w-64 mt-2" />
       </div>
 
-      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
+      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
         {Array.from({ length: 8 }).map((_, i) => (
           <Card key={i} className="relative overflow-hidden">
             <Skeleton className="h-1 bg-gradient-to-r from-emerald-500 to-violet-500" />

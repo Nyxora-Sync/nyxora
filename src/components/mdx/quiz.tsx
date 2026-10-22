@@ -27,7 +27,7 @@ export function Quiz({
       </div>
       <p className="mb-4 font-medium">{question}</p>
 
-      <div className="grid gap-2" role="group" aria-label="Answer options">
+      <div className="grid grid-cols-1 gap-2" role="group" aria-label="Answer options">
         {options.map((option, index) => {
           const isSelected = selected === index
           const isAnswer = answer === index

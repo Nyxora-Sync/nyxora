@@ -1,11 +1,11 @@
 import type { Metadata } from 'next'
 
 // Static output (sitemap, canonical links, Open Graph URLs) is generated at
-// build time. Fall back to the production Worker origin when no explicit
+// build time. Fall back to the production custom domain when no explicit
 // public URL is supplied, while keeping local development on localhost.
 const fallbackUrl =
   process.env.NODE_ENV === 'production'
-    ? 'https://sync.nyxora.workers.dev'
+    ? 'https://nyxora-sync.tech'
     : 'http://localhost:3000'
 
 const configuredUrl =

@@ -99,7 +99,7 @@ export default function LearnPage() {
                 Pick a category to explore its learning paths. Each path takes you from beginner to mastery.
               </p>
             </div>
-            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
               {trackCategories
                 .filter((cat) => curriculumTracks.some((t) => t.category === cat.id))
                 .map((category) => {
@@ -170,7 +170,7 @@ export default function LearnPage() {
                 </Link>
               </Button>
             </div>
-            <div className="grid gap-8 lg:grid-cols-2">
+            <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
               {tracks
                 .filter((track) => track.category === 'web-development' && track.key !== 'specializations')
                 .map((track) => (
@@ -278,7 +278,7 @@ export default function LearnPage() {
                 </Link>
               </Button>
             </div>
-            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+            <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
               {[
                 { title: 'Arduino Fundamentals', desc: 'GPIO, PWM, I2C/SPI, interrupts, and libraries', color: 'amber' },
                 { title: 'ESP32 WiFi & Bluetooth', desc: 'Web servers, BLE, MQTT, OTA updates', color: 'amber' },
@@ -315,7 +315,7 @@ export default function LearnPage() {
                 More categories are being built. Check back for new learning paths.
               </p>
             </div>
-            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
               {[
                 { name: 'Mobile Development', desc: 'iOS, Android, React Native, Flutter', icon: Smartphone, color: 'violet' },
                 { name: 'Data Science & AI', desc: 'Python, ML, visualization, LLMs', icon: Brain, color: 'rose' },
@@ -351,7 +351,7 @@ export default function LearnPage() {
                 We aren&apos;t just another tutorial site. We&apos;re a complete, free learning platform.
               </p>
             </div>
-            <div className="grid gap-6 md:grid-cols-3">
+            <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
               {[
                 { icon: CheckCircle, title: '100% Free Forever', desc: 'No paywalls, no subscriptions, no upsells. All content is free and open source.', color: 'emerald' },
                 { icon: Clock, title: 'Self-Paced Learning', desc: 'Learn on your schedule. Track progress, pick up where you left off, no deadlines.', color: 'violet' },

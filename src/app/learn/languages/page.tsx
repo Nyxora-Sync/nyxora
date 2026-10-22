@@ -119,7 +119,7 @@ export default function LanguagesPage() {
                 The syntax changes. The learning structure does not.
               </p>
             </div>
-            <div className="grid gap-6 md:grid-cols-3">
+            <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
               {principles.map((principle) => (
                 <Card key={principle.title} className="h-full">
                   <CardContent className="pt-6">

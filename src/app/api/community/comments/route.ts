@@ -1,3 +1,4 @@
+import { after } from 'next/server'
 import { auth } from '@/lib/auth/auth'
 import { prisma } from '@/lib/db'
 import {
@@ -10,6 +11,7 @@ import {
   sinceMinutes,
 } from '@/lib/community'
 import { notifyCommentCreated, notifyCommentReply } from '@/lib/realtime/notify'
+import { syncUserBadges } from '@/lib/badge-awards'
 
 
 
@@ -135,12 +137,18 @@ export async function POST(request: Request) {
     include: { user: { select: publicUserSelect } },
   })
 
-  // Send real-time notifications (fire and forget)
-  if (parentId) {
-    notifyCommentReply(comment.id, parentId, userId).catch(console.error)
-  } else {
-    notifyCommentCreated(comment.id, targetType, targetId, userId).catch(console.error)
-  }
+  after(async () => {
+    try {
+      if (parentId) {
+        await notifyCommentReply(comment.id, parentId, userId)
+      } else {
+        await notifyCommentCreated(comment.id, targetType, targetId, userId)
+      }
+      await syncUserBadges(userId)
+    } catch (error) {
+      console.error('Failed to finish comment side effects', error)
+    }
+  })
 
   return Response.json(
     {

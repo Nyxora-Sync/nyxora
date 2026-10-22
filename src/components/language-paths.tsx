@@ -29,7 +29,7 @@ export function LanguagePaths({ className }: { className?: string }) {
   if (languageTracks.length === 0) return null
 
   return (
-    <div className={cn('grid gap-6 md:grid-cols-2', className)}>
+    <div className={cn('grid grid-cols-1 gap-6 md:grid-cols-2', className)}>
       {languageTracks.map((track) => {
         const Icon = languageIcons[track.key] ?? Terminal
         const lessonCount = track.modules.reduce(
@@ -40,7 +40,7 @@ export function LanguagePaths({ className }: { className?: string }) {
         const xp = getTotalXP(track.key)
 
         return (
-          <Link key={track.key} href={`/learn/${track.key}`} className="group block">
+          <Link key={track.key} href={`/learn/${track.key}`} className="group block min-w-0">
             <Card className="relative h-full overflow-hidden border-border/50 transition-all motion-safe:hover:-translate-y-1 hover:shadow-xl">
               <div
                 className={cn(

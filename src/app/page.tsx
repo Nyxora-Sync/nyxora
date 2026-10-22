@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
-import { Code2, Database, Server, Globe, CheckCircle, ArrowRight, Users, Trophy, Zap, BookOpen, ExternalLink, Cpu, Smartphone, Brain, Cloud, Gamepad2, Monitor } from 'lucide-react'
+import { Code2, Database, Globe, CheckCircle, ArrowRight, Users, Trophy, Zap, BookOpen, ExternalLink, Cpu, Smartphone, Brain, Cloud, Gamepad2, Monitor } from 'lucide-react'
 import { GithubIcon } from '@/components/icons/brand'
 import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
@@ -165,7 +165,7 @@ export default function HomePage() {
             </div>
 
             {/* Trust indicators */}
-            <div className="mt-16 flex items-center justify-center gap-8 text-xs text-muted-foreground/60">
+            <div className="mt-16 flex flex-wrap items-center justify-center gap-4 text-center text-xs text-muted-foreground/60 sm:gap-8">
               <div className="flex items-center gap-1.5">
                 <GithubIcon className="h-3.5 w-3.5" aria-hidden="true" />
                 <span>Open Source</span>
@@ -196,7 +196,7 @@ export default function HomePage() {
                 Pick a category, pick a track, start building.
               </p>
             </div>
-            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
               {trackCategories
                 .filter((cat) => curriculumTracks.some((t) => t.category === cat.id))
                 .map((category) => {
@@ -261,7 +261,7 @@ export default function HomePage() {
               </div>
             </div>
             <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8" delay={0.1}>
-              <div className="grid gap-8 md:grid-cols-2">
+              <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
                 {tracks
                   .filter((t) => t.category === 'web-development' && t.key !== 'specializations')
                   .map((track) => (
@@ -372,7 +372,7 @@ export default function HomePage() {
                 </Link>
               </Button>
             </div>
-            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+            <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
               {[
                 { title: 'Arduino Fundamentals', desc: 'GPIO, PWM, I2C/SPI, interrupts, and libraries', icon: Cpu, color: 'amber' },
                 { title: 'ESP32 WiFi & Bluetooth', desc: 'Web servers, BLE, MQTT, OTA updates', icon: Cloud, color: 'amber' },
@@ -409,7 +409,7 @@ export default function HomePage() {
                 Built by developers, for developers. Every feature designed to help you learn faster.
               </p>
             </div>
-            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
               {features.map((feature) => (
                 <Card key={feature.title} className="group transition-all motion-safe:hover:-translate-y-0.5 hover:shadow-lg">
                   <CardHeader>

@@ -98,6 +98,11 @@ export const profileSchema = z
     twitterUrl: optionalUrl,
     showProgress: z.boolean().optional(),
     emailUpdates: z.boolean().optional(),
+    featuredBadges: z
+      .array(z.string().trim().min(1).max(160))
+      .max(3, 'Pin at most 3 badges')
+      .transform((keys) => Array.from(new Set(keys)))
+      .optional(),
   })
   .strict()
 

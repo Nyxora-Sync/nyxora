@@ -1,5 +1,9 @@
+import { after } from 'next/server'
 import { auth } from '@/lib/auth/auth'
 import { prisma } from '@/lib/db'
+import { getEarnedBadges } from '@/lib/badges'
+import { getPersistedBadges, syncUserBadges, type EarnedBadge } from '@/lib/badge-awards'
+import type { ProgressState } from '@/lib/progress-state'
 import {
   COMMUNITY_DISABLED,
   communityEnabled,
@@ -59,7 +63,7 @@ export async function GET(request: Request, { params }: RouteContext) {
     select: {
       ...publicUserSelect,
       username: true,
-      preferences: { select: { showProgress: true } },
+      preferences: { select: { showProgress: true, featuredBadges: true } },
     },
   })
 
@@ -75,8 +79,7 @@ export async function GET(request: Request, { params }: RouteContext) {
 
   const [
     stats,
-    completedCount,
-    badges,
+    completedRows,
     projects,
     projectCount,
     commentCount,
@@ -89,16 +92,9 @@ export async function GET(request: Request, { params }: RouteContext) {
       where: { userId: user.id },
       select: { xp: true, streakCurrent: true, streakLongest: true },
     }),
-    prisma.userProgress.count({ where: { userId: user.id, completed: true } }),
-    prisma.userBadge.findMany({
-      where: { userId: user.id },
-      orderBy: { earnedAt: 'desc' },
-      take: 12,
-      include: {
-        badge: {
-          select: { key: true, name: true, description: true, icon: true, category: true },
-        },
-      },
+    prisma.userProgress.findMany({
+      where: { userId: user.id, completed: true },
+      select: { lessonKey: true, completedAt: true },
     }),
     prisma.project.findMany({
       where: { userId: user.id },
@@ -116,6 +112,60 @@ export async function GET(request: Request, { params }: RouteContext) {
     isSelf ? getProfileViewCounts(user.id) : Promise.resolve(null),
     recordProfileView(request, user.id, viewerId),
   ])
+
+  const progressState: ProgressState = {
+    lessons: Object.fromEntries(
+      completedRows.map((row) => [
+        row.lessonKey,
+        {
+          completed: true,
+          ...(row.completedAt ? { completedAt: row.completedAt.toISOString() } : {}),
+        },
+      ])
+    ),
+    xp: stats?.xp ?? 0,
+    streak: {
+      current: stats?.streakCurrent ?? 0,
+      longest: stats?.streakLongest ?? 0,
+      lastActiveDate: null,
+    },
+    bookmarks: [],
+    lastVisited: null,
+  }
+
+  const computedBadges = getEarnedBadges({
+    state: progressState,
+    contributions: {
+      projects: projectCount,
+      comments: commentCount,
+      upvotes: upvoteCount,
+    },
+    followers: followCounts.followers,
+    joinedAt: user.createdAt.toISOString(),
+  })
+
+  // Prefer persisted awards. Older accounts are backfilled lazily on their
+  // first profile view, while the response can still render immediately.
+  let earnedBadges: EarnedBadge[] = await getPersistedBadges(user.id)
+  if (earnedBadges.length === 0 && computedBadges.length > 0) {
+    earnedBadges = computedBadges.map((badge) => ({ ...badge, earnedAt: null }))
+    after(async () => {
+      try {
+        await syncUserBadges(user.id)
+      } catch (error) {
+        console.error('Failed to backfill profile badges', error)
+      }
+    })
+  }
+
+  const earnedKeys = new Set(computedBadges.map((badge) => badge.key))
+  const selectedFeatured = (user.preferences?.featuredBadges ?? [])
+    .filter((key) => earnedKeys.has(key))
+    .slice(0, 3)
+  const featuredBadges =
+    selectedFeatured.length > 0
+      ? selectedFeatured
+      : earnedBadges.slice(0, 3).map((badge) => badge.key)
 
   return Response.json(
     {
@@ -139,14 +189,16 @@ export async function GET(request: Request, { params }: RouteContext) {
               xp: stats?.xp ?? 0,
               streakCurrent: stats?.streakCurrent ?? 0,
               streakLongest: stats?.streakLongest ?? 0,
-              lessonsCompleted: completedCount,
-              badges: badges.map((entry) => ({
-                key: entry.badge.key,
-                name: entry.badge.name,
-                description: entry.badge.description,
-                icon: entry.badge.icon,
-                category: entry.badge.category,
-                earnedAt: entry.earnedAt.toISOString(),
+              lessonsCompleted: completedRows.length,
+              featuredBadges,
+              badges: earnedBadges.map((badge) => ({
+                key: badge.key,
+                name: badge.name,
+                description: badge.description,
+                icon: badge.icon,
+                category: badge.category,
+                tier: badge.tier,
+                earnedAt: badge.earnedAt,
               })),
             }
           : null,

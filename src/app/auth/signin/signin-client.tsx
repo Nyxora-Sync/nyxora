@@ -56,6 +56,7 @@ function SignInContent({ enabled, hasDatabase }: { enabled: EnabledProviders; ha
   const [email, setEmail] = useState('')
   const [adminUsername, setAdminUsername] = useState('')
   const [adminPassword, setAdminPassword] = useState('')
+  const [adminError, setAdminError] = useState('')
   const [showAdminForm, setShowAdminForm] = useState(false)
 
   const availableOAuth = oauthProviders.filter(
@@ -74,23 +75,27 @@ function SignInContent({ enabled, hasDatabase }: { enabled: EnabledProviders; ha
   const handleAdminSignIn = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!adminUsername || !adminPassword) return
+
     setIsLoading('admin')
-    const formData = new FormData()
-    formData.append('username', adminUsername)
-    formData.append('password', adminPassword)
-    formData.append('callbackUrl', callbackUrl)
-    const res = await fetch('/api/auth/admin-login', {
-      method: 'POST',
-      body: formData,
-    })
-    if (res.ok) {
-      const data = await res.json()
-      if (data.redirectUrl) {
-        window.location.href = data.redirectUrl
-      } else {
-        window.location.href = callbackUrl
+    setAdminError('')
+
+    try {
+      const result = await signIn('admin', {
+        username: adminUsername,
+        password: adminPassword,
+        callbackUrl,
+        redirect: false,
+      })
+
+      if (result?.error) {
+        setAdminError('Invalid credentials. Please try again.')
+        setIsLoading(null)
+        return
       }
-    } else {
+
+      window.location.assign(result?.url || callbackUrl)
+    } catch {
+      setAdminError('Sign in is temporarily unavailable. Please try again.')
       setIsLoading(null)
     }
   }
@@ -106,12 +111,17 @@ function SignInContent({ enabled, hasDatabase }: { enabled: EnabledProviders; ha
     if (showAdminForm) {
       return (
         <form onSubmit={handleAdminSignIn} className="space-y-4">
+          {adminError && (
+            <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              {adminError}
+            </p>
+          )}
           <div className="space-y-2">
-            <Label htmlFor="username">Username</Label>
+            <Label htmlFor="username">Admin email</Label>
             <Input
               id="username"
               type="text"
-              placeholder="username"
+              placeholder="admin@nyxora.local"
               value={adminUsername}
               onChange={(e) => setAdminUsername(e.target.value)}
               disabled={isLoading !== null}

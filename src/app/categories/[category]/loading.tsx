@@ -10,7 +10,7 @@ export default function Loading() {
         <Skeleton className="h-4 w-64 mt-2" />
       </div>
 
-      <div className="grid gap-8 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
         {Array.from({ length: 2 }).map((_, i) => (
           <Link key={i} href={`/learn/${i}`} className="group">
             <Card className="relative overflow-hidden transition-all motion-safe:hover:-translate-y-1 hover:shadow-xl h-full border-border/50">

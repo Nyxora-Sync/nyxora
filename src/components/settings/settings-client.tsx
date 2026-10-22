@@ -77,12 +77,23 @@ interface SettingsResponse {
   preferences: {
     showProgress: boolean
     emailUpdates: boolean
+    featuredBadges: string[]
   }
   progress: {
     xp: number
     streakCurrent: number
     streakLongest: number
     lessonsCompleted: number
+    featuredBadges: string[]
+    badges: {
+      key: string
+      name: string
+      description: string
+      icon: string
+      category: string
+      tier: string
+      earnedAt: string | null
+    }[]
   }
   followers: number
   following: number
@@ -147,6 +158,7 @@ export function SettingsClient() {
     twitterUrl: '',
     showProgress: true,
     emailUpdates: false,
+    featuredBadges: [] as string[],
   })
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -199,6 +211,7 @@ export function SettingsClient() {
           twitterUrl: data.twitterUrl ?? '',
           showProgress: data.preferences.showProgress,
           emailUpdates: data.preferences.emailUpdates,
+          featuredBadges: data.preferences.featuredBadges ?? [],
         })
       } catch (err) {
         if ((err as Error).name === 'AbortError') return
@@ -216,6 +229,21 @@ export function SettingsClient() {
 
   function update<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
     setForm((current) => ({ ...current, [key]: value }))
+    setSaved(false)
+  }
+
+  function toggleFeaturedBadge(key: string) {
+    setForm((current) => {
+      const selected = current.featuredBadges.includes(key)
+      if (selected) {
+        return {
+          ...current,
+          featuredBadges: current.featuredBadges.filter((badgeKey) => badgeKey !== key),
+        }
+      }
+      if (current.featuredBadges.length >= 3) return current
+      return { ...current, featuredBadges: [...current.featuredBadges, key] }
+    })
     setSaved(false)
   }
 
@@ -250,6 +278,7 @@ export function SettingsClient() {
                 ...current.preferences,
                 showProgress: form.showProgress,
                 emailUpdates: form.emailUpdates,
+                featuredBadges: form.featuredBadges,
               },
             }
           : current
@@ -559,7 +588,7 @@ export function SettingsClient() {
 
               <Separator />
 
-              <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="space-y-1.5">
                   <Label htmlFor="settings-name">Display name</Label>
                   <Input
@@ -594,7 +623,7 @@ export function SettingsClient() {
                 </p>
               </div>
 
-              <div className="grid gap-4 sm:grid-cols-3">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <div className="space-y-1.5">
                   <Label htmlFor="settings-website">Website</Label>
                   <Input
@@ -626,6 +655,84 @@ export function SettingsClient() {
                   />
                 </div>
               </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Award className="h-4 w-4 text-amber-500" aria-hidden="true" />
+                Featured badges
+              </CardTitle>
+              <CardDescription>
+                Pick up to 3 badges for your public profile showcase. Badges unlock as you learn and contribute.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {profile.progress.badges.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-border/60 bg-muted/20 p-4 text-sm text-muted-foreground">
+                  You have not earned a badge yet.{' '}
+                  <Link href="/learn" className="font-medium text-primary underline-offset-4 hover:underline">
+                    Complete your first lesson
+                  </Link>{' '}
+                  to get started.
+                </div>
+              ) : (
+                <>
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                    <span className="text-muted-foreground">
+                      {form.featuredBadges.length} of 3 selected
+                    </span>
+                    {form.featuredBadges.length > 0 && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => update('featuredBadges', [])}
+                      >
+                        Clear selection
+                      </Button>
+                    )}
+                  </div>
+                  <div
+                    className="grid max-h-80 gap-2 overflow-y-auto pr-1 sm:grid-cols-2"
+                    role="group"
+                    aria-label="Choose featured badges"
+                  >
+                    {profile.progress.badges.map((badge) => {
+                      const selected = form.featuredBadges.includes(badge.key)
+                      const limitReached = form.featuredBadges.length >= 3 && !selected
+                      return (
+                        <button
+                          key={badge.key}
+                          type="button"
+                          aria-pressed={selected}
+                          disabled={limitReached}
+                          onClick={() => toggleFeaturedBadge(badge.key)}
+                          className={`flex min-h-16 items-start gap-3 rounded-xl border p-3 text-left transition-colors ${
+                            selected
+                              ? 'border-primary/60 bg-primary/5'
+                              : 'border-border/50 bg-background hover:bg-muted/40'
+                          } ${limitReached ? 'cursor-not-allowed opacity-50' : ''}`}
+                        >
+                          <span className="text-2xl leading-none" aria-hidden="true">
+                            {badge.icon}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-sm font-medium">{badge.name}</span>
+                            <span className="mt-0.5 line-clamp-2 block text-xs text-muted-foreground">
+                              {badge.description}
+                            </span>
+                          </span>
+                          {selected && (
+                            <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+                          )}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </>
+              )}
             </CardContent>
           </Card>
 

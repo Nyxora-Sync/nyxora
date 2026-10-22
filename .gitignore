@@ -5,6 +5,8 @@ node_modules/
 
 # Testing
 coverage/
+playwright-report/
+test-results/
 
 # Next.js
 .next/
@@ -45,12 +47,10 @@ next-env.d.ts
 *.swp
 *.swo
 
-# Prisma
-prisma/migrations/
-
 # Turbopack
 .turbo/
 
 # Cloudflare proxy
 .dev.vars
 cloudflare-env.d.ts
+.env*

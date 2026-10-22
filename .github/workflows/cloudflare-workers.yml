@@ -1,6 +1,7 @@
-# Cloudflare proxy deployment
-# The dynamic Next.js app runs on Vercel. This workflow only deploys the thin
-# public-origin proxy Worker that keeps sync.nyxora.workers.dev stable.
+# Cloudflare proxy deployment (legacy)
+# The dynamic Next.js app runs on Vercel at https://nyxora-sync.tech.
+# This workflow deploys the thin proxy Worker that keeps sync.nyxora.workers.dev stable
+# for any legacy traffic. The primary production URL is now nyxora-sync.tech.
 
 name: Deploy Cloudflare proxy
 

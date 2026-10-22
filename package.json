@@ -5,7 +5,6 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "postbuild": "prisma db push --accept-data-loss",
     "start": "next start",
     "deploy:web": "npx vercel --prod",
     "deploy:proxy": "wrangler deploy --config proxy-worker/wrangler.jsonc",
@@ -13,9 +12,17 @@
     "postinstall": "prisma generate",
     "db:generate": "prisma generate",
     "db:migrate": "dotenv -e .env.local -- prisma migrate dev",
-    "db:push": "dotenv -e .env.local -- prisma db push",
     "db:studio": "dotenv -e .env.local -- prisma studio",
-    "db:seed": "dotenv -e .env.local -- tsx prisma/seed.ts"
+    "db:seed": "dotenv -e .env.local -- tsx prisma/seed.ts",
+    "db:migrate:deploy": "prisma migrate deploy",
+    "db:migrate:status": "dotenv -e .env.local -- prisma migrate status",
+    "db:diff": "dotenv -e .env.local -- prisma migrate diff --from-url \"$DIRECT_URL\" --to-schema-datamodel prisma/schema.prisma --script",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "typecheck": "tsc --noEmit",
+    "lint:ci": "eslint .",
+    "db:backfill": "dotenv -e .env.local -- tsx scripts/backfill-badges.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -37,6 +44,8 @@
     "@radix-ui/react-tabs": "^1.2.1",
     "@radix-ui/react-tooltip": "^1.4.1",
     "@types/mdx": "^2.0.14",
+    "@vercel/blob": "^2.8.2",
+    "@vercel/speed-insights": "^2.0.0",
     "bcrypt-ts": "^9.0.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -57,11 +66,13 @@
     "shiki": "^1.17.0",
     "tailwind-merge": "^3.7.0",
     "three": "^0.186.1",
+    "web-vitals": "^6.2.3",
     "zod": "^4.6.7"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250109.0",
     "@next/bundle-analyzer": "^16.4.2",
+    "@playwright/test": "^1.64.1",
     "@tailwindcss/turbopack": "^4",
     "@tailwindcss/typography": "^0.5.20",
     "@types/node": "^20",
@@ -76,6 +87,8 @@
     "tailwindcss": "^4",
     "tsx": "^4.23.15",
     "typescript": "^5",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5",
     "wrangler": "^4.0.0"
   }
 }

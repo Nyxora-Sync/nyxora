@@ -1,12 +1,16 @@
 {
+  "id": "/",
   "name": "Nyxora Sync",
   "short_name": "Nyxora Sync",
   "description": "Free written paths for MERN, C, C++, C#, and Python, from beginner foundations to mastery.",
-  "start_url": "/",
+  "start_url": "/learn",
   "scope": "/",
   "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "orientation": "any",
   "background_color": "#0a0a0a",
   "theme_color": "#10b981",
+  "categories": ["education", "productivity"],
   "icons": [
     {
       "src": "/favicon-32x32.png",
@@ -30,6 +34,23 @@
       "sizes": "180x180",
       "type": "image/png",
       "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Continue learning",
+      "short_name": "Learn",
+      "url": "/learn"
+    },
+    {
+      "name": "My progress",
+      "short_name": "Progress",
+      "url": "/dashboard"
+    },
+    {
+      "name": "Community showcase",
+      "short_name": "Showcase",
+      "url": "/community/showcase"
     }
   ]
 }

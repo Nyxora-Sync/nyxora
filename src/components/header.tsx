@@ -7,7 +7,7 @@ import { usePathname } from 'next/navigation'
 import { useSession, signOut } from 'next-auth/react'
 import { useTheme } from 'next-themes'
 import { AnimatePresence, motion, useReducedMotion, useScroll, useSpring } from 'motion/react'
-import { Menu, X, Sun, Moon, User, LogOut, BookOpen, Trophy, Users, Code2, Rocket, Search, Layers, ChevronDown, CircleUser, ShieldCheck } from 'lucide-react'
+import { Menu, X, Sun, Moon, User, LogOut, BookOpen, Trophy, Users, Code2, Rocket, Search, Layers, ChevronDown, CircleUser, ShieldCheck, Flag, Award } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { NotificationBell } from '@/components/notification-bell'
@@ -79,7 +79,7 @@ export function Header() {
               className="h-9 w-9 rounded-lg object-cover transition-transform duration-300 hover:scale-[1.03]"
               priority
             />
-            <span className="font-bold text-xl font-sans truncate">Nyxora Sync</span>
+            <span className="hidden truncate font-bold text-xl font-sans sm:inline">Nyxora Sync</span>
           </Link>
 
           <div className="hidden lg:flex lg:items-center lg:gap-6">
@@ -221,18 +221,32 @@ export function Header() {
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
+                  <Link href="/certificates" className="flex items-center gap-2">
+                    <Award className="h-4 w-4" aria-hidden="true" />
+                    Certificates
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
                   <Link href="/settings" className="flex items-center gap-2">
                     <User className="h-4 w-4" aria-hidden="true" />
                     Settings
                   </Link>
                 </DropdownMenuItem>
                 {session.user.isAdmin && (
-                  <DropdownMenuItem asChild>
-                    <Link href="/admin/messages" className="flex items-center gap-2">
-                      <ShieldCheck className="h-4 w-4" aria-hidden="true" />
-                      Admin
-                    </Link>
-                  </DropdownMenuItem>
+                  <>
+                    <DropdownMenuItem asChild>
+                      <Link href="/admin/reports" className="flex items-center gap-2">
+                        <Flag className="h-4 w-4" aria-hidden="true" />
+                        Moderation queue
+                      </Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <Link href="/admin/messages" className="flex items-center gap-2">
+                        <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+                        Contact inbox
+                      </Link>
+                    </DropdownMenuItem>
+                  </>
                 )}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => signOut({ callbackUrl: '/' })} className="flex items-center gap-2 text-destructive focus:text-destructive">

@@ -46,6 +46,10 @@ model User {
   actorNotifications Notification[] @relation("NotificationActor")
   profileViews       ProfileView[]  @relation("ProfileViewTarget")
   viewedProfiles     ProfileView[]  @relation("ProfileViewViewer")
+  reportsMade        Report[]       @relation("ReportReporter")
+  reportsReviewed    Report[]       @relation("ReportReviewer")
+  adminActions       AdminAuditLog[]
+  certificates       Certificate[]
 }
 
 // Uploaded profile photo. Kept out of User so session/adapter queries never
@@ -153,14 +157,16 @@ model VerificationToken {
 }
 
 model UserPreferences {
-  id                   String  @id @default(cuid())
-  userId               String  @unique
-  theme                String  @default("system") // light, dark, system
-  track                String  @default("beginner") // beginner, developer
-  emailUpdates         Boolean @default(false)
-  showProgress         Boolean @default(true)
-  anonymizeLeaderboard Boolean @default(true)
-  user                 User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                   String   @id @default(cuid())
+  userId               String   @unique
+  theme                String   @default("system") // light, dark, system
+  track                String   @default("beginner") // beginner, developer
+  emailUpdates         Boolean  @default(false)
+  showProgress         Boolean  @default(true)
+  anonymizeLeaderboard Boolean  @default(true)
+  // Badge keys chosen by the user for the public profile showcase (max 3).
+  featuredBadges       String[] @default([])
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 // Learning Progress Tracking
@@ -221,16 +227,62 @@ model Badge {
 }
 
 model UserBadge {
-  id       String   @id @default(cuid())
-  userId   String
-  badgeId  String
-  earnedAt DateTime @default(now())
+  id         String    @id @default(cuid())
+  userId     String
+  badgeId    String
+  earnedAt   DateTime  @default(now())
+  // Set once the unlock toast has been shown on any device.
+  notifiedAt DateTime?
 
   user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
   badge Badge @relation(fields: [badgeId], references: [id], onDelete: Cascade)
 
   @@unique([userId, badgeId])
   @@index([userId])
+  @@index([userId, notifiedAt])
+}
+
+// User-submitted moderation reports for projects, comments, and profiles.
+model Report {
+  id             String    @id @default(cuid())
+  reporterId     String
+  targetType     String // project | comment | profile
+  targetId       String
+  reason         String // spam | harassment | inappropriate | copyright | other
+  details        String?   @db.Text
+  status         String    @default("open") // open | resolved | dismissed
+  resolutionNote String?   @db.Text
+  reviewedById   String?
+  reviewedAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  reporter   User  @relation("ReportReporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  reviewedBy User? @relation("ReportReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@unique([reporterId, targetType, targetId])
+  @@index([status, createdAt])
+  @@index([targetType, targetId])
+  @@index([reviewedById])
+}
+
+// Append-only audit trail for moderation and administrative actions.
+model AdminAuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  action     String // moderation.delete_project, admin.login_failed, ...
+  targetType String?
+  targetId   String?
+  metadata   Json?
+  ipHash     String?
+  createdAt  DateTime @default(now())
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([actorId, createdAt])
+  @@index([action, createdAt])
+  @@index([targetType, targetId])
+  @@index([ipHash, action, createdAt])
 }
 
 // Community - Project Showcase
@@ -404,4 +456,21 @@ model ContactMessage {
 
   @@index([createdAt])
   @@index([handled])
+}
+
+
+// Verifiable completion certificate for a finished curriculum track.
+model Certificate {
+  id             String   @id @default(cuid())
+  verificationId String   @unique @default(cuid())
+  userId         String
+  trackKey       String
+  trackName      String
+  recipientName  String?
+  issuedAt       DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, trackKey])
+  @@index([userId, issuedAt])
 }

@@ -6,6 +6,8 @@ import Email from 'next-auth/providers/email'
 import Credentials from 'next-auth/providers/credentials'
 import { prisma } from '@/lib/db'
 import { sendVerificationRequest } from '@/lib/auth/email'
+import { isAdmin } from '@/lib/admin'
+import { getRequestIp, hashIp, isAdminLoginRateLimited, recordAdminLogin } from '@/lib/security'
 import { compareSync } from 'bcrypt-ts'
 
 const providers: NextAuthConfig['providers'] = []
@@ -47,23 +49,58 @@ providers.push(
       username: { label: 'Username', type: 'text' },
       password: { label: 'Password', type: 'password' },
     },
-    async authorize(credentials) {
+    async authorize(credentials, request) {
       if (!credentials?.username || !credentials?.password) return null
 
-      const adminUser = await prisma.user.findUnique({
-        where: { email: 'admin@nyxora.local' },
-      })
+      const ipHash = hashIp(getRequestIp(request))
 
-      if (!adminUser || !adminUser.passwordHash) return null
+      try {
+        if (await isAdminLoginRateLimited(ipHash)) {
+          return null
+        }
 
-      const isValid = compareSync(credentials.password as string, adminUser.passwordHash)
-      if (!isValid) return null
+        const normalizedUsername = String(credentials.username).trim().toLowerCase()
+        const adminUser = await prisma.user.findUnique({
+          where: { email: 'admin@nyxora.local' },
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            image: true,
+            passwordHash: true,
+          },
+        })
 
-      return {
-        id: adminUser.id,
-        name: adminUser.name ?? 'nyx',
-        email: adminUser.email,
-        image: adminUser.image,
+        if (
+          !adminUser?.passwordHash ||
+          !isAdmin(adminUser.email) ||
+          normalizedUsername !== adminUser.email.toLowerCase()
+        ) {
+          await recordAdminLogin({ actorId: adminUser?.id, ipHash, success: false })
+          return null
+        }
+
+        const isValid = compareSync(
+          credentials.password as string,
+          adminUser.passwordHash
+        )
+
+        if (!isValid) {
+          await recordAdminLogin({ actorId: adminUser.id, ipHash, success: false })
+          return null
+        }
+
+        await recordAdminLogin({ actorId: adminUser.id, ipHash, success: true })
+
+        return {
+          id: adminUser.id,
+          name: adminUser.name ?? 'nyx',
+          email: adminUser.email,
+          image: adminUser.image,
+        }
+      } catch (error) {
+        console.error('Admin credential check failed', error)
+        return null
       }
     },
   })
@@ -114,7 +151,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           name: token?.name ?? null,
           email: token?.email ?? '',
           image: token?.picture ?? null,
-          isAdmin: token?.email === 'admin@nyxora.local',
+          isAdmin: isAdmin(typeof token?.email === 'string' ? token.email : null),
         }
         session.user = user
       }

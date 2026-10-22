@@ -1,11 +1,8 @@
 import Link from 'next/link'
 import Image from 'next/image'
-import { Mail, ExternalLink, Cpu, Smartphone, Brain, Cloud, Gamepad2, Monitor, Code2, Globe, ArrowRight } from 'lucide-react'
+import { ExternalLink, Cpu, Smartphone, Brain, Cloud, Gamepad2, Monitor, Code2, Globe, ArrowRight } from 'lucide-react'
 import { GithubIcon } from '@/components/icons/brand'
-import { NewsletterForm } from '@/components/newsletter-form'
-import { NEWSLETTER_ENABLED } from '@/lib/newsletter-feature'
 import { trackCategories } from '@/lib/curriculum'
-import { cn } from '@/lib/utils'
 
 const categoryIcons: Record<string, React.ComponentType<{ className?: string }>> = {
   'web-development': Globe,
@@ -44,12 +41,10 @@ const socialLinks = [
 ]
 
 export function Footer() {
-  const visibleCategories = trackCategories.filter((cat) => cat.order <= 4) // Show first 4 in footer
-
   return (
     <footer data-site-footer data-print-hide className="border-t border-border/50 bg-muted/30" role="contentinfo">
       <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8 lg:py-16">
-        <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-6">
+        <div className="grid grid-cols-1 gap-8 md:grid-cols-2 lg:grid-cols-6">
           {/* Brand */}
           <div className="col-span-2 lg:col-span-2">
             <Link href="/" className="inline-block" aria-label="Nyxora Sync Home">

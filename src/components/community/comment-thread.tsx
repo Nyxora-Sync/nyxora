@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Textarea } from '@/components/ui/textarea'
 import { UserChip } from '@/components/community/user-chip'
+import { ReportButton } from '@/components/community/report-button'
 import type { CommentItem } from '@/lib/community-types'
 import { timeAgo } from '@/lib/time'
 
@@ -250,7 +251,7 @@ export function CommentThread({
 
                 <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed">{comment.body}</p>
 
-                <div className="mt-2 flex items-center gap-3">
+                <div className="mt-2 flex flex-wrap items-center gap-3">
                   {status === 'authenticated' && (
                     <button
                       type="button"
@@ -263,6 +264,9 @@ export function CommentThread({
                       <CornerDownRight className="h-3.5 w-3.5" aria-hidden="true" />
                       Reply
                     </button>
+                  )}
+                  {!own && (
+                    <ReportButton targetType="comment" targetId={comment.id} />
                   )}
                 </div>
 
@@ -309,6 +313,11 @@ export function CommentThread({
                             )}
                           </div>
                           <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed">{reply.body}</p>
+                          {!replyOwn && (
+                            <div className="mt-2">
+                              <ReportButton targetType="comment" targetId={reply.id} />
+                            </div>
+                          )}
                         </li>
                       )
                     })}

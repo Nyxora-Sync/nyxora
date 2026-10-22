@@ -193,7 +193,7 @@ ${debouncedJs}
           </div>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           {/* Editor side */}
           <div className="rounded-xl border border-border/50 overflow-hidden bg-card">
             <div className="flex items-center justify-between border-b border-border/50 px-3 py-2">
@@ -270,7 +270,7 @@ ${debouncedJs}
             StackBlitz — a free, browser-based dev environment. No installation, no account required.
           </p>
         </div>
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {LAUNCH_ENVIRONMENTS.map((env) => (
             <Card key={env.id} className="group hover:shadow-lg transition-shadow">
               <CardContent className="pt-6">
