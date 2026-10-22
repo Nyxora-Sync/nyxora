@@ -73,6 +73,8 @@ model Follow {
   @@unique([followerId, followingId])
   @@index([followingId, status, createdAt])
   @@index([followerId, status])
+  @@index([followingId, status]) // For "followers of X" queries
+  @@index([followerId, createdAt]) // For "following list" queries
 }
 
 // In-app notification for follow requests and their outcomes.
@@ -91,6 +93,8 @@ model Notification {
 
   @@index([userId, readAt, createdAt])
   @@index([actorId])
+  @@index([userId, createdAt]) // For notification list
+  @@index([userId, readAt]) // For unread count
 }
 
 // One row per unique visitor per profile per UTC day. viewerKey is a stable
@@ -109,6 +113,8 @@ model ProfileView {
   @@unique([profileUserId, viewerKey, viewDate])
   @@index([profileUserId, viewedAt])
   @@index([viewDate])
+  @@index([profileUserId, viewDate]) // For daily stats
+  @@index([viewerId, viewedAt]) // For viewer history
 }
 
 model Account {
@@ -177,6 +183,7 @@ model UserProgress {
   @@index([userId])
   @@index([completed])
   @@index([userId, completed])
+  @@index([userId, lessonKey, completed]) // For progress queries
 }
 
 // Aggregate learning state that doesn't map to a single lesson
@@ -195,6 +202,8 @@ model UserStats {
   updatedAt         DateTime  @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([updatedAt]) // For streak recalculation
 }
 
 // Gamification - Badges
@@ -251,6 +260,8 @@ model Project {
   @@index([track, createdAt])
   @@index([track, upvotes, createdAt])
   @@index([upvotes, createdAt])
+  @@index([userId, track]) // For user's projects by track
+  @@index([createdAt, upvotes]) // For leaderboard
 }
 
 // One upvote per user per project. The denormalized Project.upvotes counter is
@@ -287,6 +298,8 @@ model Comment {
   @@index([targetType, targetId, parentId, createdAt])
   @@index([parentId, createdAt])
   @@index([userId])
+  @@index([targetType, targetId, createdAt]) // For top-level comments
+  @@index([targetType, targetId, parentId]) // For reply count
 }
 
 // Content Structure (can also be file-based via MDX)
@@ -312,6 +325,7 @@ model Module {
 
   @@unique([trackId, key])
   @@index([trackId])
+  @@index([trackId, order]) // For ordered module list
 }
 
 model Lesson {
@@ -330,6 +344,8 @@ model Lesson {
 
   @@unique([moduleId, key])
   @@index([moduleId])
+  @@index([moduleId, order]) // For module lesson list
+  @@index([difficulty]) // For difficulty filter
 }
 
 model Resource {

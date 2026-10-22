@@ -1,9 +1,7 @@
 import type { Metadata } from 'next'
 import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
-import { ProjectDetailClient } from '@/components/community/project-detail-client'
-
-
+import { ProjectDetailClientWrapper } from './project-detail-client-wrapper'
 
 export const metadata: Metadata = {
   title: 'Project',
@@ -25,7 +23,7 @@ export default async function ProjectPage({
       <Header />
       <main id="main-content" tabIndex={-1} className="flex-1 py-10 sm:py-14 pb-20 sm:pb-0">
         <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
-          <ProjectDetailClient id={id} />
+          <ProjectDetailClientWrapper id={id} />
         </div>
       </main>
       <Footer />

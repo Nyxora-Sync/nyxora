@@ -1,9 +1,7 @@
 import type { Metadata } from 'next'
 import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
-import { ProfileClient } from '@/components/community/profile-client'
-
-
+import { ProfileClientWrapper } from './profile-client-wrapper'
 
 export const metadata: Metadata = {
   title: 'Learner Profile',
@@ -25,7 +23,7 @@ export default async function ProfilePage({
       <Header />
       <main id="main-content" tabIndex={-1} className="flex-1 py-10 sm:py-14 pb-20 sm:pb-0">
         <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
-          <ProfileClient id={id} />
+          <ProfileClientWrapper id={id} />
         </div>
       </main>
       <Footer />

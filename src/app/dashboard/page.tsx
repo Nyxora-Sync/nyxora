@@ -1,10 +1,10 @@
 import Link from 'next/link'
 import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
-import { DashboardClient } from '@/components/dashboard-client'
 import { Reveal } from '@/components/motion/reveal'
 import { Button } from '@/components/ui/button'
 import { pageMetadata } from '@/lib/seo'
+import { DashboardClientWrapper } from './dashboard-client-wrapper'
 
 export const metadata = pageMetadata({
   title: 'My Progress',
@@ -36,7 +36,7 @@ export default function DashboardPage() {
 
         <section className="py-12 sm:py-16">
           <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-            <DashboardClient />
+            <DashboardClientWrapper />
           </Reveal>
         </section>
       </main>
