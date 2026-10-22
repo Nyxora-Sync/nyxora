@@ -53,14 +53,22 @@ export function useNotifications({ onNotification, enabled = true }: UseNotifica
     eventSourceRef.current = es
 
     es.onopen = () => {
-      setConnected(true)
+      // Don't set connected immediately - wait for first heartbeat or message
+      // to ensure connection is stable
       reconnectAttemptsRef.current = 0
     }
 
     es.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data) as RealtimeNotification
-        if (data.type === 'connected' || data.type === 'heartbeat') {
+        if (data.type === 'connected') {
+          // Connection is confirmed stable after receiving connected event
+          setConnected(true)
+          return
+        }
+        if (data.type === 'heartbeat') {
+          // Heartbeat confirms connection is alive
+          if (!connected) setConnected(true)
           return
         }
         addNotification(data)
