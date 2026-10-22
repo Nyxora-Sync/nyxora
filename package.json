@@ -61,6 +61,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250109.0",
+    "@next/bundle-analyzer": "^16.4.2",
     "@tailwindcss/turbopack": "^4",
     "@tailwindcss/typography": "^0.5.20",
     "@types/node": "^20",

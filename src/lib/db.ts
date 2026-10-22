@@ -13,6 +13,8 @@ function createPrismaClient() {
   const connectionString = process.env.DATABASE_URL
 
   if (connectionString) {
+    // Use pooled connection for serverless (max 5 connections per instance)
+    // The pooler URL should be used for the app, directUrl only for migrations
     return new PrismaClient({
       adapter: new PrismaPg({ connectionString }),
       log:

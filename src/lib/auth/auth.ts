@@ -82,16 +82,26 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   // Use JWT sessions for all providers. The Prisma adapter is still used for
   // account linking and user management when a database is configured.
   ...(hasDatabase ? { adapter: PrismaAdapter(prisma) } : {}),
-  session: { strategy: 'jwt' as const },
+  session: { strategy: 'jwt' as const, maxAge: 60 * 60 * 24 * 30 }, // 30 days
   providers,
   cookies: {
     csrfToken: {
       name: 'authjs.csrf-token',
       options: {
         httpOnly: true,
-        sameSite: 'none',
+        sameSite: 'lax', // Changed from 'none' to 'lax' for better compatibility
         path: '/',
         secure: true,
+      },
+    },
+    sessionToken: {
+      name: '__Secure-authjs.session-token',
+      options: {
+        httpOnly: true,
+        sameSite: 'lax',
+        path: '/',
+        secure: true,
+        maxAge: 60 * 60 * 24 * 30, // 30 days
       },
     },
   },
@@ -118,8 +128,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         if (user.image != null) token.picture = user.image
       }
 
-      // Always sync token with latest user data from database
-      if (token.sub && process.env.DATABASE_URL) {
+      // Only sync with database on sign-in or when explicitly triggered
+      // NOT on every request - this was a major performance bottleneck
+      if (user) {
+        // Initial sign-in: fetch fresh user data
         try {
           const dbUser = await prisma.user.findUnique({
             where: { id: token.sub },
@@ -135,6 +147,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         }
       }
 
+      // Only sync on explicit update trigger
       if (trigger === 'update' && session && typeof session === 'object') {
         const updateData = session as { name?: string | null; image?: string | null }
         if (updateData.name != null) token.name = updateData.name

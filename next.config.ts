@@ -1,5 +1,10 @@
 import type { NextConfig } from "next";
 import createMDX from "@next/mdx";
+import bundleAnalyzer from "@next/bundle-analyzer";
+
+const withBundleAnalyzer = bundleAnalyzer({
+  enabled: process.env.ANALYZE === "true",
+});
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
@@ -33,9 +38,16 @@ const nextConfig: NextConfig = {
         ],
       },
       {
-        source: "/:path*.(jpg|jpeg|png|webp|avif)",
+        source: "/:path*.(jpg|jpeg|png|webp|avif|woff2|woff)",
         headers: [
           { key: "Cache-Control", value: "public, max-age=86400" },
+        ],
+      },
+      // Cache fonts aggressively
+      {
+        source: "/:path*.woff2",
+        headers: [
+          { key: "Cache-Control", value: "public, max-age=31536000, immutable" },
         ],
       },
     ];
@@ -46,6 +58,24 @@ const nextConfig: NextConfig = {
       { source: "/showcase", destination: "/community/showcase", permanent: true },
       { source: "/learn/modules", destination: "/learn", permanent: true },
     ];
+  },
+
+  experimental: {
+    optimizePackageImports: [
+      "lucide-react",
+      "@radix-ui/react-avatar",
+      "@radix-ui/react-dialog",
+      "@radix-ui/react-dropdown-menu",
+      "@radix-ui/react-label",
+      "@radix-ui/react-progress",
+      "@radix-ui/react-separator",
+      "@radix-ui/react-slot",
+      "@radix-ui/react-tabs",
+      "@radix-ui/react-tooltip",
+      "date-fns",
+      "motion",
+      "zod",
+    ],
   },
 };
 

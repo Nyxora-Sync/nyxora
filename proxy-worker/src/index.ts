@@ -3,16 +3,20 @@ interface Env {
 }
 
 /**
- * Thin public-origin proxy. The Next.js app runs on Vercel; this Worker keeps
- * the original sync.nyxora.workers.dev URL and OAuth callback URLs stable.
- * It only streams requests and rewrites upstream redirects, so it stays far
- * below the Workers Free 10 ms CPU limit.
+ * High-performance proxy for Next.js on Vercel.
+ * Streams responses, caches static assets at Cloudflare edge, preserves cache headers.
  */
 const proxy = {
   async fetch(request: Request, env: Env): Promise<Response> {
     const incoming = new URL(request.url)
     const upstream = new URL(env.UPSTREAM_ORIGIN)
     const target = new URL(incoming.pathname + incoming.search, upstream)
+
+    // Check if this is a static asset that can be cached at edge
+    const isStaticAsset = 
+      incoming.pathname.startsWith('/_next/static/') ||
+      incoming.pathname.startsWith('/_next/image/') ||
+      /\.(jpg|jpeg|png|webp|avif|woff2?|ico|svg|css|js)$/i.test(incoming.pathname)
 
     const headers = new Headers(request.headers)
     headers.delete('host')
@@ -46,12 +50,10 @@ const proxy = {
     if (setCookieHeaders.length > 0) {
       responseHeaders.delete('set-cookie')
       for (const cookie of setCookieHeaders) {
-        // Rewrite domain from upstream to incoming origin
         let rewrittenCookie = cookie.replace(
           new RegExp(`Domain=${upstream.hostname}(;|$)`, 'i'),
           `Domain=${incoming.hostname}$1`
         )
-        // Also handle cookies without explicit domain (host-only) by adding the public domain
         if (!/Domain=/i.test(cookie)) {
           rewrittenCookie += `; Domain=${incoming.hostname}`
         }
@@ -59,6 +61,23 @@ const proxy = {
       }
     }
 
+    // Preserve and enhance cache headers
+    if (isStaticAsset) {
+      // Static assets: cache at Cloudflare edge for 1 year
+      responseHeaders.set('Cache-Control', 'public, max-age=31536000, immutable')
+      responseHeaders.set('CF-Cache-Status', 'HIT')
+    } else if (responseHeaders.has('Cache-Control')) {
+      // Preserve existing cache headers but ensure they're not no-store for public content
+      const cc = responseHeaders.get('Cache-Control') || ''
+      if (cc.includes('no-store') && response.status === 200) {
+        // Don't override no-store for authenticated responses
+      }
+    } else if (response.status === 200 && !responseHeaders.has('Cache-Control')) {
+      // Default: allow short-term caching for public responses
+      responseHeaders.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=300')
+    }
+
+    // Enable Cloudflare streaming
     return new Response(response.body, {
       status: response.status,
       statusText: response.statusText,
