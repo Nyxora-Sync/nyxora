@@ -1,0 +1,291 @@
+You've landed clients, delivered projects, and started retainers. Now: **systematize everything** so the business runs without you in every detail. This lesson covers SOPs, automation, and the solo-to-agency decision.
+
+## Why SOPs Beat Heroics
+
+| Without SOPs | With SOPs |
+|--------------|-----------|
+| You remember "how I did it last time" | Checklist ensures consistency |
+| New contractor takes 2 weeks to ramp | New contractor productive in 2 days |
+| Quality varies by mood/deadline | Quality floor guaranteed |
+| You can't take real vacation | Business runs while you're away |
+| Scaling = hiring clones | Scaling = delegating processes |
+
+**Rule**: If you've done it twice, document it. If you'll do it again, automate it.
+
+---
+
+## Core SOPs Every Freelancer Needs
+
+### 1. Client Onboarding SOP
+```markdown
+# SOP: Client Onboarding
+
+**Trigger**: Signed contract + 50% deposit received
+
+**Owner**: You (or VA)
+
+**Steps**:
+1. [ ] Create project folder: `/clients/[ClientName]/[ProjectName]`
+2. [ ] Initialize GitHub repo (private) → add client as collaborator
+3. [ ] Set up Vercel/Render/Neon projects → transfer to client team
+4. [ ] Configure Stripe Connect / SendGrid / Sentry / UptimeRobot
+5. [ ] Create `.env.production` in 1Password / Bitwarden vault
+6. [ ] Send Welcome Email (template below)
+7. [ ] Schedule Kickoff Call (Calendly link)
+8. [ ] Add to Notion "Active Projects" board
+
+**Welcome Email Template**:
+> Subject: Welcome to [Project Name] — Next Steps
+>
+> Hi [Name],
+>
+> Contract signed, deposit received — we're live! 🎉
+>
+> **Your Action Items:**
+> 1. Complete this brief: [Typeform/Notion link] — 10 min
+> 2. Grant access: [GitHub/Figma/Analytics] — see brief
+> 3. Book kickoff: [Calendly link] — 30 min this week
+>
+> **What Happens Next:**
+> - Kickoff call → finalize scope & timeline
+> - Weekly Loom updates every Friday
+> - Staging demo at Milestone 2 (40% payment)
+>
+> Questions? Reply to this email.
+>
+> [Your Name]
+```
+
+---
+
+### 2. Project Kickoff SOP
+```markdown
+# SOP: Project Kickoff Call (30 min)
+
+**Agenda**:
+1. Confirm scope (Exhibit A) — 5 min
+2. Review client responsibilities & deadlines — 5 min
+3. Walk through communication protocol — 5 min
+   - Weekly Loom (Friday 5 PM UTC)
+   - Slack/Email for urgent (2-hr response)
+   - No surprise scope changes — Change Order required
+4. Confirm tech stack & integrations — 5 min
+5. Set Milestone 2 target date — 5 min
+6. Q&A — 5 min
+
+**Output**: Signed Kickoff Notes (Notion page) + updated timeline
+```
+
+---
+
+### 3. Weekly Delivery SOP
+```markdown
+# SOP: Weekly Delivery (Friday)
+
+**Trigger**: Friday 4 PM UTC
+
+**Steps**:
+1. [ ] Push all commits to `main` → CI must pass
+2. [ ] Deploy to staging → verify full flow (5 min)
+3. [ ] Record Loom (3 min max):
+   - What's done this week
+   - What's blocked / needs client input
+   - Next week's focus
+4. [ ] Send Weekly Update Email:
+   > Subject: [Project] — Week [N] Update
+   >
+   > **Done:** [3 bullets]
+   > **Blocked:** [Client action needed?]
+   > **Next Week:** [3 bullets]
+   > **Staging:** [URL]
+   > **Loom:** [Link]
+5. [ ] Update Notion project board (move cards)
+
+**Time Budget**: 30 min total
+```
+
+---
+
+### 4. Staging Demo & Milestone Payment SOP
+```markdown
+# SOP: Staging Demo & Milestone Collection
+
+**Trigger**: Feature-complete for milestone
+
+**Steps**:
+1. [ ] Full regression test on staging (checklist)
+2. [ ] Record demo Loom (5 min) — walk through acceptance criteria
+3. [ ] Send Demo Email:
+   > Subject: [Project] — Milestone [N] Ready for Review
+   >
+   > Staging: [URL] | Demo: [Loom] | Acceptance Criteria: [Link]
+   >
+   > Please review by [Date + 3 business days]. Silence = approval.
+   > Invoice for Milestone [N] attached (40% / 10%).
+4. [ ] If feedback: address → redeploy → re-send (max 2 rounds)
+5. [ ] On approval: Confirm payment received → proceed to next phase
+```
+
+---
+
+### 5. Production Deploy & Handoff SOP
+```markdown
+# SOP: Production Deploy & Handoff
+
+**Trigger**: Milestone 3 approved + final payment received
+
+**Steps**:
+1. [ ] Deploy to production (Vercel/Render) → verify
+2. [ ] Configure custom domain (DNS) → SSL active
+3. [ ] Rotate all secrets → client owns all credentials
+4. [ ] Transfer GitHub repo ownership to client
+5. [ ] Transfer Vercel/Render/Neon team ownership
+6. [ ] Deliver Handoff Document (PDF + Notion)
+7. [ ] Send Handoff Email:
+   > Subject: [Project] — Live & Handed Off 🎉
+   >
+   > Production: [URL] | Handoff Doc: [Link] | Repo: [Link]
+   >
+   > **30-Day Warranty Starts Now** — bugs in scope fixed free.
+   > **Retainer Options:** [Link to one-pager]
+   >
+   > It's been a pleasure. Let me know if you need anything.
+8. [ ] Archive project in Notion → "Completed"
+9. [ ] Send 60-day check-in reminder (calendar)
+```
+
+---
+
+### 6. Retainer Monthly SOP
+```markdown
+# SOP: Monthly Retainer Cycle
+
+**Trigger**: 1st of month
+
+**Steps**:
+1. [ ] Run `npm audit` → fix critical/high → deploy
+2. [ ] Run dependency updates → test → deploy
+3. [ ] Verify backups (Neon/Atlas/Supabase)
+4. [ ] Check UptimeRobot / Sentry — zero unresolved critical
+5. [ ] Run Lighthouse on key pages — log scores
+6. [ ] Send Monthly Report (template):
+   > Subject: [Client] — Monthly Report [Month]
+   >
+   > **Health:** ✅ Uptime 99.9% | ✅ Zero critical errors | ✅ Lighthouse 94
+   > **Updates:** [Dependency updates applied]
+   > **Hours Used:** [X]/[Included] hrs
+   > **Backlog:** [Top 3 priorities for next month]
+   > **Recommendation:** [One strategic suggestion]
+7. [ ] Log hours in Notion tracker
+```
+
+---
+
+## Automation Stack (Zero-Code to Low-Code)
+
+| Process | Tool | Setup Time |
+|---------|------|------------|
+| **Scheduling** | Calendly (free) | 15 min |
+| **Contracts/Invoices** | Bonsai / Hello Bonsai ($19/mo) | 1 hr |
+| **Time Tracking** | Toggl Track (free) | 10 min |
+| **Project Board** | Notion (free) | 30 min |
+| **Weekly Loom** | Loom (free) | 5 min |
+| **Backups** | Neon/Atlas auto + monthly manual verify | 0 min |
+| **Monitoring** | UptimeRobot (free) + Sentry (free) | 15 min |
+| **Invoice Reminders** | Wise/Stripe auto-reminders | 5 min |
+| **Tax Estimates** | Spreadsheet + quarterly review | 30 min/qtr |
+
+**Total setup**: ~3 hours. **Ongoing**: ~2 hrs/month.
+
+---
+
+## The Solo-to-Agency Decision Framework
+
+### Stay Solo If:
+- ✅ You enjoy coding > managing
+- ✅ Revenue < $10k/mo consistently
+- ✅ You value flexibility/location independence
+- ✅ Niche is narrow (you're the expert)
+
+### Consider Agency If:
+- ✅ Turning away 3+ qualified leads/month
+- ✅ Retainer MRR > $5k + project pipeline full
+- ✅ You have documented SOPs for 80% of delivery
+- ✅ You've mentored 1+ junior devs successfully
+- ✅ You're willing to spend 50%+ time on sales/mgmt
+
+### The Hybrid Path (Recommended First)
+```
+You (Strategy + High-Value Code)
+    │
+    ├── Contractor A: UI Implementation (Figma → React)
+    ├── Contractor B: Backend/API (Prisma, Postgres, Auth)
+    └── VA: Admin (Invoicing, Scheduling, Reporting)
+```
+- Start with **one** trusted contractor on a per-project basis
+- Pay 50% of project fee → you keep margin + oversight
+- Only hire full-time when contractor > 80% utilized for 3+ months
+
+---
+
+## Contractor Onboarding SOP (When Ready)
+
+```markdown
+# SOP: Contractor Onboarding
+
+**Before They Start**:
+1. [ ] Signed Contractor Agreement (IP, confidentiality, rate, terms)
+2. [ ] Added to GitHub org (read-only → write per repo)
+3. [ ] Added to Notion workspace (project board access)
+4. [ ] Added to Slack/Discord (project channel)
+5. [ ] Shared 1Password vault (project secrets only)
+
+**First Week**:
+1. [ ] Pair program 2 hrs: walk through codebase, CI, deploy
+2. [ ] Assign "Good First Issue" (labeled, scoped, tested)
+3. [ ] Daily 15-min sync (async Loom OK)
+4. [ ] Code review every PR (you approve first 5)
+
+**Ongoing**:
+- Weekly: Async status (Notion) + 1 sync if needed
+- Monthly: Rate review / capacity planning
+```
+
+---
+
+## Financial Discipline (Solo or Agency)
+
+| Habit | Frequency | Tool |
+|-------|-----------|------|
+| **Revenue tracking** | Weekly | Notion / Spreadsheet |
+| **Expense logging** | Per transaction | Wise/Stripe export → Notion |
+| **Tax savings transfer** | Monthly (25–30% of revenue) | Separate bank account |
+| **Runway calculation** | Monthly | (Cash + Receivables) / Monthly Burn |
+| **Quarterly review** | Quarterly | P&L, utilization, pipeline, rates |
+
+**Target**: 6 months runway always. If < 3 months → pause hiring, increase outreach.
+
+---
+
+## Exercise: Document Your Top 3 SOPs This Week
+
+1. Pick your 3 most repeated processes (onboarding, weekly delivery, deploy)
+2. Write each as a checklist in Notion (use templates above)
+3. Test: Follow the SOP exactly on next project — note friction
+4. Refine → lock in as v1.0
+5. Share with accountability partner for review
+
+**Time**: 2–3 hours. Compounds forever.
+
+## Key Takeaways
+- **SOPs = freedom** — they're not bureaucracy, they're leverage
+- **Automate the boring** — Calendly, Bonsai, monitoring, backups
+- **Solo first, agency later** — hybrid contractor model reduces risk
+- **Document before you delegate** — you can't outsource chaos
+- **Financial discipline = optionality** — runway lets you say no to bad clients
+
+## Resources
+- [The E-Myth Revisited](https://www.goodreads.com/book/show/41582.The_E_Myth_Revisited) — Michael Gerber (SOPs bible)
+- [Atomic Habits](https://jamesclear.com/atomic-habits) — James Clear (systems > goals)
+- [Bonsai for Freelancers](https://www.hellobonsai.com/) — All-in-one business tool
+- [Notion for Agency Ops](https://www.notion.so/templates) — Free templates

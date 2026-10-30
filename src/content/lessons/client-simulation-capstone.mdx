@@ -1,0 +1,285 @@
+This is your Week 6 capstone: a **simulated client project** executed end-to-end under realistic constraints. You'll build, test, stage, demo, and hand off a complete feature — exactly as you would for a paying client.
+
+**No hand-holding. No starter code. Just a brief, acceptance criteria, and a deadline.**
+
+---
+
+## The Brief: "Vendor Dashboard for Marketplace Platform"
+
+> **Client:** "We're launching a 2-sided marketplace connecting local artisans with buyers. We need a vendor dashboard where artisans can:
+> - Register and onboard (business details, bank info for payouts)
+> - Manage products (CRUD + images + inventory)
+> - View orders assigned to them (status updates, shipping)
+> - See earnings analytics (daily/weekly/monthly, pending vs. paid)
+> - Receive notifications (new order, payout sent, low stock)
+>
+> **Constraints:**
+> - Stack: Next.js 14 (App Router), TypeScript, PostgreSQL, Prisma, Tailwind
+> - Auth: NextAuth.js (Credentials + Google OAuth)
+> - Payments: Stripe Connect Express (vendor onboarding + payouts)
+> - Real-time: Socket.io for notifications
+> - Deploy: Vercel (frontend) + Render (API) + Neon (PostgreSQL)
+> - Timeline: 5 business days from kickoff
+> - Budget: Professional tier ($3,000 equivalent)
+>
+> **Acceptance Criteria (Non-Negotiable):**
+> 1. Vendor can complete onboarding → Stripe Connect account active
+> 2. Vendor can create/edit/delete products with images (S3/R2 upload)
+> 3. Vendor sees only THEIR orders, can update status (pending → shipped → delivered)
+> 4. Earnings dashboard shows correct numbers (tested with seed data)
+> 5. Real-time notifications appear without refresh
+> 6. 80%+ test coverage (Vitest + Playwright)
+> 7. Staging deploy accessible via URL for client review
+> 8. Handoff document delivered (access, deploy, maintenance)
+> 9. Zero critical/severe vulnerabilities (`npm audit`)
+> 10. Lighthouse 90+ on all pages"
+
+---
+
+## Your Deliverables (Due in 5 Days)
+
+| Day | Milestone | Deliverable |
+|-----|-----------|-------------|
+| **Day 1** | Kickoff & Setup | Repo initialized, CI/CD running, DB schema pushed, auth working |
+| **Day 2** | Core Features | Vendor onboarding + Stripe Connect, Product CRUD, Order management |
+| **Day 3** | Analytics & Real-time | Earnings charts, Socket.io notifications, Role-based access |
+| **Day 4** | Polish & Test | Test suite, staging deploy, Lighthouse audit, security review |
+| **Day 5** | Demo & Handoff | Client demo (Loom), Handoff doc, Production deploy prep |
+
+---
+
+## Technical Specifications
+
+### Database Schema (Prisma)
+```prisma
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  passwordHash  String?
+  name          String?
+  role          Role      @default(VENDOR)
+  image         String?
+  stripeAccountId String?  // Stripe Connect account ID
+  onboardingComplete Boolean @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  products      Product[]
+  orders        Order[]   @relation("VendorOrders")
+  notifications Notification[]
+}
+
+model Product {
+  id          String   @id @default(cuid())
+  vendorId    String
+  vendor      User     @relation(fields: [vendorId], references: [id])
+  name        String
+  description String?
+  price       Int      // cents
+  inventory   Int      @default(0)
+  images      String[] // S3/R2 URLs
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  orderItems  OrderItem[]
+}
+
+model Order {
+  id          String     @id @default(cuid())
+  buyerEmail  String
+  vendorId    String
+  vendor      User       @relation("VendorOrders", fields: [vendorId], references: [id])
+  status      OrderStatus @default(PENDING)
+  total       Int        // cents
+  stripePaymentIntentId String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  items       OrderItem[]
+}
+
+model OrderItem {
+  id        String  @id @default(cuid())
+  orderId   String
+  order     Order   @relation(fields: [orderId], references: [id])
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+  quantity  Int
+  price     Int     // cents at time of order
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id])
+  type      NotificationType
+  title     String
+  message   String
+  read      Boolean          @default(false)
+  data      Json?
+  createdAt DateTime         @default(now())
+}
+
+enum Role { VENDOR ADMIN }
+enum OrderStatus { PENDING CONFIRMED SHIPPED DELIVERED CANCELLED REFUNDED }
+enum NotificationType { NEW_ORDER PAYOUT_SENT LOW_STOCK SYSTEM }
+```
+
+### API Routes (Next.js App Router)
+```
+POST   /api/auth/register          // Vendor registration
+POST   /api/auth/login             // Credentials login
+GET    /api/auth/google            // Google OAuth
+POST   /api/auth/logout
+
+GET    /api/vendor/onboarding      // Check Stripe Connect status
+POST   /api/vendor/onboarding      // Create Stripe Connect Express account
+GET    /api/vendor/onboarding/callback // Stripe return
+
+GET    /api/products               // List vendor's products (paginated)
+POST   /api/products               // Create product + image upload
+PATCH  /api/products/[id]          // Update product
+DELETE /api/products/[id]          // Delete product
+POST   /api/products/[id]/images   // Upload product images (presigned URL)
+
+GET    /api/orders                 // List vendor's orders (filterable)
+PATCH  /api/orders/[id]            // Update order status (vendor)
+GET    /api/orders/[id]            // Order detail
+
+GET    /api/analytics/earnings     // Daily/weekly/monthly aggregates
+GET    /api/analytics/overview     // Summary cards (revenue, orders, products)
+
+GET    /api/notifications          // List (paginated, filter unread)
+PATCH  /api/notifications/[id]/read // Mark read
+```
+
+### Frontend Pages
+```
+/vendor/onboarding          // Stripe Connect flow
+/vendor/dashboard           // Overview + earnings summary
+/vendor/products            // Product list + create/edit modal
+/vendor/products/[id]/edit  // Edit product
+/vendor/orders              // Order list + status update
+/vendor/orders/[id]         // Order detail
+/vendor/analytics           // Charts (Recharts) + date range picker
+/vendor/notifications       // Notification center (real-time badge)
+```
+
+### Real-time (Socket.io)
+- **Server**: Custom Node server on Render (or Pusher/Ably if simpler)
+- **Events**: `notification:new`, `order:status_changed`, `payout:sent`
+- **Auth**: JWT in handshake query → validate → join `user:{id}` room
+- **Client**: `useSocket` hook in `_app.tsx` or layout
+
+---
+
+## Quality Gates (Must Pass)
+
+### Automated (CI/CD - GitHub Actions)
+```yaml
+# .github/workflows/ci.yml
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_PASSWORD: test }
+        ports: [5432:5432]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4 { node-version: 20 }
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npx prisma migrate deploy
+      - run: npm run test:run -- --coverage
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm audit --audit-level=high
+```
+
+### Manual (Before Staging Deploy)
+- [ ] `npm run test:run` — all pass, coverage ≥ 80%
+- [ ] `npm run lint` — zero errors
+- [ ] `npm run typecheck` — zero errors
+- [ ] `npm audit` — zero critical/high
+- [ ] Lighthouse CI (or manual) — all pages ≥ 90
+- [ ] Staging URL loads, auth works, full flow works
+- [ ] Seed script runs: `npm run seed` → 3 vendors, 20 products, 50 orders
+
+---
+
+## Client Demo Script (Record Loom, 3 Minutes Max)
+
+```
+0:00–0:15  "This is the vendor dashboard for [Marketplace]. I'm logged in as artisan@example.com."
+0:15–0:45  Onboarding: Show Stripe Connect flow → "Account active, ready for payouts."
+0:45–1:30  Products: Create product → upload image → edit inventory → "Saved, visible in list."
+1:30–2:00  Orders: Filter by status → update to SHIPPED → "Real-time notification fires."
+2:00–2:30  Analytics: Date range picker → charts update → "Pending vs. paid separated."
+2:30–2:45  Notifications: Bell icon → unread count → mark all read.
+2:45–3:00  "Staging URL: [link]. Handoff doc attached. Ready for your review."
+```
+
+---
+
+## Handoff Document Checklist
+Use the template from **Week 5 (Contracts & Invoicing)** — fill in:
+- [ ] All access credentials (rotated for client)
+- [ ] Local dev setup (copy-paste ready)
+- [ ] Deploy commands (Vercel, Render, Neon)
+- [ ] Monitoring links (UptimeRobot, Sentry)
+- [ ] Monthly maintenance checklist
+- [ ] Known limitations / recommended next steps
+
+---
+
+## Grading Rubric (Self-Assessment)
+
+| Criterion | Pass = 1 pt | Partial = 0.5 | Fail = 0 |
+|-----------|-------------|---------------|----------|
+| All 10 acceptance criteria met | ✅ | ⚠️ 1–2 missing | ❌ 3+ missing |
+| CI/CD green on main branch | ✅ | ⚠️ warnings only | ❌ failing |
+| Test coverage ≥ 80% | ✅ | 60–79% | < 60% |
+| Staging deploy accessible & working | ✅ | minor bugs | broken |
+| Loom demo ≤ 3 min, clear audio | ✅ | 3–5 min / muffled | > 5 min / no audio |
+| Handoff doc complete & accurate | ✅ | missing 1–2 sections | incomplete |
+| `npm audit` clean | ✅ | moderate only | critical/high |
+| Lighthouse ≥ 90 all pages | ✅ | 80–89 | < 80 |
+| **Total** | **≥ 7/8 = PASS** | **5–6 = REVISE** | **< 5 = REPEAT** |
+
+---
+
+## If You Get Stuck (Escalation Protocol)
+
+1. **15 min rule**: Stuck > 15 min → write down the blocker, try 3 approaches, then...
+2. **Check curriculum**: Revisit relevant modules (Auth, Stripe, Socket.io, Prisma, Testing)
+3. **Search**: GitHub Issues, Stack Overflow, Prisma/Next.js/Stripe docs
+4. **Ask**: Post in Nyxora community `#first-client` with: error, what you tried, repo link
+5. **Timebox**: Max 2 hours on any single blocker — move to next task, return later
+
+---
+
+## Submission
+When all criteria pass:
+1. Push to `main` → CI green
+2. Deploy staging → verify
+3. Record Loom demo
+4. Fill handoff doc
+5. Submit: **Staging URL + Loom Link + Handoff Doc (PDF)** in the track completion form
+
+**This simulation is your proof.** Treat it like a real client — because the next one will be.
+
+## Key Takeaways
+- **Real constraints build real skills** — no starter code, no hints
+- **Staging demo = client review gate** — never skip it
+- **Handoff doc = professional signature** — clients remember smooth offboarding
+- **Test coverage = your safety net** — ship confidently
+- **Timebox everything** — freelancers who miss deadlines don't get referrals
+
+## Resources
+- [Next.js 14 App Router Docs](https://nextjs.org/docs/app) — Official
+- [Stripe Connect Express Guide](https://stripe.com/docs/connect/express-accounts) — Official
+- [Prisma Relations Guide](https://www.prisma.io/docs/orm/prisma-schema/data-model/relations) — Official
+- [Socket.io with Next.js](https://socket.io/docs/v4/server-initialization/#with-nextjs) — Official
+- [Recharts](https://recharts.org/) — React charting library
+- [Playwright Testing](https://playwright.dev/docs/intro) — E2E testing

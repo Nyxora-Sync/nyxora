@@ -15,7 +15,7 @@ export default function TermsPage() {
       badge="Legal"
       title="Terms of Service"
       intro="These are the rules for using Nyxora Sync. They are written to be read, not to hide behind."
-      updated="October 20, 2026"
+      updated="October 23, 2026"
     >
       <h2>Using the site</h2>
       <p>
@@ -81,6 +81,22 @@ export default function TermsPage() {
         logo to imply endorsement of a product or service.
       </p>
 
+      <h2>Completion certificates</h2>
+      <p>
+        Nyxora Sync may issue an informal certificate when every lesson in a curriculum track is
+        marked complete. It is a record of progress on this site only. Nyxora Sync is not a
+        recognized school, university, college, or accrediting body, and the certificate is not a
+        certification, diploma, degree, license, or accredited credential. It is intended for
+        personal showcase only, and it may hold no value in real life.
+      </p>
+      <p>
+        We may correct or withdraw a certificate if the underlying progress is inaccurate, if the
+        track or feature changes, or if the certificate is misused. A certificate&apos;s verification
+        page shows the recipient name, track name, and issue date to anyone with the link. Do not
+        share a verification link if you do not want that information to be public. Certificates are
+        not listed on your public profile, and search engines are asked not to index them.
+      </p>
+
       <h2>Third-party resources</h2>
       <p>
         Lessons link to documentation, videos, articles, and tools maintained by other people. We
@@ -103,8 +119,9 @@ export default function TermsPage() {
       <h2>Educational disclaimer</h2>
       <p>
         The content is for learning. It is not professional advice, a guarantee of employment, or a
-        certification. Code samples are provided as examples; you are responsible for reviewing and
-        testing anything you run or deploy.
+        certification. Completion certificates are informal, non-accredited records as described
+        above. Code samples are provided as examples; you are responsible for reviewing and testing
+        anything you run or deploy.
       </p>
 
       <h2>No warranty</h2>

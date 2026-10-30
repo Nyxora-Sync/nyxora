@@ -1,0 +1,1521 @@
+
+===== FILE: e2e/smoke.spec.ts =====
+import { expect, test } from '@playwright/test'
+
+test('homepage renders the primary navigation', async ({ page }) => {
+  await page.goto('/')
+  await expect(page).toHaveTitle(/Nyxora Sync/i)
+  await expect(page.getByRole('navigation', { name: 'Main navigation' })).toBeVisible()
+  const menuToggle = page.getByRole('button', { name: 'Toggle menu' })
+  if (await menuToggle.isVisible()) await menuToggle.click()
+  await expect(page.getByRole('link', { name: 'Learn', exact: true }).last()).toBeVisible()
+})
+
+test('badge collection lists the catalog', async ({ page }) => {
+  await page.goto('/badges')
+  await expect(page.getByRole('heading', { name: /All Badges/i })).toBeVisible()
+  await expect(page.getByText(/Browse all 79 badges/i)).toBeVisible()
+})
+
+test('sign-in page is reachable', async ({ page }) => {
+  await page.goto('/auth/signin')
+  await expect(page.getByRole('heading', { name: /welcome back/i })).toBeVisible()
+})
+
+test('health endpoint reports readiness', async ({ request }) => {
+  const response = await request.get('/api/health')
+  expect([200, 503]).toContain(response.status())
+  const payload = await response.json()
+  expect(payload.checks.database).toMatch(/^(ok|error)$/)
+  if (response.status() === 200) expect(payload.status).toBe('ok')
+})
+
+test('certificates require sign-in', async ({ page }) => {
+  await page.goto('/certificates')
+  await expect(page).toHaveURL(/\/auth\/signin/)
+})
+
+test('key pages do not overflow horizontally at 320px', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 844 })
+
+  for (const path of [
+    '/',
+    '/learn',
+    '/badges',
+    '/community/showcase',
+    '/roadmap',
+    '/learn/beginner',
+    '/resources',
+    '/categories',
+  ]) {
+    await page.goto(path)
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - window.innerWidth
+    )
+    expect(overflow, `${path} should not scroll horizontally`).toBeLessThanOrEqual(1)
+  }
+})
+
+
+test('PWA manifest and offline fallback are available', async ({ page, context, request }) => {
+  const manifestResponse = await request.get('/site.webmanifest')
+  expect(manifestResponse.status()).toBe(200)
+  const manifest = await manifestResponse.json()
+  expect(manifest.name).toBe('Nyxora Sync')
+  expect(manifest.start_url).toBe('/learn')
+
+  await page.goto('/learn')
+  await page.waitForFunction(
+    () => Boolean(navigator.serviceWorker?.controller),
+    undefined,
+    { timeout: 20_000 }
+  )
+
+  await context.setOffline(true)
+  try {
+    await page.goto('/qa-offline-fallback')
+    await expect(page.getByRole('heading', { name: /offline/i })).toBeVisible()
+  } finally {
+    await context.setOffline(false)
+  }
+})
+
+
+===== FILE: prisma/schema.prisma =====
+// Prisma Schema for MERN Learn Platform
+// Run: npx prisma migrate dev --name init
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  emailVerified DateTime?
+  name          String?
+  image         String?
+  passwordHash  String?
+  // Public community profile. All optional; the UI falls back gracefully.
+  bio           String?   @db.Text
+  website       String?
+  githubUrl     String?
+  twitterUrl    String?
+  // Username for profile URLs (optional, unique when set)
+  username      String?   @unique
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts       Account[]
+  sessions       Session[]
+  progress       UserProgress[]
+  stats          UserStats?
+  badges         UserBadge[]
+  projects       Project[]
+  preferences    UserPreferences?
+  comments       Comment[]
+  projectUpvotes ProjectUpvote[]
+  avatar         UserAvatar?
+
+  followers          Follow[]       @relation("FollowTarget")
+  following          Follow[]       @relation("FollowSource")
+  notifications      Notification[] @relation("NotificationRecipient")
+  actorNotifications Notification[] @relation("NotificationActor")
+  profileViews       ProfileView[]  @relation("ProfileViewTarget")
+  viewedProfiles     ProfileView[]  @relation("ProfileViewViewer")
+  reportsMade        Report[]       @relation("ReportReporter")
+  reportsReviewed    Report[]       @relation("ReportReviewer")
+  adminActions       AdminAuditLog[]
+  certificates       Certificate[]
+}
+
+// Uploaded profile photo. Kept out of User so session/adapter queries never
+// load the image bytes; User.image points at /api/community/avatar/<id>.
+model UserAvatar {
+  userId    String   @id
+  mime      String
+  data      String   @db.Text
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// Follow requests are pending until the target accepts or rejects them.
+model Follow {
+  id          String   @id @default(cuid())
+  followerId  String
+  followingId String
+  status      String   @default("pending") // pending, accepted, rejected
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  follower  User @relation("FollowSource", fields: [followerId], references: [id], onDelete: Cascade)
+  following User @relation("FollowTarget", fields: [followingId], references: [id], onDelete: Cascade)
+
+  @@unique([followerId, followingId])
+  @@index([followingId, status, createdAt])
+  @@index([followerId, status])
+  @@index([followingId, status]) // For "followers of X" queries
+  @@index([followerId, createdAt]) // For "following list" queries
+}
+
+// In-app notification for follow requests and their outcomes.
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  actorId   String?
+  type      String // follow_request, follow_accepted, follow_rejected
+  message   String?   @db.Text
+  href      String?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user  User  @relation("NotificationRecipient", fields: [userId], references: [id], onDelete: Cascade)
+  actor User? @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([userId, readAt, createdAt])
+  @@index([actorId])
+  @@index([userId, createdAt]) // For notification list
+  @@index([userId, readAt]) // For unread count
+}
+
+// One row per unique visitor per profile per UTC day. viewerKey is a stable
+// hash for anonymous visitors, so no raw IP address is stored.
+model ProfileView {
+  id            String   @id @default(cuid())
+  profileUserId String
+  viewerId      String?
+  viewerKey     String
+  viewDate      DateTime @db.Date
+  viewedAt      DateTime @default(now())
+
+  profile User  @relation("ProfileViewTarget", fields: [profileUserId], references: [id], onDelete: Cascade)
+  viewer  User? @relation("ProfileViewViewer", fields: [viewerId], references: [id], onDelete: SetNull)
+
+  @@unique([profileUserId, viewerKey, viewDate])
+  @@index([profileUserId, viewedAt])
+  @@index([viewDate])
+  @@index([profileUserId, viewDate]) // For daily stats
+  @@index([viewerId, viewedAt]) // For viewer history
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model UserPreferences {
+  id                   String   @id @default(cuid())
+  userId               String   @unique
+  theme                String   @default("system") // light, dark, system
+  track                String   @default("beginner") // beginner, developer
+  emailUpdates         Boolean  @default(false)
+  showProgress         Boolean  @default(true)
+  anonymizeLeaderboard Boolean  @default(true)
+  // Badge keys chosen by the user for the public profile showcase (max 3).
+  featuredBadges       String[] @default([])
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// Learning Progress Tracking
+model UserProgress {
+  id          String    @id @default(cuid())
+  userId      String
+  // Curriculum lesson id (e.g. "foundations-html-basics"). Curriculum content
+  // lives in the app, so this is a stable string key rather than a foreign key.
+  lessonKey   String
+  completed   Boolean   @default(false)
+  notes       String?   @db.Text
+  xpEarned    Int       @default(0)
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, lessonKey])
+  @@index([userId])
+  @@index([completed])
+  @@index([userId, completed])
+  @@index([userId, lessonKey, completed]) // For progress queries
+}
+
+// Aggregate learning state that doesn't map to a single lesson
+model UserStats {
+  id                String    @id @default(cuid())
+  userId            String    @unique
+  xp                Int       @default(0)
+  streakCurrent     Int       @default(0)
+  streakLongest     Int       @default(0)
+  streakLastActive  DateTime?
+  bookmarks         String[]  @default([])
+  lastVisitedTrack  String?
+  lastVisitedModule String?
+  lastVisitedLesson String?
+  lastVisitedAt     DateTime?
+  updatedAt         DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([updatedAt]) // For streak recalculation
+}
+
+// Gamification - Badges
+model Badge {
+  id          String      @id @default(cuid())
+  key         String      @unique // e.g., "first-api", "react-hooks-master"
+  name        String
+  description String
+  icon        String // lucide icon name
+  category    String // milestone, skill, streak, special
+  xpReward    Int         @default(0)
+  criteria    Json // { type: "lesson_complete", count: 5, track: "developer" }
+  createdAt   DateTime    @default(now())
+  userBadges  UserBadge[]
+}
+
+model UserBadge {
+  id         String    @id @default(cuid())
+  userId     String
+  badgeId    String
+  earnedAt   DateTime  @default(now())
+  // Set once the unlock toast has been shown on any device.
+  notifiedAt DateTime?
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  badge Badge @relation(fields: [badgeId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, badgeId])
+  @@index([userId])
+  @@index([userId, notifiedAt])
+}
+
+// User-submitted moderation reports for projects, comments, and profiles.
+model Report {
+  id             String    @id @default(cuid())
+  reporterId     String
+  targetType     String // project | comment | profile
+  targetId       String
+  reason         String // spam | harassment | inappropriate | copyright | other
+  details        String?   @db.Text
+  status         String    @default("open") // open | resolved | dismissed
+  resolutionNote String?   @db.Text
+  reviewedById   String?
+  reviewedAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  reporter   User  @relation("ReportReporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  reviewedBy User? @relation("ReportReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@unique([reporterId, targetType, targetId])
+  @@index([status, createdAt])
+  @@index([targetType, targetId])
+  @@index([reviewedById])
+}
+
+// Append-only audit trail for moderation and administrative actions.
+model AdminAuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  action     String // moderation.delete_project, admin.login_failed, ...
+  targetType String?
+  targetId   String?
+  metadata   Json?
+  ipHash     String?
+  createdAt  DateTime @default(now())
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([actorId, createdAt])
+  @@index([action, createdAt])
+  @@index([targetType, targetId])
+  @@index([ipHash, action, createdAt])
+}
+
+// Community - Project Showcase
+model Project {
+  id          String   @id @default(cuid())
+  userId      String
+  title       String
+  description String   @db.Text
+  githubUrl   String?
+  demoUrl     String?
+  imageUrl    String?
+  track       String // beginner, developer
+  modules     String[] // which modules this project covers
+  tags        String[]
+  upvotes     Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user       User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  upvoteRows ProjectUpvote[]
+
+  @@index([userId])
+  @@index([track])
+  @@index([createdAt])
+  @@index([upvotes])
+  @@index([userId, createdAt])
+  @@index([track, createdAt])
+  @@index([track, upvotes, createdAt])
+  @@index([upvotes, createdAt])
+  @@index([userId, track]) // For user's projects by track
+  @@index([createdAt, upvotes]) // For leaderboard
+}
+
+// One upvote per user per project. The denormalized Project.upvotes counter is
+// updated in the same transaction so the showcase can sort without aggregating.
+model ProjectUpvote {
+  id        String   @id @default(cuid())
+  projectId String
+  userId    String
+  createdAt DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, userId])
+  @@index([userId])
+}
+
+// Discussions attached to a lesson or a showcase project. Replies are one level
+// deep (parentId points at a top-level comment); deleting a parent removes them.
+model Comment {
+  id         String   @id @default(cuid())
+  userId     String
+  targetType String // "lesson" | "project"
+  targetId   String // lesson id or project id
+  parentId   String?
+  body       String   @db.Text
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user    User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent  Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies Comment[] @relation("CommentReplies")
+
+  @@index([targetType, targetId, parentId, createdAt])
+  @@index([parentId, createdAt])
+  @@index([userId])
+  @@index([targetType, targetId, createdAt]) // For top-level comments
+  @@index([targetType, targetId, parentId]) // For reply count
+}
+
+// Content Structure (can also be file-based via MDX)
+model Track {
+  id          String   @id @default(cuid())
+  key         String   @unique // beginner, developer
+  name        String
+  description String   @db.Text
+  order       Int      @default(0)
+  modules     Module[]
+}
+
+model Module {
+  id             String   @id @default(cuid())
+  trackId        String
+  key            String // e.g., "node-express", "mongodb", "react"
+  name           String
+  description    String   @db.Text
+  order          Int      @default(0)
+  estimatedHours Int      @default(0)
+  track          Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  lessons        Lesson[]
+
+  @@unique([trackId, key])
+  @@index([trackId])
+  @@index([trackId, order]) // For ordered module list
+}
+
+model Lesson {
+  id               String     @id @default(cuid())
+  moduleId         String
+  key              String // e.g., "express-routing", "mongoose-schemas"
+  title            String
+  description      String     @db.Text
+  content          String?    @db.Text // MDX content or reference to file
+  order            Int        @default(0)
+  estimatedMinutes Int        @default(0)
+  difficulty       String     @default("beginner") // beginner, intermediate, advanced
+  xpReward         Int        @default(10)
+  module           Module     @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  resources        Resource[]
+
+  @@unique([moduleId, key])
+  @@index([moduleId])
+  @@index([moduleId, order]) // For module lesson list
+  @@index([difficulty]) // For difficulty filter
+}
+
+model Resource {
+  id          String  @id @default(cuid())
+  lessonId    String
+  type        String // video, article, docs, interactive, project, cheatsheet
+  title       String
+  url         String
+  description String? @db.Text
+  duration    String? // e.g., "15 min", "2 hours"
+  provider    String? // freeCodeCamp, Net Ninja, Official Docs, etc.
+  isVerified  Boolean @default(false) // official docs get this badge
+  order       Int     @default(0)
+  lesson      Lesson  @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@index([lessonId])
+}
+
+// Newsletter - one row per address. Unsubscribing deletes the row.
+model NewsletterSubscriber {
+  id                 String    @id @default(cuid())
+  email              String    @unique
+  source             String    @default("site") // footer, newsletter, site page
+  confirmedAt        DateTime?
+  confirmationSentAt DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @default(now()) @updatedAt
+
+  @@index([createdAt])
+  @@index([confirmedAt])
+}
+
+// Audit trail for newsletter broadcasts. Only metadata is stored here; the
+// rendered email body lives in the admin request and is not persisted.
+model NewsletterSend {
+  id             String   @id @default(cuid())
+  sentBy         String
+  subject        String
+  recipientCount Int
+  failedCount    Int      @default(0)
+  isTest         Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+// Private contact messages. Stored first, then a best-effort email notification.
+model ContactMessage {
+  id        String   @id @default(cuid())
+  name      String?
+  email     String
+  topic     String   @default("general") // general, bug, content, conduct, privacy, security
+  message   String   @db.Text
+  handled   Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([handled])
+}
+
+
+// Verifiable completion certificate for a finished curriculum track.
+model Certificate {
+  id             String   @id @default(cuid())
+  verificationId String   @unique @default(cuid())
+  userId         String
+  trackKey       String
+  trackName      String
+  recipientName  String?
+  issuedAt       DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, trackKey])
+  @@index([userId, issuedAt])
+}
+
+
+===== FILE: prisma/seed.ts =====
+import { PrismaClient } from '@prisma/client'
+
+const prisma = new PrismaClient()
+
+const badges = [
+  // ==================== MILESTONE BADGES ====================
+  {
+    key: 'first-lesson',
+    name: 'First Steps',
+    description: 'Complete your first lesson',
+    icon: 'Target',
+    category: 'milestone',
+    xpReward: 10,
+    criteria: { type: 'completed_count', count: 1 },
+  },
+  {
+    key: 'five-lessons',
+    name: 'Getting Warmed Up',
+    description: 'Complete 5 lessons',
+    icon: 'Flame',
+    category: 'milestone',
+    xpReward: 25,
+    criteria: { type: 'completed_count', count: 5 },
+  },
+  {
+    key: 'ten-lessons',
+    name: 'Committed',
+    description: 'Complete 10 lessons',
+    icon: 'TrendingUp',
+    category: 'milestone',
+    xpReward: 50,
+    criteria: { type: 'completed_count', count: 10 },
+  },
+  {
+    key: 'twenty-lessons',
+    name: 'Halfway Hero',
+    description: 'Complete 20 lessons',
+    icon: 'Rocket',
+    category: 'milestone',
+    xpReward: 100,
+    criteria: { type: 'completed_count', count: 20 },
+  },
+  {
+    key: 'fifty-lessons',
+    name: 'Scholar',
+    description: 'Complete 50 lessons',
+    icon: 'BookOpen',
+    category: 'milestone',
+    xpReward: 200,
+    criteria: { type: 'completed_count', count: 50 },
+  },
+  {
+    key: 'hundred-lessons',
+    name: 'Scholar Supreme',
+    description: 'Complete 100 lessons',
+    icon: 'Library',
+    category: 'milestone',
+    xpReward: 400,
+    criteria: { type: 'completed_count', count: 100 },
+  },
+  {
+    key: 'two-hundred-lessons',
+    name: 'Omniscient',
+    description: 'Complete 200 lessons',
+    icon: 'Brain',
+    category: 'milestone',
+    xpReward: 800,
+    criteria: { type: 'completed_count', count: 200 },
+  },
+  {
+    key: 'all-lessons',
+    name: 'Knowledge Incarnate',
+    description: 'Complete every single lesson',
+    icon: 'Crown',
+    category: 'milestone',
+    xpReward: 2000,
+    criteria: { type: 'completed_count', count: 300 },
+  },
+
+  // ==================== STREAK BADGES ====================
+  {
+    key: 'streak-1',
+    name: 'Day One',
+    description: 'Start a 1-day learning streak',
+    icon: 'Flame',
+    category: 'streak',
+    xpReward: 5,
+    criteria: { type: 'streak', days: 1 },
+  },
+  {
+    key: 'streak-3',
+    name: 'On Fire',
+    description: 'Maintain a 3-day learning streak',
+    icon: 'Fire',
+    category: 'streak',
+    xpReward: 30,
+    criteria: { type: 'streak', days: 3 },
+  },
+  {
+    key: 'streak-7',
+    name: 'Unstoppable',
+    description: 'Maintain a 7-day learning streak',
+    icon: 'Zap',
+    category: 'streak',
+    xpReward: 75,
+    criteria: { type: 'streak', days: 7 },
+  },
+  {
+    key: 'streak-14',
+    name: 'Fortnight Warrior',
+    description: 'Maintain a 14-day learning streak',
+    icon: 'Moon',
+    category: 'streak',
+    xpReward: 150,
+    criteria: { type: 'streak', days: 14 },
+  },
+  {
+    key: 'streak-30',
+    name: 'Monthly Master',
+    description: 'Maintain a 30-day learning streak',
+    icon: 'Calendar',
+    category: 'streak',
+    xpReward: 300,
+    criteria: { type: 'streak', days: 30 },
+  },
+  {
+    key: 'streak-60',
+    name: 'Habitual',
+    description: 'Maintain a 60-day learning streak',
+    icon: 'Infinity',
+    category: 'streak',
+    xpReward: 600,
+    criteria: { type: 'streak', days: 60 },
+  },
+  {
+    key: 'streak-100',
+    name: 'Centurion',
+    description: 'Maintain a 100-day learning streak',
+    icon: 'BadgeCheck',
+    category: 'streak',
+    xpReward: 1000,
+    criteria: { type: 'streak', days: 100 },
+  },
+  {
+    key: 'streak-365',
+    name: 'Eternal Flame',
+    description: 'Maintain a 365-day learning streak',
+    icon: 'Sun',
+    category: 'streak',
+    xpReward: 5000,
+    criteria: { type: 'streak', days: 365 },
+  },
+
+  // ==================== XP BADGES ====================
+  {
+    key: 'xp-50',
+    name: 'Novice',
+    description: 'Earn 50 XP',
+    icon: 'Star',
+    category: 'xp',
+    xpReward: 0,
+    criteria: { type: 'xp', amount: 50 },
+  },
+  {
+    key: 'xp-100',
+    name: 'Century Club',
+    description: 'Earn 100 XP',
+    icon: 'BadgePercent',
+    category: 'xp',
+    xpReward: 20,
+    criteria: { type: 'xp', amount: 100 },
+  },
+  {
+    key: 'xp-250',
+    name: 'Rising Star',
+    description: 'Earn 250 XP',
+    icon: 'Sparkles',
+    category: 'xp',
+    xpReward: 50,
+    criteria: { type: 'xp', amount: 250 },
+  },
+  {
+    key: 'xp-500',
+    name: 'XP Hunter',
+    description: 'Earn 500 XP',
+    icon: 'Trophy',
+    category: 'xp',
+    xpReward: 100,
+    criteria: { type: 'xp', amount: 500 },
+  },
+  {
+    key: 'xp-1000',
+    name: 'MERN Master',
+    description: 'Earn 1000 XP',
+    icon: 'Crown',
+    category: 'xp',
+    xpReward: 250,
+    criteria: { type: 'xp', amount: 1000 },
+  },
+  {
+    key: 'xp-2500',
+    name: 'XP Legend',
+    description: 'Earn 2500 XP',
+    icon: 'Diamond',
+    category: 'xp',
+    xpReward: 500,
+    criteria: { type: 'xp', amount: 2500 },
+  },
+  {
+    key: 'xp-5000',
+    name: 'XP Deity',
+    description: 'Earn 5000 XP',
+    icon: 'Ghost',
+    category: 'xp',
+    xpReward: 1000,
+    criteria: { type: 'xp', amount: 5000 },
+  },
+  {
+    key: 'xp-10000',
+    name: 'XP Deity Supreme',
+    description: 'Earn 10000 XP',
+    icon: 'Galaxy',
+    category: 'xp',
+    xpReward: 2000,
+    criteria: { type: 'xp', amount: 10000 },
+  },
+
+  // ==================== PROJECT BADGES ====================
+  {
+    key: 'first-project',
+    name: 'Builder',
+    description: 'Share your first project in the showcase',
+    icon: 'Hammer',
+    category: 'project',
+    xpReward: 50,
+    criteria: { type: 'projects', count: 1 },
+  },
+  {
+    key: 'five-projects',
+    name: 'Architect',
+    description: 'Share 5 projects',
+    icon: 'Building',
+    category: 'project',
+    xpReward: 150,
+    criteria: { type: 'projects', count: 5 },
+  },
+  {
+    key: 'ten-projects',
+    name: 'Master Builder',
+    description: 'Share 10 projects',
+    icon: 'Building2',
+    category: 'project',
+    xpReward: 300,
+    criteria: { type: 'projects', count: 10 },
+  },
+  {
+    key: 'twenty-projects',
+    name: 'Grand Architect',
+    description: 'Share 20 projects',
+    icon: 'City',
+    category: 'project',
+    xpReward: 600,
+    criteria: { type: 'projects', count: 20 },
+  },
+  {
+    key: 'fifty-projects',
+    name: 'City Planner',
+    description: 'Share 50 projects',
+    icon: 'Map',
+    category: 'project',
+    xpReward: 1200,
+    criteria: { type: 'projects', count: 50 },
+  },
+  {
+    key: 'hundred-projects',
+    name: 'Metropolis Builder',
+    description: 'Share 100 projects',
+    icon: 'Landmark',
+    category: 'project',
+    xpReward: 2500,
+    criteria: { type: 'projects', count: 100 },
+  },
+
+  // ==================== COMMUNITY BADGES ====================
+  {
+    key: 'first-comment',
+    name: 'Voice',
+    description: 'Post your first comment',
+    icon: 'MessageSquare',
+    category: 'community',
+    xpReward: 10,
+    criteria: { type: 'comments', count: 1 },
+  },
+  {
+    key: 'ten-comments',
+    name: 'Conversationalist',
+    description: 'Post 10 comments',
+    icon: 'MessageCircle',
+    category: 'community',
+    xpReward: 30,
+    criteria: { type: 'comments', count: 10 },
+  },
+  {
+    key: 'fifty-comments',
+    name: 'Orator',
+    description: 'Post 50 comments',
+    icon: 'Mic',
+    category: 'community',
+    xpReward: 100,
+    criteria: { type: 'comments', count: 50 },
+  },
+  {
+    key: 'hundred-comments',
+    name: 'Orator Supreme',
+    description: 'Post 100 comments',
+    icon: 'Megaphone',
+    category: 'community',
+    xpReward: 200,
+    criteria: { type: 'comments', count: 100 },
+  },
+  {
+    key: 'first-upvote',
+    name: 'Supporter',
+    description: 'Give your first upvote',
+    icon: 'ThumbsUp',
+    category: 'community',
+    xpReward: 5,
+    criteria: { type: 'upvotes', count: 1 },
+  },
+  {
+    key: 'ten-upvotes',
+    name: 'Cheerleader',
+    description: 'Give 10 upvotes',
+    icon: 'Heart',
+    category: 'community',
+    xpReward: 20,
+    criteria: { type: 'upvotes', count: 10 },
+  },
+  {
+    key: 'fifty-upvotes',
+    name: 'Champion',
+    description: 'Give 50 upvotes',
+    icon: 'Award',
+    category: 'community',
+    xpReward: 50,
+    criteria: { type: 'upvotes', count: 50 },
+  },
+  {
+    key: 'hundred-upvotes',
+    name: 'Champion Supreme',
+    description: 'Give 100 upvotes',
+    icon: 'Medal',
+    category: 'community',
+    xpReward: 100,
+    criteria: { type: 'upvotes', count: 100 },
+  },
+  {
+    key: 'follower-10',
+    name: 'Rising Star',
+    description: 'Gain 10 followers',
+    icon: 'Users',
+    category: 'community',
+    xpReward: 50,
+    criteria: { type: 'followers', count: 10 },
+  },
+  {
+    key: 'follower-50',
+    name: 'Influencer',
+    description: 'Gain 50 followers',
+    icon: 'Star',
+    category: 'community',
+    xpReward: 150,
+    criteria: { type: 'followers', count: 50 },
+  },
+  {
+    key: 'follower-100',
+    name: 'Leader',
+    description: 'Gain 100 followers',
+    icon: 'Crown',
+    category: 'community',
+    xpReward: 300,
+    criteria: { type: 'followers', count: 100 },
+  },
+  {
+    key: 'follower-500',
+    name: 'Luminary',
+    description: 'Gain 500 followers',
+    icon: 'Sparkles',
+    category: 'community',
+    xpReward: 800,
+    criteria: { type: 'followers', count: 500 },
+  },
+  {
+    key: 'follower-1000',
+    name: 'Legend',
+    description: 'Gain 1000 followers',
+    icon: 'Trophy',
+    category: 'community',
+    xpReward: 2000,
+    criteria: { type: 'followers', count: 1000 },
+  },
+
+  // ==================== MASTERY BADGES ====================
+  {
+    key: 'html-master',
+    name: 'HTML Artisan',
+    description: 'Complete all HTML lessons',
+    icon: 'Code',
+    category: 'mastery',
+    xpReward: 200,
+    criteria: { type: 'track_complete', track: 'beginner', module: 'foundations', topic: 'html' },
+  },
+  {
+    key: 'css-master',
+    name: 'CSS Virtuoso',
+    description: 'Complete all CSS lessons',
+    icon: 'Palette',
+    category: 'mastery',
+    xpReward: 200,
+    criteria: { type: 'track_complete', track: 'beginner', module: 'foundations', topic: 'css' },
+  },
+  {
+    key: 'js-master',
+    name: 'JavaScript Sage',
+    description: 'Complete all JavaScript lessons',
+    icon: 'Zap',
+    category: 'mastery',
+    xpReward: 300,
+    criteria: { type: 'track_complete', track: 'beginner', module: 'foundations', topic: 'javascript' },
+  },
+  {
+    key: 'react-master',
+    name: 'React Architect',
+    description: 'Complete all React lessons',
+    icon: 'Atom',
+    category: 'mastery',
+    xpReward: 400,
+    criteria: { type: 'track_complete', track: 'developer', module: 'react' },
+  },
+  {
+    key: 'node-master',
+    name: 'Node.js Architect',
+    description: 'Complete all Node.js lessons',
+    icon: 'Server',
+    category: 'mastery',
+    xpReward: 400,
+    criteria: { type: 'track_complete', track: 'developer', module: 'node-express' },
+  },
+  {
+    key: 'mongodb-master',
+    name: 'MongoDB Master',
+    description: 'Complete all MongoDB lessons',
+    icon: 'Database',
+    category: 'mastery',
+    xpReward: 300,
+    criteria: { type: 'track_complete', track: 'developer', module: 'mongodb' },
+  },
+  {
+    key: 'typescript-master',
+    name: 'TypeScript Architect',
+    description: 'Complete all TypeScript lessons',
+    icon: 'FileCode',
+    category: 'mastery',
+    xpReward: 400,
+    criteria: { type: 'track_complete', track: 'mastery', module: 'typescript' },
+  },
+  {
+    key: 'testing-master',
+    name: 'Testing Guru',
+    description: 'Complete all testing lessons',
+    icon: 'FlaskConical',
+    category: 'mastery',
+    xpReward: 300,
+    criteria: { type: 'track_complete', track: 'mastery', module: 'testing' },
+  },
+  {
+    key: 'security-master',
+    name: 'Security Guardian',
+    description: 'Complete all security lessons',
+    icon: 'Shield',
+    category: 'mastery',
+    xpReward: 300,
+    criteria: { type: 'track_complete', track: 'mastery', module: 'security' },
+  },
+  {
+    key: 'devops-master',
+    name: 'DevOps Engineer',
+    description: 'Complete all DevOps lessons',
+    icon: 'Cloud',
+    category: 'mastery',
+    xpReward: 300,
+    criteria: { type: 'track_complete', track: 'mastery', module: 'devops' },
+  },
+  {
+    key: 'performance-master',
+    name: 'Performance Engineer',
+    description: 'Complete all performance lessons',
+    icon: 'Gauge',
+    category: 'mastery',
+    xpReward: 300,
+    criteria: { type: 'track_complete', track: 'mastery', module: 'performance' },
+  },
+  {
+    key: 'architecture-master',
+    name: 'System Architect',
+    description: 'Complete all architecture lessons',
+    icon: 'Layout',
+    category: 'mastery',
+    xpReward: 300,
+    criteria: { type: 'track_complete', track: 'mastery', module: 'architecture' },
+  },
+  {
+    key: 'scalable-systems-master',
+    name: 'Scalability Architect',
+    description: 'Complete all scalable systems lessons',
+    icon: 'GitBranch',
+    category: 'mastery',
+    xpReward: 400,
+    criteria: { type: 'track_complete', track: 'mastery', module: 'scalability' },
+  },
+  {
+    key: 'react-native-master',
+    name: 'Mobile Architect',
+    description: 'Complete all React Native lessons',
+    icon: 'Smartphone',
+    category: 'mastery',
+    xpReward: 400,
+    criteria: { type: 'track_complete', track: 'mastery', module: 'react-native' },
+  },
+
+  // ==================== LANGUAGE MASTERY BADGES ====================
+  {
+    key: 'c-master',
+    name: 'C Systems Master',
+    description: 'Complete all C language lessons',
+    icon: 'Cpu',
+    category: 'mastery',
+    xpReward: 500,
+    criteria: { type: 'language_complete', language: 'c' },
+  },
+  {
+    key: 'cpp-master',
+    name: 'C++ Systems Master',
+    description: 'Complete all C++ language lessons',
+    icon: 'Braces',
+    category: 'mastery',
+    xpReward: 500,
+    criteria: { type: 'language_complete', language: 'cpp' },
+  },
+  {
+    key: 'csharp-master',
+    name: 'C# .NET Master',
+    description: 'Complete all C# language lessons',
+    icon: 'Hash',
+    category: 'mastery',
+    xpReward: 500,
+    criteria: { type: 'language_complete', language: 'csharp' },
+  },
+  {
+    key: 'python-master',
+    name: 'Python Master',
+    description: 'Complete all Python language lessons',
+    icon: 'Terminal',
+    category: 'mastery',
+    xpReward: 500,
+    criteria: { type: 'language_complete', language: 'python' },
+  },
+  {
+    key: 'polyglot-2',
+    name: 'Bilingual Coder',
+    description: 'Complete lessons in 2 languages',
+    icon: 'Languages',
+    category: 'mastery',
+    xpReward: 100,
+    criteria: { type: 'languages_count', count: 2 },
+  },
+  {
+    key: 'polyglot-5',
+    name: 'Polyglot',
+    description: 'Complete lessons in 5 languages',
+    icon: 'Globe',
+    category: 'mastery',
+    xpReward: 500,
+    criteria: { type: 'languages_count', count: 5 },
+  },
+  {
+    key: 'polyglot-10',
+    name: 'Omniglott',
+    description: 'Complete lessons in 10 languages',
+    icon: 'Crown',
+    category: 'mastery',
+    xpReward: 1500,
+    criteria: { type: 'languages_count', count: 10 },
+  },
+
+  // ==================== SPECIAL/SECRET BADGES ====================
+  {
+    key: 'night-owl',
+    name: 'Night Owl',
+    description: 'Complete a lesson after midnight',
+    icon: 'Moon',
+    category: 'special',
+    xpReward: 25,
+    criteria: { type: 'time_of_day', hour: { gte: 0, lt: 5 } },
+  },
+  {
+    key: 'early-bird',
+    name: 'Early Bird',
+    description: 'Complete a lesson before 6 AM',
+    icon: 'Sunrise',
+    category: 'special',
+    xpReward: 25,
+    criteria: { type: 'time_of_day', hour: { gte: 4, lt: 6 } },
+  },
+  {
+    key: 'weekend-warrior',
+    name: 'Weekend Warrior',
+    description: 'Complete lessons on both Saturday and Sunday in one weekend',
+    icon: 'Sword',
+    category: 'special',
+    xpReward: 50,
+    criteria: { type: 'weekend_both_days' },
+  },
+  {
+    key: 'speed-learner',
+    name: 'Speed Learner',
+    description: 'Complete 10 lessons in a single day',
+    icon: 'Zap',
+    category: 'special',
+    xpReward: 100,
+    criteria: { type: 'lessons_per_day', count: 10 },
+  },
+  {
+    key: 'marathon-learner',
+    name: 'Marathon Learner',
+    description: 'Complete 25 lessons in a single day',
+    icon: 'Trophy',
+    category: 'special',
+    xpReward: 300,
+    criteria: { type: 'lessons_per_day', count: 25 },
+  },
+  {
+    key: 'perfectionist',
+    name: 'Perfectionist',
+    description: 'Complete a project with 100% test coverage',
+    icon: 'Gem',
+    category: 'special',
+    xpReward: 200,
+    criteria: { type: 'project_perfect', coverage: 100 },
+  },
+  {
+    key: 'first-blood',
+    name: 'First Blood',
+    description: 'Be the first to complete a new lesson',
+    icon: 'Droplet',
+    category: 'special',
+    xpReward: 100,
+    criteria: { type: 'first_completion' },
+  },
+  {
+    key: 'helpful-hand',
+    name: 'Helpful Hand',
+    description: 'Have 10 comments marked as helpful',
+    icon: 'HandHeart',
+    category: 'special',
+    xpReward: 100,
+    criteria: { type: 'helpful_comments', count: 10 },
+  },
+  {
+    key: 'bug-hunter',
+    name: 'Bug Hunter',
+    description: 'Report 5 verified bugs',
+    icon: 'Bug',
+    category: 'special',
+    xpReward: 150,
+    criteria: { type: 'bug_reports', count: 5 },
+  },
+  {
+    key: 'mentor',
+    name: 'Mentor',
+    description: 'Help 50 learners with answers',
+    icon: 'GraduationCap',
+    category: 'special',
+    xpReward: 300,
+    criteria: { type: 'accepted_answers', count: 50 },
+  },
+  {
+    key: 'full-stack-master',
+    name: 'Full-Stack Master',
+    description: 'Complete all tracks: Beginner, Developer, and all Specializations',
+    icon: 'Layers',
+    category: 'special',
+    xpReward: 2000,
+    criteria: { type: 'all_tracks_complete' },
+  },
+  {
+    key: 'community-pillar',
+    name: 'Community Pillar',
+    description: 'Help 100+ learners through comments and upvotes',
+    icon: 'Building2',
+    category: 'special',
+    xpReward: 1000,
+    criteria: { type: 'community_help', count: 100 },
+  },
+  {
+    key: 'early-adopter',
+    name: 'Early Adopter',
+    description: 'Joined during beta phase',
+    icon: 'Rocket',
+    category: 'special',
+    xpReward: 500,
+    criteria: { type: 'joined_before', date: '2025-01-01' },
+  },
+  {
+    key: 'contributor',
+    name: 'Open Source Contributor',
+    description: 'Contribute to the platform codebase',
+    icon: 'GitMerge',
+    category: 'special',
+    xpReward: 1000,
+    criteria: { type: 'github_contribution' },
+  },
+  {
+    key: 'content-creator',
+    name: 'Content Creator',
+    description: 'Create a lesson or resource used by 100+ learners',
+    icon: 'PenTool',
+    category: 'special',
+    xpReward: 500,
+    criteria: { type: 'content_views', count: 100 },
+  },
+]
+
+async function main() {
+  console.log('🌱 Seeding badges...')
+
+  for (const badge of badges) {
+    await prisma.badge.upsert({
+      where: { key: badge.key },
+      update: badge,
+      create: badge,
+    })
+  }
+
+  console.log(`✅ Seeded ${badges.length} badges`)
+}
+
+main()
+  .catch((e) => {
+    console.error(e)
+    process.exit(1)
+  })
+  .finally(async () => {
+    await prisma.$disconnect()
+  })
+
+===== FILE: proxy-worker/src/index.ts =====
+interface Env {
+  UPSTREAM_ORIGIN: string
+}
+
+/**
+ * High-performance proxy for Next.js on Vercel.
+ * Streams responses, caches static assets at Cloudflare edge, preserves cache headers.
+ */
+const proxy = {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const incoming = new URL(request.url)
+    const upstream = new URL(env.UPSTREAM_ORIGIN)
+    const target = new URL(incoming.pathname + incoming.search, upstream)
+
+    // Check if this is a static asset that can be cached at edge
+    const isStaticAsset = 
+      incoming.pathname.startsWith('/_next/static/') ||
+      incoming.pathname.startsWith('/_next/image/') ||
+      /\.(jpg|jpeg|png|webp|avif|woff2?|ico|svg|css|js)$/i.test(incoming.pathname)
+
+    const headers = new Headers(request.headers)
+    headers.delete('host')
+    headers.set('x-forwarded-host', incoming.host)
+    headers.set('x-forwarded-proto', 'https')
+
+    const init: RequestInit & { duplex?: 'half' } = {
+      method: request.method,
+      headers,
+      redirect: 'manual',
+      body: request.body,
+    }
+    if (request.body) init.duplex = 'half'
+
+    const response = await fetch(target, init)
+    const responseHeaders = new Headers(response.headers)
+    const location = responseHeaders.get('location')
+
+    if (location) {
+      const resolved = new URL(location, upstream)
+      if (resolved.origin === upstream.origin) {
+        responseHeaders.set(
+          'location',
+          `${incoming.origin}${resolved.pathname}${resolved.search}${resolved.hash}`
+        )
+      }
+    }
+
+    // Rewrite Set-Cookie headers to use the public origin domain
+    const setCookieHeaders = responseHeaders.getSetCookie()
+    if (setCookieHeaders.length > 0) {
+      responseHeaders.delete('set-cookie')
+      for (const cookie of setCookieHeaders) {
+        let rewrittenCookie = cookie.replace(
+          new RegExp(`Domain=${upstream.hostname}(;|$)`, 'i'),
+          `Domain=${incoming.hostname}$1`
+        )
+        if (!/Domain=/i.test(cookie)) {
+          rewrittenCookie += `; Domain=${incoming.hostname}`
+        }
+        responseHeaders.append('set-cookie', rewrittenCookie)
+      }
+    }
+
+    // Preserve and enhance cache headers
+    if (isStaticAsset) {
+      // Static assets: cache at Cloudflare edge for 1 year
+      responseHeaders.set('Cache-Control', 'public, max-age=31536000, immutable')
+      responseHeaders.set('CF-Cache-Status', 'HIT')
+    } else if (responseHeaders.has('Cache-Control')) {
+      // Preserve existing cache headers but ensure they're not no-store for public content
+      const cc = responseHeaders.get('Cache-Control') || ''
+      if (cc.includes('no-store') && response.status === 200) {
+        // Don't override no-store for authenticated responses
+      }
+    } else if (response.status === 200 && !responseHeaders.has('Cache-Control')) {
+      // Default: allow short-term caching for public responses
+      responseHeaders.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=300')
+    }
+
+    // Enable Cloudflare streaming
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: responseHeaders,
+    })
+  },
+}
+
+export default proxy
+
+
+===== FILE: proxy-worker/wrangler.jsonc =====
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "sync",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-03-25",
+  "observability": {
+    "enabled": true
+  },
+  "vars": {
+    "UPSTREAM_ORIGIN": "https://nyxora-sync.vercel.app"
+  }
+}
+
+
+===== FILE: scripts/backfill-badges.ts =====
+/**
+ * One-off (and safe to repeat) backfill for accounts that predate persisted
+ * badges and certificates. Run after deploying schema migrations:
+ *
+ *   npm run db:backfill
+ */
+import { prisma } from '../src/lib/db'
+import { syncUserBadges } from '../src/lib/badge-awards'
+import { syncUserCertificates } from '../src/lib/certificates'
+
+async function main() {
+  const users = await prisma.user.findMany({
+    select: { id: true, email: true },
+    orderBy: { createdAt: 'asc' },
+  })
+
+  console.log(`Backfilling achievements for ${users.length} accounts...`)
+  let failures = 0
+
+  for (const user of users) {
+    try {
+      const [badges, certificates] = await Promise.all([
+        syncUserBadges(user.id),
+        syncUserCertificates(user.id),
+      ])
+      console.log(
+        `  ${user.email}: ${badges.earned.length} badges, ${certificates.length} certificates`
+      )
+    } catch (error) {
+      failures += 1
+      console.error(`  ${user.email}: failed`, error)
+    }
+  }
+
+  if (failures > 0) {
+    throw new Error(`${failures} account(s) failed to backfill.`)
+  }
+
+  console.log('Achievement backfill complete.')
+}
+
+main()
+  .catch((error) => {
+    console.error(error)
+    process.exit(1)
+  })
+  .finally(async () => {
+    await prisma.$disconnect()
+  })
+
+
+===== FILE: scripts/clear-data.ts =====
+import { PrismaClient } from '@prisma/client'
+
+const prisma = new PrismaClient()
+
+async function main() {
+  console.log('Clearing all community data...')
+  
+  // Delete in correct order to avoid foreign key constraints
+  await prisma.notification.deleteMany()
+  await prisma.profileView.deleteMany()
+  await prisma.follow.deleteMany()
+  await prisma.comment.deleteMany()
+  await prisma.projectUpvote.deleteMany()
+  await prisma.project.deleteMany()
+  await prisma.userBadge.deleteMany()
+  await prisma.userStats.deleteMany()
+  await prisma.userProgress.deleteMany()
+  await prisma.userPreferences.deleteMany()
+  await prisma.userAvatar.deleteMany()
+  await prisma.session.deleteMany()
+  await prisma.account.deleteMany()
+  
+  // Delete users except admin
+  await prisma.user.deleteMany({
+    where: {
+      email: { not: 'admin@nyxora.local' }
+    }
+  })
+  
+  console.log('All community data cleared!')
+  console.log('Admin user preserved.')
+}
+
+main()
+  .catch((e) => {
+    console.error(e)
+    process.exit(1)
+  })
+  .finally(async () => {
+    await prisma.$disconnect()
+  })
+

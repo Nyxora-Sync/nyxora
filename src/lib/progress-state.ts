@@ -8,6 +8,42 @@ export interface LessonProgress {
   notes?: string
 }
 
+export interface PracticeProgress {
+  // Flashcard SRS state per card
+  flashcards: Record<string, {
+    easeFactor: number
+    interval: number
+    repetitions: number
+    nextReview: string
+    lastReviewed: string | null
+    lastGrade: number | null
+  }>
+  // Kata completions
+  katas: Record<string, {
+    completed: boolean
+    completedAt: string
+    attempts: number
+  }>
+  // Micro-project submissions
+  projects: Record<string, {
+    completed: boolean
+    completedAt: string
+    submissionUrl?: string
+  }>
+  // Interview drill completions
+  drills: Record<string, {
+    completed: boolean
+    completedAt: string
+    notes?: string
+  }>
+  // Practice streak (separate from lesson streak)
+  streak: {
+    current: number
+    lastActiveDate: string | null
+    longest: number
+  }
+}
+
 export interface ProgressState {
   lessons: Record<string, LessonProgress> // lessonId -> progress
   xp: number
@@ -23,10 +59,24 @@ export interface ProgressState {
     lesson: string
     timestamp: string
   } | null
+  // Practice system progress
+  practice: PracticeProgress
 }
 
 export const GUEST_STORAGE_KEY = 'mern-learn-progress'
 const USER_STORAGE_PREFIX = 'mern-learn-progress:u:'
+
+export const defaultPracticeProgress: PracticeProgress = {
+  flashcards: {},
+  katas: {},
+  projects: {},
+  drills: {},
+  streak: {
+    current: 0,
+    lastActiveDate: null,
+    longest: 0,
+  },
+}
 
 export const defaultProgressState: ProgressState = {
   lessons: {},
@@ -38,6 +88,7 @@ export const defaultProgressState: ProgressState = {
   },
   bookmarks: [],
   lastVisited: null,
+  practice: defaultPracticeProgress,
 }
 
 // Which bucket is currently active. Set to the signed-in user's id by
@@ -62,6 +113,7 @@ export function loadProgressState(userId: string | null = activeUserId): Progres
       ...defaultProgressState,
       ...parsed,
       streak: { ...defaultProgressState.streak, ...parsed.streak },
+      practice: { ...defaultPracticeProgress, ...parsed.practice },
     }
   } catch {
     return defaultProgressState
@@ -110,6 +162,78 @@ function mergeStreaks(a: ProgressState['streak'], b: ProgressState['streak']): P
   }
 }
 
+function mergePracticeProgress(
+  primary: PracticeProgress,
+  secondary: PracticeProgress
+): PracticeProgress {
+  // Merge flashcards - keep the most advanced SRS state per card
+  const flashcardIds = new Set([
+    ...Object.keys(primary.flashcards),
+    ...Object.keys(secondary.flashcards),
+  ])
+  const flashcards: PracticeProgress['flashcards'] = {}
+  for (const id of flashcardIds) {
+    const a = primary.flashcards[id]
+    const b = secondary.flashcards[id]
+    // Keep the one with higher repetitions (more advanced)
+    flashcards[id] = a && b
+      ? a.repetitions >= b.repetitions
+        ? a
+        : b
+      : a ?? b
+  }
+
+  // Merge katas - union completions
+  const kataIds = new Set([...Object.keys(primary.katas), ...Object.keys(secondary.katas)])
+  const katas: PracticeProgress['katas'] = {}
+  for (const id of kataIds) {
+    const a = primary.katas[id]
+    const b = secondary.katas[id]
+    katas[id] = {
+      completed: Boolean(a?.completed || b?.completed),
+      completedAt: a?.completed && b?.completed
+        ? (a.completedAt > b.completedAt ? a.completedAt : b.completedAt)
+        : a?.completedAt ?? b?.completedAt ?? new Date().toISOString(),
+      attempts: Math.max(a?.attempts ?? 0, b?.attempts ?? 0),
+    }
+  }
+
+  // Merge projects - union completions
+  const projectIds = new Set([...Object.keys(primary.projects), ...Object.keys(secondary.projects)])
+  const projects: PracticeProgress['projects'] = {}
+  for (const id of projectIds) {
+    const a = primary.projects[id]
+    const b = secondary.projects[id]
+    projects[id] = {
+      completed: Boolean(a?.completed || b?.completed),
+      completedAt: a?.completed && b?.completed
+        ? (a.completedAt > b.completedAt ? a.completedAt : b.completedAt)
+        : a?.completedAt ?? b?.completedAt ?? new Date().toISOString(),
+      submissionUrl: a?.submissionUrl ?? b?.submissionUrl,
+    }
+  }
+
+  // Merge drills - union completions
+  const drillIds = new Set([...Object.keys(primary.drills), ...Object.keys(secondary.drills)])
+  const drills: PracticeProgress['drills'] = {}
+  for (const id of drillIds) {
+    const a = primary.drills[id]
+    const b = secondary.drills[id]
+    drills[id] = {
+      completed: Boolean(a?.completed || b?.completed),
+      completedAt: a?.completed && b?.completed
+        ? (a.completedAt > b.completedAt ? a.completedAt : b.completedAt)
+        : a?.completedAt ?? b?.completedAt ?? new Date().toISOString(),
+      notes: a?.notes?.trim() ? a.notes : b?.notes,
+    }
+  }
+
+  // Merge practice streak
+  const streak = mergeStreaks(primary.streak, secondary.streak)
+
+  return { flashcards, katas, projects, drills, streak }
+}
+
 /**
  * Merge two progress snapshots without losing work.
  * `primary` wins note conflicts; completion, bookmarks, and streaks are unioned.
@@ -146,5 +270,6 @@ export function mergeProgressStates(primary: ProgressState, secondary: ProgressS
     streak: mergeStreaks(primary.streak, secondary.streak),
     bookmarks,
     lastVisited,
+    practice: mergePracticeProgress(primary.practice, secondary.practice),
   }
 }

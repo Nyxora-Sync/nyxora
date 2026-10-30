@@ -23,16 +23,16 @@ const categoryIcons: Record<string, typeof Globe> = {
 
 export const metadata: Metadata = {
   title: 'Learning Categories | Nyxora Sync',
-  description: 'Explore all learning categories: Web Development, Programming Languages, Embedded Systems, Mobile Development, Data Science, DevOps, Game Development, and Desktop Apps.',
+  description: 'Explore all learning categories: Web Development, Programming Languages, Mobile Development, Data Science, DevOps, Game Development, and Desktop Apps.',
   openGraph: {
     title: 'Learning Categories | Nyxora Sync',
-    description: 'Explore all learning categories: Web Development, Programming Languages, Embedded Systems, Mobile Development, Data Science, DevOps, Game Development, and Desktop Apps.',
+    description: 'Explore all learning categories: Web Development, Programming Languages, Mobile Development, Data Science, DevOps, Game Development, and Desktop Apps.',
   },
 }
 
 export default function CategoriesPage() {
   const categoriesWithTracks = trackCategories
-    .filter((cat) => curriculumTracks.some((t) => t.category === cat.id))
+    .filter((cat) => cat.id !== 'embedded-systems' && curriculumTracks.some((t) => t.category === cat.id))
     .map((category) => {
       const categoryTracks = curriculumTracks.filter((t) => t.category === category.id)
       const totalLessons = categoryTracks.reduce((sum, t) => sum + t.modules.reduce((s, m) => s + m.lessons.length, 0), 0)

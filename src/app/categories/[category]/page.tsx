@@ -40,7 +40,7 @@ const trackIcons: Record<string, typeof Globe> = {
 
 export async function generateStaticParams() {
   return trackCategories
-    .filter((cat) => curriculumTracks.some((t) => t.category === cat.id))
+    .filter((cat) => cat.id !== 'embedded-systems' && curriculumTracks.some((t) => t.category === cat.id))
     .map((cat) => ({ category: cat.id }))
 }
 

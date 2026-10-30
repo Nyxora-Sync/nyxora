@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { Award } from 'lucide-react'
 import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
 import { Reveal } from '@/components/motion/reveal'
@@ -8,7 +9,7 @@ import { DashboardClientWrapper } from './dashboard-client-wrapper'
 
 export const metadata = pageMetadata({
   title: 'My Progress',
-  description: 'Track your MERN learning journey: lessons completed, XP earned, badges unlocked, and streaks.',
+  description: 'Track your MERN learning journey: lessons completed, XP earned, badges unlocked, streaks, and informal completion certificates.',
   path: '/dashboard',
   noIndex: true,
 })
@@ -27,9 +28,17 @@ export default function DashboardPage() {
                   Your learning journey at a glance. Data stored locally in your browser.
                 </p>
               </div>
-              <Button variant="outline" asChild>
-                <Link href="/learn">Browse Curriculum</Link>
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" asChild className="gap-2">
+                  <Link href="/certificates">
+                    <Award className="h-4 w-4" aria-hidden="true" />
+                    Certificates
+                  </Link>
+                </Button>
+                <Button variant="outline" asChild>
+                  <Link href="/learn">Browse Curriculum</Link>
+                </Button>
+              </div>
             </div>
           </Reveal>
         </section>

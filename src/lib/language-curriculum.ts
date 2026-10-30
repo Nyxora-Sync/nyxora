@@ -1,4 +1,4 @@
-import type { Difficulty, Lesson, Module, Resource, Track } from './curriculum'
+import type { Difficulty, Lesson, Module, ModuleStatus, Resource, Track } from './curriculum'
 
 /**
  * Language tracks are kept in their own module so the growing catalog stays
@@ -52,7 +52,14 @@ const moduleDef = (
   order: number,
   estimatedHours: number,
   color: string,
-  lessons: Lesson[]
+  lessons: Lesson[],
+  status: ModuleStatus = 'core',
+  isExperimental?: boolean,
+  estimatedHoursRange?: string,
+  outcomes?: string[],
+  capstoneProject?: Module['capstoneProject'],
+  isCapstone?: boolean,
+  isFastTrackModule?: boolean
 ): Module => ({
   id,
   key: id,
@@ -60,9 +67,16 @@ const moduleDef = (
   description,
   order,
   estimatedHours,
+  estimatedHoursRange,
   icon: 'FileCode',
   color,
   lessons,
+  status,
+  isExperimental,
+  outcomes,
+  capstoneProject,
+  isCapstone,
+  isFastTrackModule,
 })
 
 // ---------------------------------------------------------------------------
@@ -406,7 +420,9 @@ const cAdvancedModules: Module[] = [
         ],
         [cDocs.linuxKernel, cDocs.explorer, docs('BCC Reference Guide', 'https://github.com/iovisor/bcc/blob/master/docs/reference_guide.md', 'iovisor')]
       ),
-    ]
+    ],
+    'advanced',
+    true
   ),
   moduleDef(
     'c-kernel-drivers',
@@ -480,7 +496,9 @@ const cAdvancedModules: Module[] = [
         ],
         [cDocs.linuxKernel, cDocs.driverModel, docs('Device Tree Spec', 'https://www.devicetree.org/', 'devicetree.org')]
       ),
-    ]
+    ],
+    'advanced',
+    true
   ),
   moduleDef(
     'c-rtos-embedded',
@@ -554,7 +572,9 @@ const cAdvancedModules: Module[] = [
         ],
         [cDocs.freertos, cDocs.zephyr, cDocs.reference]
       ),
-    ]
+    ],
+    'advanced',
+    true
   ),
   moduleDef(
     'c-security-hardening',
@@ -628,7 +648,9 @@ const cAdvancedModules: Module[] = [
         ],
         [cDocs.hardening, docs('Reproducible Builds', 'https://reproducible-builds.org/', 'Reproducible Builds'), docs('Sigstore', 'https://www.sigstore.dev/', 'Sigstore')]
       ),
-    ]
+    ],
+    'advanced',
+    true
   ),
   moduleDef(
     'c-advanced-topics',
@@ -702,7 +724,9 @@ const cAdvancedModules: Module[] = [
         ],
         [cDocs.gcc, cDocs.make, cDocs.linuxKernel]
       ),
-    ]
+    ],
+    'advanced',
+    true
   ),
 ]
 
@@ -825,7 +849,7 @@ const cppModules: Module[] = [
         ],
         [cppDocs.cmake, cppDocs.googletest, cppDocs.explorer]
       ),
-    ]
+    ],
   ),
   moduleDef(
     'cpp-engineering',
@@ -1054,7 +1078,9 @@ const cppAdvancedModules: Module[] = [
         ],
         [cppDocs.metaprog, cppDocs.reference, cppDocs.explorer]
       ),
-    ]
+    ],
+    'advanced',
+    true
   ),
   moduleDef(
     'cpp-coroutines',
@@ -1128,7 +1154,9 @@ const cppAdvancedModules: Module[] = [
         ],
         [cppDocs.coro, cppDocs.folly, docs('liburing C++', 'https://github.com/axboe/liburing/tree/master/src/cpp', 'Jens Axboe')]
       ),
-    ]
+    ],
+    'advanced',
+    true
   ),
   moduleDef(
     'cpp-simd-vectorization',
@@ -1202,7 +1230,9 @@ const cppAdvancedModules: Module[] = [
         ],
         [docs('SYCL 2020 Spec', 'https://www.khronos.org/sycl/', 'Khronos'), docs('OpenMP 5.2', 'https://www.openmp.org/spec-html/5.2/openmp.html', 'OpenMP'), cppDocs.explorer]
       ),
-    ]
+    ],
+    'advanced',
+    true
   ),
   moduleDef(
     'cpp-modules-build',
@@ -1276,7 +1306,9 @@ const cppAdvancedModules: Module[] = [
         ],
         [docs('Bazel C++ Rules', 'https://bazel.build/rules/cpp', 'Bazel'), docs('Buck2', 'https://buck2.build/', 'Meta'), cppDocs.explorer]
       ),
-    ]
+    ],
+    'advanced',
+    true
   ),
   moduleDef(
     'cpp-advanced-concurrency',
@@ -1350,7 +1382,9 @@ const cppAdvancedModules: Module[] = [
         ],
         [cppDocs.exec, cppDocs.stdexec, cppDocs.folly]
       ),
-    ]
+    ],
+    'advanced',
+    true
   ),
 ]
 
@@ -1703,7 +1737,9 @@ const csharpAdvancedModules: Module[] = [
         ],
         [csharpDocs.sourceGen, csharpDocs.cli, csharpDocs.testing]
       ),
-    ]
+    ],
+    'advanced',
+    true
   ),
   moduleDef(
     'csharp-maui-blazor',
@@ -1777,7 +1813,9 @@ const csharpAdvancedModules: Module[] = [
         ],
         [csharpDocs.testing, csharpDocs.blazor, csharpDocs.maui]
       ),
-    ]
+    ],
+    'advanced',
+    true
   ),
   moduleDef(
     'csharp-grpc-cloud',
@@ -1851,7 +1889,9 @@ const csharpAdvancedModules: Module[] = [
         ],
         [csharpDocs.yarp, csharpDocs.security, csharpDocs.health]
       ),
-    ]
+    ],
+    'advanced',
+    true
   ),
   moduleDef(
     'csharp-orleans-distributed',
@@ -1925,7 +1965,9 @@ const csharpAdvancedModules: Module[] = [
         ],
         [csharpDocs.signalr, csharpDocs.orleans, csharpDocs.diagnostics]
       ),
-    ]
+    ],
+    'advanced',
+    true
   ),
   moduleDef(
     'csharp-advanced-architecture',
@@ -1999,7 +2041,9 @@ const csharpAdvancedModules: Module[] = [
         ],
         [csharpDocs.diagnostics, csharpDocs.health, csharpDocs.testing]
       ),
-    ]
+    ],
+    'advanced',
+    true
   ),
 ]
 
@@ -2363,7 +2407,9 @@ const pythonAdvancedModules: Module[] = [
         ],
         [pythonDocs.packaging, pythonDocs.cApi, pythonDocs.explorer]
       ),
-    ]
+    ],
+    'advanced',
+    true
   ),
   moduleDef(
     'python-ml-ops',
@@ -2437,7 +2483,9 @@ const pythonAdvancedModules: Module[] = [
         ],
         [docs('Great Expectations', 'https://greatexpectations.io/', 'GX'), docs('Evidently', 'https://www.evidentlyai.com/', 'Evidently'), pythonDocs.mlflow]
       ),
-    ]
+    ],
+    'advanced',
+    true
   ),
   moduleDef(
     'python-distributed-systems',
@@ -2511,7 +2559,9 @@ const pythonAdvancedModules: Module[] = [
         ],
         [pythonDocs.kafka, pythonDocs.celery, pythonDocs.asyncio]
       ),
-    ]
+    ],
+    'advanced',
+    true
   ),
   moduleDef(
     'python-advanced-async',
@@ -2585,7 +2635,9 @@ const pythonAdvancedModules: Module[] = [
         ],
         [docs('SQLAlchemy 2.0', 'https://docs.sqlalchemy.org/en/20/', 'SQLAlchemy'), docs('asyncpg', 'https://magicstack.github.io/asyncpg/', 'MagicStack'), docs('Tortoise ORM', 'https://tortoise-orm.readthedocs.io/', 'Tortoise')]
       ),
-    ]
+    ],
+    'advanced',
+    true
   ),
   moduleDef(
     'python-advanced-topics',
@@ -2659,7 +2711,9 @@ const pythonAdvancedModules: Module[] = [
         ],
         [docs('CPython Dev Guide', 'https://devguide.python.org/', 'Python'), pythonDocs.profile, pythonDocs.explorer]
       ),
-    ]
+    ],
+    'advanced',
+    true
   ),
 ]
 

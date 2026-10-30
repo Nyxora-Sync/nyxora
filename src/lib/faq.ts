@@ -17,7 +17,7 @@ export interface FaqSection {
   items: FaqItem[]
 }
 
-export const FAQ_LAST_REVIEWED = '2026-10-20'
+export const FAQ_LAST_REVIEWED = '2026-10-23'
 
 export const faqSections: FaqSection[] = [
   {
@@ -29,14 +29,14 @@ export const faqSections: FaqSection[] = [
         slug: 'is-it-free',
         question: 'Is Nyxora Sync really free?',
         answer:
-          'Yes. Every written lesson, the resource directory, the playground, progress tracking, and the community features are free to use. There is no paywall, trial, or required purchase.',
+          'Yes. Every written lesson, the resource directory, the playground, progress tracking, certificates, and the community features are free to use. There is no paywall, trial, or required purchase.',
         related: { label: 'Start with the beginner track', href: '/learn/beginner' },
       },
       {
         slug: 'do-i-need-an-account',
         question: 'Do I need an account to learn?',
         answer:
-          'No. You can read every lesson and keep progress in your browser without signing in. An account is only needed if you want progress synced across devices, lesson discussions, a public profile, or the project showcase.',
+          'No. You can read every lesson and keep progress in your browser without signing in. An account is only needed if you want progress synced across devices, lesson discussions, a public profile, the project showcase, or completion certificates.',
         related: { label: 'See how progress works', href: '/dashboard' },
       },
       {
@@ -48,10 +48,10 @@ export const faqSections: FaqSection[] = [
       },
       {
         slug: 'certificates',
-        question: 'Do I get a certificate or credential?',
+        question: 'Do I get a certificate?',
         answer:
-          'No. Nyxora Sync does not issue certificates, diplomas, or accredited credentials. The lessons and projects are built to help you understand the stack and produce work you can show, not to replace a formal program.',
-        related: { label: 'Build something for the showcase', href: '/community/showcase' },
+          'Yes, but only as an informal completion record — not a certification. Sign in, finish every lesson in a track, and Nyxora Sync automatically issues a printable certificate with a public verification link. Nyxora Sync is not a recognized school, university, or accrediting body. The certificate is for showcase only; it is not a certified, accredited, or official qualification, and it may hold no value in real life. It records that you completed the lessons on this site, nothing more.',
+        related: { label: 'View your certificates', href: '/certificates' },
       },
       {
         slug: 'how-long',
@@ -85,7 +85,7 @@ export const faqSections: FaqSection[] = [
         slug: 'xp-and-badges',
         question: 'What are XP and badges for?',
         answer:
-          'XP and badges are a lightweight way to mark progress and keep momentum. They are for you, not for a certificate or a public ranking. You can hide your learning progress from other people in settings.',
+          'XP and badges are a lightweight way to mark progress and keep momentum. They are for you, not a public ranking, and they are separate from completion certificates. You can hide your learning progress from other people in settings.',
         related: { label: 'Manage your settings', href: '/settings' },
       },
       {

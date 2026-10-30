@@ -16,12 +16,13 @@ export default function PrivacyPage() {
       badge="Legal"
       title="Privacy Policy"
       intro="Learning does not require an account. This page explains the data that does exist, why, and how to get rid of it."
-      updated="October 20, 2026"
+      updated="October 23, 2026"
     >
       <h2>The short version</h2>
       <ul>
         <li>Progress and notes stay in your browser unless you sign in.</li>
         <li>An account stores your identity from GitHub, Google, or email, plus synced progress.</li>
+        <li>Completion certificates are stored only when you sign in and finish a track.</li>
         <li>Comments, projects, and profile fields you publish are public.</li>
         <li>We do not sell data, run advertising, or use third-party tracking scripts.</li>
       </ul>
@@ -50,6 +51,11 @@ export default function PrivacyPage() {
           last visited lesson. Sync happens only after you sign in.
         </li>
         <li>
+          <strong>Certificates:</strong> the track name, your display name, the issue date, and a
+          random verification ID for each completed track. Certificates are issued automatically
+          when every lesson in a track is complete.
+        </li>
+        <li>
           <strong>Preferences:</strong> theme, preferred track, whether your progress is visible to
           others
           {NEWSLETTER_ENABLED
@@ -69,6 +75,13 @@ export default function PrivacyPage() {
         <strong>Show my learning progress</strong> in <Link href="/settings">settings</Link>, your XP,
         completed lessons, streaks, and badges are hidden from other people. Your email address is
         never shown on a public profile.
+      </p>
+      <p>
+        Completion certificates are not shown on your public profile. Each certificate has a
+        verification page that shows your display name, track name, and issue date to anyone who has
+        the link. Search engines are asked not to index these pages, but the link itself is not
+        secret. Share it only with people you want to see that information. The certificate is an
+        informal, non-accredited record for showcase only, not an official qualification.
       </p>
       <p>
         Comments and projects can be deleted by their author. Deleting a parent comment also removes
@@ -165,7 +178,7 @@ export default function PrivacyPage() {
 
       <h2>Retention</h2>
       <ul>
-        <li>Account data remains until you request deletion.</li>
+        <li>Account data, including issued certificates, remains until you request deletion.</li>
         <li>Comments and projects remain until you delete them or your account is deleted.</li>
         {NEWSLETTER_ENABLED ? (
           <li>
@@ -189,6 +202,10 @@ export default function PrivacyPage() {
       </p>
       <ul>
         <li>Edit your profile and hide your progress in <Link href="/settings">settings</Link>.</li>
+        <li>
+          View your certificates in <Link href="/certificates">your certificate list</Link>; deleting
+          your account also deletes the certificate records.
+        </li>
         <li>Delete your comments and projects directly on the site.</li>
         {NEWSLETTER_ENABLED && (
           <li>

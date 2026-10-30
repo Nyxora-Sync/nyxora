@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
-import { BookOpen, Code2, ArrowRight, CheckCircle, Clock, Users, Trophy, Code2 as Code2Icon, Sparkles, Cpu, Smartphone, Brain, Cloud, Gamepad2, Monitor, Globe } from 'lucide-react'
+import { BookOpen, Code2, ArrowRight, CheckCircle, Clock, Users, Trophy, Code2 as Code2Icon, Sparkles, Smartphone, Brain, Cloud, Gamepad2, Monitor, Globe } from 'lucide-react'
 import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
 import { LanguagePaths } from '@/components/language-paths'
@@ -15,7 +15,6 @@ import { pageMetadata } from '@/lib/seo'
 const categoryIcons: Record<string, typeof Globe> = {
   'web-development': Globe,
   'programming-languages': Code2,
-  'embedded-systems': Cpu,
   'mobile-development': Smartphone,
   'data-science': Brain,
   'devops-cloud': Cloud,
@@ -31,23 +30,23 @@ const trackIcons: Record<string, typeof BookOpen> = {
   cpp: Code2,
   csharp: Code2,
   python: BookOpen,
-  embedded: Cpu,
 }
 
 const tracks = curriculumTracks.map((track) => {
-  const lessons = track.modules.reduce((sum, m) => sum + m.lessons.length, 0)
-  const totalHours = track.modules.reduce((sum, m) => sum + m.estimatedHours, 0)
+  const coreModules = track.modules.filter((m) => m.status !== 'advanced' && m.status !== 'planned')
+  const lessons = coreModules.reduce((sum, m) => sum + m.lessons.length, 0)
+  const totalHours = coreModules.reduce((sum, m) => sum + m.estimatedHours, 0)
   return {
     key: track.key,
     name: track.name,
     description: track.description,
     category: track.category,
     duration: `~${Math.round(totalHours / 10)} wks`,
-    modules: track.modules.length,
+    modules: coreModules.length,
     lessons,
     color: track.color,
     icon: trackIcons[track.key] ?? BookOpen,
-    modulesList: track.modules.map((m) => ({
+    modulesList: coreModules.map((m) => ({
       key: m.key,
       name: m.name,
       weeks: Math.max(1, Math.round(m.estimatedHours / 10)),
@@ -64,7 +63,7 @@ const uniqueLessonCount = new Set(
 
 export const metadata = pageMetadata({
   title: 'Explore All Learning Paths',
-  description: `Choose from ${trackCategories.filter(c => curriculumTracks.some(t => t.category === c.id)).length} categories with ${uniqueLessonCount} free written lessons across web development, programming languages, embedded systems, and more.`,
+  description: `Choose from ${trackCategories.filter(c => curriculumTracks.some(t => t.category === c.id)).length} categories with ${uniqueLessonCount} free written lessons across web development, programming languages, embedded systems, and more. Track progress and earn informal, non-accredited completion certificates.`,
   path: '/learn',
   keywords: ['web development', 'programming languages', 'embedded systems', 'IoT', 'Arduino', 'ESP32', 'C', 'C++', 'C#', 'Python', 'MERN', 'React', 'Node.js', 'free coding curriculum'],
 })
@@ -99,9 +98,9 @@ export default function LearnPage() {
                 Pick a category to explore its learning paths. Each path takes you from beginner to mastery.
               </p>
             </div>
-            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {trackCategories
-                .filter((cat) => curriculumTracks.some((t) => t.category === cat.id))
+                .filter((cat) => cat.id !== 'embedded-systems' && curriculumTracks.some((t) => t.category === cat.id))
                 .map((category) => {
                   const categoryTracks = tracks.filter((t) => t.category === category.id)
                   const totalLessons = categoryTracks.reduce((sum, t) => sum + t.lessons, 0)
@@ -256,56 +255,6 @@ export default function LearnPage() {
           </Reveal>
         </section>
 
-        {/* Embedded Systems */}
-        <section id="embedded" className="py-16 sm:py-20 scroll-mt-20">
-          <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-            <div className="mb-10 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-              <div className="max-w-2xl">
-                <p className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
-                  Embedded Systems & IoT
-                </p>
-                <h2 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">
-                  Code that touches the physical world
-                </h2>
-                <p className="mt-3 text-muted-foreground">
-                  Arduino, ESP32, sensors, actuators, and IoT cloud.
-                </p>
-              </div>
-              <Button asChild variant="outline" className="gap-2 self-start sm:self-auto">
-                <Link href="/categories/embedded-systems">
-                  View embedded tracks
-                  <ArrowRight className="h-4 w-4" aria-hidden="true" />
-                </Link>
-              </Button>
-            </div>
-            <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
-              {[
-                { title: 'Arduino Fundamentals', desc: 'GPIO, PWM, I2C/SPI, interrupts, and libraries', color: 'amber' },
-                { title: 'ESP32 WiFi & Bluetooth', desc: 'Web servers, BLE, MQTT, OTA updates', color: 'amber' },
-                { title: 'Sensors & Actuators', desc: 'Temperature, distance, motors, displays', color: 'amber' },
-                { title: 'RTOS & FreeRTOS', desc: 'Tasks, queues, semaphores, timing', color: 'amber' },
-                { title: 'IoT Cloud Integration', desc: 'AWS IoT, Azure, MQTT brokers', color: 'amber' },
-                { title: 'PCB Design Basics', desc: 'KiCad, schematics, layout, manufacturing', color: 'amber' },
-              ].map((item) => (
-                <Card key={item.title} className="group transition-all motion-safe:hover:-translate-y-0.5 hover:shadow-lg h-full border-border/50">
-                  <CardHeader>
-                    <div className={cn('mb-3 flex h-12 w-12 items-center justify-center rounded-xl', getAccent(item.color).icon)}>
-                      <Cpu className="h-6 w-6" aria-hidden="true" />
-                    </div>
-                    <CardTitle>{item.title}</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <CardDescription className="text-base">{item.desc}</CardDescription>
-                  </CardContent>
-                  <CardFooter className="border-t-0 pt-0">
-                    <span className="text-xs text-muted-foreground">Coming Soon</span>
-                  </CardFooter>
-                </Card>
-              ))}
-            </div>
-          </Reveal>
-        </section>
-
         {/* Coming Soon Categories */}
         <section className="py-16 sm:py-20 bg-muted/30">
           <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
@@ -351,10 +300,10 @@ export default function LearnPage() {
                 We aren&apos;t just another tutorial site. We&apos;re a complete, free learning platform.
               </p>
             </div>
-            <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
               {[
                 { icon: CheckCircle, title: '100% Free Forever', desc: 'No paywalls, no subscriptions, no upsells. All content is free and open source.', color: 'emerald' },
-                { icon: Clock, title: 'Self-Paced Learning', desc: 'Learn on your schedule. Track progress, pick up where you left off, no deadlines.', color: 'violet' },
+                { icon: Clock, title: 'Self-Paced Learning', desc: 'Learn on your schedule. Track progress, earn an informal, non-accredited completion certificate, and pick up where you left off.', color: 'violet' },
                 { icon: Trophy, title: 'Real Projects', desc: 'Build a portfolio site, blog, e-commerce app, and a multi-tenant SaaS capstone.', color: 'amber' },
                 { icon: Code2, title: 'Interactive Playgrounds', desc: 'Run HTML, CSS, JavaScript, React, Node, Express, Python examples in your browser. Zero setup.', color: 'rose' },
                 { icon: Users, title: 'Community', desc: 'Lesson discussions, a project showcase, and public learner profiles.', color: 'blue' },

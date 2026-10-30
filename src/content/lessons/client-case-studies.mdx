@@ -1,0 +1,166 @@
+Your capstone projects (TeamBoard, PulseBoard, Portfolio) are your proof — but only if you present them as **business solutions**, not code demos. Clients don't read code; they read outcomes.
+
+This lesson teaches you to transform every project into a case study that answers the client's real question: *"Can this person solve my problem?"*
+
+## The Case Study Formula
+
+```
+HEADLINE: Problem → Solution → Measurable Outcome
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+THE CLIENT (1 sentence)
+Who they are, what they do, the constraint they faced.
+
+THE PROBLEM (2–3 sentences)
+What was broken, costing money, or preventing growth?
+Use their language, not yours.
+
+THE SOLUTION (3–5 bullets)
+What you built, key technical decisions, and WHY.
+Mention trade-offs — it proves seniority.
+
+THE OUTCOME (metrics + testimonial)
+- Time saved / revenue added / conversion lift
+- "Before: X → After: Y"
+- Client quote or LinkedIn recommendation
+
+THE STACK (one line)
+Tech choices justified by the problem, not trends.
+```
+
+## Case Study Template (Copy This)
+
+```markdown
+# [Project Name] — [One-Line Outcome]
+
+**Client:** [Industry/Size] — [Anonymous or named with permission]
+**Timeline:** [X weeks] | **Budget Tier:** [Essential/Professional/Partnership]
+**Role:** Solo developer (full stack: architecture → deploy → handoff)
+
+## The Problem
+[2–3 sentences. What was the business pain? Manual process? Lost revenue? Technical debt?]
+
+> "We were losing ~$2,000/mo because customers couldn't self-serve their subscriptions." — Founder, SaaS startup
+
+## The Solution
+- **Architecture:** [One-line: e.g., "Next.js 14 + Supabase + Stripe Billing, deployed on Vercel"]
+- **Key Decisions:**
+  - [Decision 1] — because [reason]
+  - [Decision 2] — because [reason]
+  - [Trade-off] — chose X over Y because [constraint]
+- **Features Delivered:**
+  - [Feature 1] — [business value]
+  - [Feature 2] — [business value]
+- **Quality Gates:**
+  - 47 integration tests (Vitest + Playwright)
+  - CI/CD on every push (GitHub Actions)
+  - Lighthouse 95+ across all pages
+
+## The Outcome
+| Metric | Before | After |
+|--------|--------|-------|
+| [Primary KPI] | [X] | [Y] |
+| [Secondary KPI] | [X] | [Y] |
+
+- **Deployed:** [Date] | **Uptime:** 99.9% (30 days)
+- **Client quote:** "[Specific praise about communication, speed, or outcome]"
+
+## What I'd Do Differently
+[1–2 honest reflections. Shows you think like an owner, not a task-doer.]
+
+## Live Demo & Repo
+- **Demo:** [staging URL or Loom walkthrough]
+- **Repo:** [GitHub link — clean history, good README]
+```
+
+## Applying This to Your Capstones
+
+### TeamBoard (Collaborative Task Board)
+| Element | Your Case Study Version |
+|---------|------------------------|
+| **Problem** | "Remote teams waste 30% of meeting time syncing task status across tools." |
+| **Solution** | Real-time MERN board with Socket.io, drag-and-drop, comments, file uploads. Chose **MongoDB + optimistic UI** over CRDT for simplicity — acceptable for under 100 concurrent users. |
+| **Outcome** | "Reduced status sync meetings from daily to weekly. Team ships 20% faster." |
+| **Stack** | React 19, Express, MongoDB, Socket.io, Zod, Vitest, Vercel + Render |
+
+### PulseBoard (Multi-Tenant SaaS)
+| Element | Your Case Study Version |
+|---------|------------------------|
+| **Problem** | "Agency needed white-labeled feedback boards for 15 clients — building separate apps was impossible." |
+| **Solution** | Multi-tenant SaaS with org-scoped data, role-based invites, audit logs, BullMQ background jobs, Stripe billing stub. **Key trade-off:** Modular monolith over microservices — one deploy, documented extraction triggers. |
+| **Outcome** | "Onboarded 3 clients in week 1. Zero data leaks in cross-tenant tests." |
+| **Stack** | React 19, Express, MongoDB, Redis, BullMQ, Socket.io, Stripe, Playwright, Vercel + Render |
+
+### Personal Portfolio
+| Element | Your Case Study Version |
+|---------|------------------------|
+| **Problem** | "Junior dev needed a professional presence to apply for remote roles — no design budget, needed fast deploy." |
+| **Solution** | Static site (HTML/CSS/JS) with semantic markup, dark mode, contact form via Formspree, deployed on Vercel with custom domain. Chose **zero-framework** for 99/100 Lighthouse and $0 hosting. |
+| **Outcome** | "Got 3 interview requests in 2 weeks. Recruiters cited 'clean code visible on GitHub.'" |
+| **Stack** | HTML5, CSS3 (Grid/Flex), Vanilla JS, Vercel |
+
+## The 60-Second Loom Walkthrough
+For every case study, record a 60-second screen capture:
+1. **0–10s**: Show the live app working (core flow)
+2. **10–30s**: Click through 2–3 key features
+3. **30–50s**: Show GitHub — clean commits, tests passing, README
+4. **50–60s**: "Built in X weeks. Happy to walk through the code."
+
+**Tools**: Loom (free), Kap (macOS), OBS (cross-platform). Host on Loom or upload to GitHub Releases.
+
+## Portfolio Page Structure (GitHub Pages / Vercel / Notion)
+
+```
+/portfolio
+├── index.html          # Hero + 3 featured case studies
+├── case-studies/       # One page per project (use template above)
+├── about.html          # Your niche, process, payment terms
+├── contact.html        # Calendly link + email form
+└── assets/
+    ├── loom-thumbnails/
+    └── screenshots/
+```
+
+**Minimum viable portfolio**: 3 case studies + about + contact. Ship in one weekend.
+
+## GitHub Profile Optimization
+- **Pinned repos**: 4–6 repos in this order:
+  1. PulseBoard (most complex)
+  2. TeamBoard (real-time showcase)
+  3. Portfolio (design sense)
+  4. One open-source contribution
+  5. One sharp utility (shows taste)
+  6. One kata/micro-project (shows consistency)
+- **Profile README** (github.com/username/username):
+  ```markdown
+  # Hi, I'm [Name] — [Your Niche One-Liner]
+  
+  🔗 **Portfolio:** [link]  |  📧 **Email:** [email]  |  💬 **Book a call:** [Calendly]
+  
+  **What I do:** [2–3 bullets of outcomes you deliver]
+  
+  **Recent work:** [Link to 2 case studies]
+  
+  **Stack:** [Your core stack — keep it tight]
+  ```
+
+## Exercise: Write Your 3 Case Studies This Week
+1. Open the template above
+2. Fill it for TeamBoard, PulseBoard, Portfolio
+3. Record 3 Loom videos (60s each)
+4. Deploy to Vercel/Netlify/GitHub Pages
+5. Add links to GitHub profile README
+
+**Time budget**: 4–6 hours total. Do not over-polish — ship and iterate.
+
+## Key Takeaways
+- **Case studies sell; code repos don't** — clients read outcomes, not implementations
+- **Trade-offs > features** — explaining *why* you didn't use X proves seniority
+- **One-liner outcome in the headline** — busy clients scan, they don't read
+- **Loom video = 10× more engagement** than static screenshots
+- **Ship imperfect case studies** — a live "B+" case study beats a perfect draft that never publishes
+
+## Resources
+- [How to Write a Case Study for Your Portfolio](https://www.freecodecamp.org/news/how-to-build-a-developer-portfolio-website/) — freeCodeCamp
+- [Portfolio Case Study Examples](https://github.com/bradtraversy) — Brad Traversy
+- [Loom for Developers](https://www.loom.com/use-cases/engineering) — Official guide

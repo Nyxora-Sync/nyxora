@@ -1,0 +1,3150 @@
+
+===== FILE: src/app/api/admin/messages/[id]/route.ts =====
+import { auth } from '@/lib/auth/auth'
+import { isAdmin } from '@/lib/admin'
+import { jsonError } from '@/lib/community'
+import { prisma } from '@/lib/db'
+
+type RouteContext = { params: Promise<{ id: string }> }
+
+export async function PATCH(request: Request, { params }: RouteContext) {
+  const session = await auth()
+  if (!isAdmin(session?.user?.email)) {
+    return jsonError(404, 'NOT_FOUND', 'Message not found.')
+  }
+
+  if (!process.env.DATABASE_URL) {
+    return jsonError(503, 'CONTACT_UNAVAILABLE', 'The contact inbox is temporarily unavailable.')
+  }
+
+  const body = (await request.json().catch(() => null)) as { handled?: unknown } | null
+  if (!body || typeof body.handled !== 'boolean') {
+    return jsonError(422, 'VALIDATION_ERROR', 'Choose whether the message is handled.')
+  }
+
+  const { id } = await params
+  const updated = await prisma.contactMessage.updateMany({
+    where: { id },
+    data: { handled: body.handled },
+  })
+
+  if (updated.count === 0) {
+    return jsonError(404, 'NOT_FOUND', 'Message not found.')
+  }
+
+  return Response.json(
+    { data: { id, handled: body.handled } },
+    { headers: { 'Cache-Control': 'no-store' } }
+  )
+}
+
+
+===== FILE: src/app/api/admin/newsletter/route.ts =====
+import { z } from 'zod'
+import { auth } from '@/lib/auth/auth'
+import { prisma } from '@/lib/db'
+import { jsonError } from '@/lib/community'
+import {
+  isNewsletterAdmin,
+  newsletterEmailConfigured,
+  sendNewsletterBroadcast,
+} from '@/lib/newsletter'
+import { siteUrl } from '@/lib/seo'
+import { NEWSLETTER_ENABLED } from '@/lib/newsletter-feature'
+
+// Sending to a small list can take longer than the default route budget. The
+// admin UI is intentionally limited to a few hundred recipients per send.
+export const maxDuration = 60
+
+const MAX_RECIPIENTS = 500
+
+const schema = z
+  .object({
+    subject: z
+      .string()
+      .trim()
+      .min(3, 'Write a subject')
+      .max(140, 'Keep the subject under 140 characters')
+      .refine((value) => !/[\r\n]/.test(value), 'The subject must be a single line'),
+    body: z
+      .string()
+      .trim()
+      .min(20, 'Write at least a couple of sentences')
+      .max(20_000, 'Keep the email under 20,000 characters'),
+    test: z.boolean().optional().default(false),
+    confirm: z.string().optional(),
+  })
+  .strict()
+
+export async function POST(request: Request) {
+  if (!NEWSLETTER_ENABLED) {
+    return jsonError(404, 'NEWSLETTER_DISABLED', 'The newsletter is not available.')
+  }
+
+  if (!process.env.DATABASE_URL) {
+    return jsonError(503, 'NEWSLETTER_UNAVAILABLE', 'The newsletter database is not configured.')
+  }
+
+  const session = await auth()
+  const adminEmail = session?.user?.email
+  if (!isNewsletterAdmin(adminEmail)) {
+    return jsonError(403, 'FORBIDDEN', 'You do not have access to the newsletter admin.')
+  }
+  if (!newsletterEmailConfigured()) {
+    return jsonError(503, 'EMAIL_UNAVAILABLE', 'Email delivery is not configured.')
+  }
+
+  const body = await request.json().catch(() => null)
+  const parsed = schema.safeParse(body)
+  if (!parsed.success) {
+    return Response.json(
+      {
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: parsed.error.issues[0]?.message ?? 'Check the subject and body.',
+        },
+      },
+      { status: 422 }
+    )
+  }
+
+  const { subject, body: text, test, confirm } = parsed.data
+
+  try {
+    if (test) {
+      const result = await sendNewsletterBroadcast({
+        subject,
+        body: text,
+        recipients: [],
+        origin: siteUrl,
+        testTo: adminEmail!,
+      })
+
+      await prisma.newsletterSend.create({
+        data: {
+          sentBy: adminEmail!,
+          subject,
+          recipientCount: 1,
+          failedCount: 0,
+          isTest: true,
+        },
+      })
+
+      return Response.json({ data: { ...result, total: 1, test: true } })
+    }
+
+    if (confirm !== 'SEND') {
+      return jsonError(400, 'CONFIRMATION_REQUIRED', 'Type SEND to confirm a real broadcast.')
+    }
+
+    const lastSend = await prisma.newsletterSend.findFirst({
+      where: { isTest: false },
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true },
+    })
+    if (lastSend && Date.now() - lastSend.createdAt.getTime() < 60_000) {
+      return jsonError(
+        429,
+        'RATE_LIMITED',
+        'A broadcast was just sent. Wait a minute before sending another one.'
+      )
+    }
+
+    const recipients = await prisma.newsletterSubscriber.findMany({
+      where: { confirmedAt: { not: null } },
+      select: { id: true, email: true },
+      orderBy: { createdAt: 'asc' },
+      take: MAX_RECIPIENTS + 1,
+    })
+
+    if (recipients.length === 0) {
+      return jsonError(400, 'NO_RECIPIENTS', 'There are no confirmed subscribers yet.')
+    }
+    if (recipients.length > MAX_RECIPIENTS) {
+      return jsonError(
+        400,
+        'TOO_MANY_RECIPIENTS',
+        `This broadcast has more than ${MAX_RECIPIENTS} recipients. Send it in smaller batches.`
+      )
+    }
+
+    const result = await sendNewsletterBroadcast({
+      subject,
+      body: text,
+      recipients,
+      origin: siteUrl,
+    })
+
+    await prisma.newsletterSend.create({
+      data: {
+        sentBy: adminEmail!,
+        subject,
+        recipientCount: recipients.length,
+        failedCount: result.failed,
+        isTest: false,
+      },
+    })
+
+    if (result.sent === 0) {
+      return Response.json(
+        {
+          error: {
+            code: 'SEND_FAILED',
+            message: 'Every recipient failed. Check the email server configuration and try again.',
+          },
+          data: { ...result, total: recipients.length },
+        },
+        { status: 502 }
+      )
+    }
+
+    return Response.json({
+      data: { ...result, total: recipients.length, test: false },
+    })
+  } catch (error) {
+    console.error(
+      'Newsletter broadcast failed:',
+      error instanceof Error ? error.message : error
+    )
+    return jsonError(
+      502,
+      'SEND_FAILED',
+      'The email server did not accept the send. Check the server logs and try again.'
+    )
+  }
+}
+
+
+===== FILE: src/app/api/admin/reports/[id]/route.ts =====
+import { z } from 'zod'
+import { auth } from '@/lib/auth/auth'
+import { isAdmin } from '@/lib/admin'
+import { prisma } from '@/lib/db'
+import { jsonError } from '@/lib/community'
+import { getRequestIp, hashIp, writeAuditLog } from '@/lib/security'
+
+const actionSchema = z
+  .object({
+    action: z.enum(['resolve', 'dismiss', 'delete']),
+    note: z.string().trim().max(1000).optional(),
+  })
+  .strict()
+
+type RouteContext = { params: Promise<{ id: string }> }
+
+export async function PATCH(request: Request, { params }: RouteContext) {
+  const session = await auth()
+  const adminId = session?.user?.id
+  if (!adminId || !isAdmin(session?.user?.email)) {
+    return jsonError(403, 'FORBIDDEN', 'Maintainer access required.')
+  }
+
+  const { id } = await params
+  const body = await request.json().catch(() => null)
+  const parsed = actionSchema.safeParse(body)
+  if (!parsed.success) {
+    return jsonError(422, 'VALIDATION_ERROR', 'Choose resolve, dismiss, or delete.')
+  }
+
+  const report = await prisma.report.findUnique({ where: { id } })
+  if (!report) return jsonError(404, 'NOT_FOUND', 'Report not found.')
+
+  const { action, note } = parsed.data
+  const ipHash = hashIp(getRequestIp(request))
+  const reviewedAt = new Date()
+
+  if (action === 'delete') {
+    if (report.targetType === 'profile') {
+      return jsonError(400, 'UNSUPPORTED', 'Profile reports cannot delete an account from this queue.')
+    }
+
+    if (report.targetType === 'project') {
+      await prisma.$transaction([
+        prisma.comment.deleteMany({
+          where: { targetType: 'project', targetId: report.targetId },
+        }),
+        prisma.project.deleteMany({ where: { id: report.targetId } }),
+      ])
+    } else {
+      const comment = await prisma.comment.findUnique({
+        where: { id: report.targetId },
+        select: { parentId: true },
+      })
+      if (comment) {
+        await prisma.comment.deleteMany({
+          where: comment.parentId
+            ? { id: report.targetId }
+            : { OR: [{ id: report.targetId }, { parentId: report.targetId }] },
+        })
+      }
+    }
+
+    await prisma.report.updateMany({
+      where: {
+        targetType: report.targetType,
+        targetId: report.targetId,
+        status: 'open',
+      },
+      data: {
+        status: 'resolved',
+        resolutionNote: note || 'Content removed by a maintainer.',
+        reviewedById: adminId,
+        reviewedAt,
+      },
+    })
+
+    await writeAuditLog({
+      actorId: adminId,
+      action: `moderation.delete_${report.targetType}`,
+      targetType: report.targetType,
+      targetId: report.targetId,
+      metadata: { reportId: report.id, reason: report.reason },
+      ipHash,
+    })
+
+    return Response.json({ data: { status: 'deleted' } })
+  }
+
+  const status = action === 'resolve' ? 'resolved' : 'dismissed'
+  const updated = await prisma.report.update({
+    where: { id },
+    data: {
+      status,
+      resolutionNote: note || null,
+      reviewedById: adminId,
+      reviewedAt,
+    },
+  })
+
+  await writeAuditLog({
+    actorId: adminId,
+    action: `moderation.${action}_report`,
+    targetType: report.targetType,
+    targetId: report.targetId,
+    metadata: { reportId: report.id, reason: report.reason },
+    ipHash,
+  })
+
+  return Response.json({ data: { status: updated.status } })
+}
+
+
+===== FILE: src/app/api/admin/reports/route.ts =====
+import { auth } from '@/lib/auth/auth'
+import { isAdmin } from '@/lib/admin'
+import { prisma } from '@/lib/db'
+import { jsonError } from '@/lib/community'
+import { getLessonHref } from '@/lib/lesson-links'
+
+export const dynamic = 'force-dynamic'
+
+type ReportRow = Awaited<ReturnType<typeof loadReports>>[number]
+
+async function loadReports(status: string) {
+  return prisma.report.findMany({
+    where: status === 'all' ? {} : { status },
+    orderBy: { createdAt: 'desc' },
+    take: 100,
+    include: {
+      reporter: { select: { id: true, name: true, image: true, email: true } },
+      reviewedBy: { select: { id: true, name: true } },
+    },
+  })
+}
+
+export async function GET(request: Request) {
+  const session = await auth()
+  if (!isAdmin(session?.user?.email)) {
+    return jsonError(403, 'FORBIDDEN', 'Maintainer access required.')
+  }
+
+  const url = new URL(request.url)
+  const statusParam = url.searchParams.get('status')
+  const status = ['open', 'resolved', 'dismissed', 'all'].includes(statusParam ?? '')
+    ? (statusParam as string)
+    : 'open'
+
+  const reports = await loadReports(status)
+
+  const projectIds = reports
+    .filter((report) => report.targetType === 'project')
+    .map((report) => report.targetId)
+  const commentIds = reports
+    .filter((report) => report.targetType === 'comment')
+    .map((report) => report.targetId)
+  const profileIds = reports
+    .filter((report) => report.targetType === 'profile')
+    .map((report) => report.targetId)
+
+  const [projects, comments, profiles] = await Promise.all([
+    projectIds.length
+      ? prisma.project.findMany({
+          where: { id: { in: projectIds } },
+          select: {
+            id: true,
+            title: true,
+            description: true,
+            userId: true,
+            user: { select: { name: true } },
+          },
+        })
+      : [],
+    commentIds.length
+      ? prisma.comment.findMany({
+          where: { id: { in: commentIds } },
+          select: {
+            id: true,
+            body: true,
+            userId: true,
+            targetType: true,
+            targetId: true,
+            user: { select: { name: true } },
+          },
+        })
+      : [],
+    profileIds.length
+      ? prisma.user.findMany({
+          where: { id: { in: profileIds } },
+          select: { id: true, name: true, email: true, image: true },
+        })
+      : [],
+  ])
+
+  const projectById = new Map(projects.map((project) => [project.id, project]))
+  const commentById = new Map(comments.map((comment) => [comment.id, comment]))
+  const profileById = new Map(profiles.map((profile) => [profile.id, profile]))
+
+  const data = reports.map((report: ReportRow) => {
+    let title = 'Deleted content'
+    let preview = ''
+    let href: string | null = null
+    let authorName: string | null = null
+    let available = true
+
+    if (report.targetType === 'project') {
+      const project = projectById.get(report.targetId)
+      if (!project) {
+        available = false
+      } else {
+        title = project.title
+        preview = project.description.slice(0, 240)
+        href = `/community/showcase/${project.id}`
+        authorName = project.user.name
+      }
+    } else if (report.targetType === 'comment') {
+      const comment = commentById.get(report.targetId)
+      if (!comment) {
+        available = false
+      } else {
+        title = 'Comment'
+        preview = comment.body.slice(0, 240)
+        href =
+          comment.targetType === 'lesson'
+            ? `${getLessonHref(comment.targetId)}#discussion-heading`
+            : `/community/showcase/${comment.targetId}?comment=${comment.id}#discussion-heading`
+        authorName = comment.user.name
+      }
+    } else {
+      const profile = profileById.get(report.targetId)
+      if (!profile) {
+        available = false
+      } else {
+        title = profile.name ?? 'Unnamed learner'
+        preview = profile.email
+        href = `/community/people/${profile.id}`
+        authorName = profile.name
+      }
+    }
+
+    return {
+      id: report.id,
+      targetType: report.targetType,
+      targetId: report.targetId,
+      reason: report.reason,
+      details: report.details,
+      status: report.status,
+      resolutionNote: report.resolutionNote,
+      createdAt: report.createdAt.toISOString(),
+      reviewedAt: report.reviewedAt?.toISOString() ?? null,
+      reviewedBy: report.reviewedBy,
+      reporter: {
+        id: report.reporter.id,
+        name: report.reporter.name,
+        image: report.reporter.image,
+      },
+      target: { title, preview, href, authorName, available },
+    }
+  })
+
+  return Response.json(
+    { data, status },
+    { headers: { 'Cache-Control': 'no-store' } }
+  )
+}
+
+
+===== FILE: src/app/api/auth/[...nextauth]/route.ts =====
+import { handlers } from '@/lib/auth/auth'
+
+export const GET = handlers.GET
+export const POST = handlers.POST
+
+
+===== FILE: src/app/api/badges/pending/route.ts =====
+import { z } from 'zod'
+import { auth } from '@/lib/auth/auth'
+import { prisma } from '@/lib/db'
+import { jsonError } from '@/lib/community'
+
+export const dynamic = 'force-dynamic'
+
+/** Badges newly persisted on another device that this browser has not shown. */
+export async function GET() {
+  const session = await auth()
+  const userId = session?.user?.id
+  if (!userId) return jsonError(401, 'UNAUTHORIZED', 'Sign in to load badge notifications.')
+
+  const rows = await prisma.userBadge.findMany({
+    where: { userId, notifiedAt: null },
+    select: { badge: { select: { key: true } } },
+    orderBy: { earnedAt: 'asc' },
+    take: 50,
+  })
+
+  return Response.json(
+    { data: { keys: rows.map((row) => row.badge.key) } },
+    { headers: { 'Cache-Control': 'no-store' } }
+  )
+}
+
+const markSchema = z.object({
+  keys: z.array(z.string().min(1).max(160)).max(100),
+}).strict()
+
+/** Mark toast-seen badges so other devices do not repeat the celebration. */
+export async function POST(request: Request) {
+  const session = await auth()
+  const userId = session?.user?.id
+  if (!userId) return jsonError(401, 'UNAUTHORIZED', 'Sign in to update badge notifications.')
+
+  const body = await request.json().catch(() => null)
+  const parsed = markSchema.safeParse(body)
+  if (!parsed.success || parsed.data.keys.length === 0) {
+    return jsonError(422, 'VALIDATION_ERROR', 'Provide at least one badge key.')
+  }
+
+  await prisma.userBadge.updateMany({
+    where: {
+      userId,
+      notifiedAt: null,
+      badge: { key: { in: Array.from(new Set(parsed.data.keys)) } },
+    },
+    data: { notifiedAt: new Date() },
+  })
+
+  return Response.json({ data: { ok: true } })
+}
+
+
+===== FILE: src/app/api/community/avatar/[id]/route.ts =====
+import { prisma } from '@/lib/db'
+import { communityEnabled } from '@/lib/community'
+
+type RouteContext = { params: Promise<{ id: string }> }
+
+/** Public, immutable-by-URL avatar image served from PostgreSQL. */
+export async function GET(_request: Request, { params }: RouteContext) {
+  if (!communityEnabled()) {
+    return new Response('Not found', { status: 404 })
+  }
+
+  const { id } = await params
+  const avatar = await prisma.userAvatar.findUnique({
+    where: { userId: id },
+    select: { mime: true, data: true },
+  })
+
+  if (!avatar?.data) {
+    return new Response('Not found', { status: 404 })
+  }
+
+  const binary = atob(avatar.data)
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index)
+  }
+
+  return new Response(bytes, {
+    headers: {
+      'Content-Type': avatar.mime,
+      'Content-Length': String(bytes.byteLength),
+      'Cache-Control': 'public, max-age=31536000, immutable',
+      'X-Content-Type-Options': 'nosniff',
+    },
+  })
+}
+
+
+===== FILE: src/app/api/community/comments/[id]/route.ts =====
+import { auth } from '@/lib/auth/auth'
+import { prisma } from '@/lib/db'
+import { COMMUNITY_DISABLED, communityEnabled, jsonError } from '@/lib/community'
+
+
+
+type RouteContext = { params: Promise<{ id: string }> }
+
+export async function DELETE(request: Request, { params }: RouteContext) {
+  if (!communityEnabled()) {
+    return jsonError(COMMUNITY_DISABLED.status, COMMUNITY_DISABLED.code, COMMUNITY_DISABLED.message)
+  }
+
+  const session = await auth()
+  const userId = session?.user?.id
+  if (!userId) return jsonError(401, 'UNAUTHORIZED', 'Sign in first.')
+
+  const { id } = await params
+  const comment = await prisma.comment.findUnique({ where: { id }, select: { userId: true } })
+  if (!comment) return jsonError(404, 'NOT_FOUND', 'Comment not found.')
+  if (comment.userId !== userId) {
+    return jsonError(403, 'FORBIDDEN', 'You can only delete your own comment.')
+  }
+
+  // Replies cascade with the parent.
+  await prisma.comment.delete({ where: { id } })
+  return new Response(null, { status: 204 })
+}
+
+
+===== FILE: src/app/api/community/comments/route.ts =====
+import { after } from 'next/server'
+import { auth } from '@/lib/auth/auth'
+import { prisma } from '@/lib/db'
+import {
+  COMMUNITY_DISABLED,
+  commentSchema,
+  communityEnabled,
+  isKnownLesson,
+  jsonError,
+  publicUserSelect,
+  sinceMinutes,
+} from '@/lib/community'
+import { notifyCommentCreated, notifyCommentReply } from '@/lib/realtime/notify'
+import { syncUserBadges } from '@/lib/badge-awards'
+
+
+
+async function getComments(targetType: string, targetId: string) {
+
+  const comments = await prisma.comment.findMany({
+    where: {
+      targetType,
+      targetId,
+      parentId: null,
+    },
+    orderBy: { createdAt: 'asc' },
+    take: 200,
+    include: {
+      user: { select: publicUserSelect },
+      replies: {
+        orderBy: { createdAt: 'asc' },
+        take: 50,
+        include: { user: { select: publicUserSelect } },
+      },
+    },
+  })
+
+  return comments.map((comment) => ({
+    id: comment.id,
+    body: comment.body,
+    createdAt: comment.createdAt.toISOString(),
+    author: comment.user,
+    replies: comment.replies.map((reply) => ({
+      id: reply.id,
+      body: reply.body,
+      createdAt: reply.createdAt.toISOString(),
+      author: reply.user,
+    })),
+  }))
+}
+
+export async function GET(request: Request) {
+  if (!communityEnabled()) {
+    return jsonError(COMMUNITY_DISABLED.status, COMMUNITY_DISABLED.code, COMMUNITY_DISABLED.message)
+  }
+
+  const url = new URL(request.url)
+  const targetType = url.searchParams.get('targetType')
+  const targetId = url.searchParams.get('targetId')
+
+  if (
+    (targetType !== 'lesson' && targetType !== 'project') ||
+    !targetId
+  ) {
+    return jsonError(422, 'VALIDATION_ERROR', 'Provide a valid targetType and targetId.')
+  }
+
+  const data = await getComments(targetType, targetId)
+
+  return Response.json(
+    { data },
+    {
+      headers: {
+        // The serialized response is cached server-side for 15 seconds. Keep
+        // the browser copy fresh so new comments appear on the next view.
+        'Cache-Control': 'public, max-age=0, must-revalidate',
+      },
+    }
+  )
+}
+
+export async function POST(request: Request) {
+  if (!communityEnabled()) {
+    return jsonError(COMMUNITY_DISABLED.status, COMMUNITY_DISABLED.code, COMMUNITY_DISABLED.message)
+  }
+
+  const session = await auth()
+  const userId = session?.user?.id
+  if (!userId) return jsonError(401, 'UNAUTHORIZED', 'Sign in to join the discussion.')
+
+  const body = await request.json().catch(() => null)
+  const parsed = commentSchema.safeParse(body)
+  if (!parsed.success) {
+    return Response.json(
+      {
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: parsed.error.issues[0]?.message ?? 'Invalid comment',
+        },
+      },
+      { status: 422 }
+    )
+  }
+
+  const { targetType, targetId, body: commentBody, parentId } = parsed.data
+
+  if (targetType === 'lesson' && !isKnownLesson(targetId)) {
+    return jsonError(404, 'NOT_FOUND', 'That lesson does not exist.')
+  }
+  if (targetType === 'project') {
+    const project = await prisma.project.findUnique({ where: { id: targetId }, select: { id: true } })
+    if (!project) return jsonError(404, 'NOT_FOUND', 'That project does not exist.')
+  }
+
+  if (parentId) {
+    const parent = await prisma.comment.findUnique({
+      where: { id: parentId },
+      select: { parentId: true, targetType: true, targetId: true },
+    })
+    if (!parent || parent.targetType !== targetType || parent.targetId !== targetId) {
+      return jsonError(404, 'NOT_FOUND', 'The comment you are replying to does not exist.')
+    }
+    if (parent.parentId) {
+      return jsonError(422, 'VALIDATION_ERROR', 'Replies can only be one level deep.')
+    }
+  }
+
+  const recent = await prisma.comment.count({
+    where: { userId, createdAt: { gte: sinceMinutes(10) } },
+  })
+  if (recent >= 12) {
+    return jsonError(429, 'RATE_LIMITED', 'You are posting quickly — take a breath and try again in a few minutes.')
+  }
+
+  const comment = await prisma.comment.create({
+    data: { userId, targetType, targetId, body: commentBody, parentId: parentId ?? null },
+    include: { user: { select: publicUserSelect } },
+  })
+
+  after(async () => {
+    try {
+      if (parentId) {
+        await notifyCommentReply(comment.id, parentId, userId)
+      } else {
+        await notifyCommentCreated(comment.id, targetType, targetId, userId)
+      }
+      await syncUserBadges(userId)
+    } catch (error) {
+      console.error('Failed to finish comment side effects', error)
+    }
+  })
+
+  return Response.json(
+    {
+      data: {
+        id: comment.id,
+        body: comment.body,
+        createdAt: comment.createdAt.toISOString(),
+        author: comment.user,
+        replies: [],
+      },
+    },
+    { status: 201 }
+  )
+}
+
+
+===== FILE: src/app/api/community/follow-requests/[id]/route.ts =====
+import { after } from 'next/server'
+import { auth } from '@/lib/auth/auth'
+import { prisma } from '@/lib/db'
+import {
+  COMMUNITY_DISABLED,
+  communityEnabled,
+  jsonError,
+} from '@/lib/community'
+import { notifyFollowAccepted, notifyFollowRejected, notifyFollowRequest } from '@/lib/realtime/notify'
+import { syncUserBadges } from '@/lib/badge-awards'
+
+type RouteContext = { params: Promise<{ id: string }> }
+
+/** Create a follow request. */
+export async function POST(request: Request, { params }: RouteContext) {
+  if (!communityEnabled()) {
+    return jsonError(COMMUNITY_DISABLED.status, COMMUNITY_DISABLED.code, COMMUNITY_DISABLED.message)
+  }
+
+  const session = await auth()
+  const userId = session?.user?.id
+  if (!userId) return jsonError(401, 'UNAUTHORIZED', 'Sign in first.')
+
+  const body = await request.json().catch(() => null)
+  const action = body?.action
+  const targetUserId = body?.targetUserId
+
+  // Create a new follow request
+  if (action === 'create' && targetUserId) {
+    if (targetUserId === userId) {
+      return jsonError(422, 'VALIDATION_ERROR', 'You cannot follow yourself.')
+    }
+
+    const target = await prisma.user.findUnique({
+      where: { id: targetUserId },
+      select: { id: true },
+    })
+    if (!target) return jsonError(404, 'NOT_FOUND', 'Profile not found.')
+
+    // Check if already following or requested
+    const existing = await prisma.follow.findUnique({
+      where: {
+        followerId_followingId: {
+          followerId: userId,
+          followingId: targetUserId,
+        },
+      },
+      select: { status: true },
+    })
+
+    if (existing) {
+      if (existing.status === 'accepted') {
+        return jsonError(422, 'VALIDATION_ERROR', 'You are already following this user.')
+      }
+      if (existing.status === 'pending') {
+        return jsonError(422, 'VALIDATION_ERROR', 'You already have a pending follow request.')
+      }
+      // If rejected, allow new request
+    }
+
+    const follow = existing
+      ? await prisma.follow.update({
+          where: {
+            followerId_followingId: {
+              followerId: userId,
+              followingId: targetUserId,
+            },
+          },
+          data: { status: 'pending' },
+        })
+      : await prisma.follow.create({
+          data: {
+            followerId: userId,
+            followingId: targetUserId,
+            status: 'pending',
+          },
+        })
+
+    try {
+      await notifyFollowRequest(userId, targetUserId)
+    } catch (error) {
+      console.error('Failed to create follow request notification', error)
+    }
+
+    return Response.json({ data: { status: 'pending', requestId: follow.id } }, { status: 201 })
+  }
+
+  // Accept or reject an incoming follow request
+  if (action !== 'accept' && action !== 'reject') {
+    return jsonError(422, 'VALIDATION_ERROR', 'Choose accept, reject, or create.')
+  }
+
+  const { id } = await params
+  const follow = await prisma.follow.findFirst({
+    where: { id, followingId: userId, status: 'pending' },
+    select: { id: true, followerId: true },
+  })
+  if (!follow) {
+    return jsonError(404, 'NOT_FOUND', 'This follow request is no longer pending.')
+  }
+
+  const status = action === 'accept' ? 'accepted' : 'rejected'
+  const updated = await prisma.follow.updateMany({
+    where: { id, followingId: userId, status: 'pending' },
+    data: { status },
+  })
+  if (updated.count === 0) {
+    return jsonError(404, 'NOT_FOUND', 'This follow request is no longer pending.')
+  }
+
+  try {
+    if (action === 'accept') {
+      await notifyFollowAccepted(follow.followerId, userId)
+    } else {
+      await notifyFollowRejected(follow.followerId, userId)
+    }
+  } catch (error) {
+    console.error('Failed to create follow response notification', error)
+  }
+
+  if (action === 'accept') {
+    after(async () => {
+      try {
+        await syncUserBadges(userId)
+      } catch (error) {
+        console.error('Failed to sync follower badges', error)
+      }
+    })
+  }
+
+  return Response.json({
+    data: { status: action === 'accept' ? 'following' : 'none' },
+  })
+}
+
+
+===== FILE: src/app/api/community/people/[id]/follow/route.ts =====
+import { after } from 'next/server'
+import { Prisma } from '@prisma/client'
+import { auth } from '@/lib/auth/auth'
+import { prisma } from '@/lib/db'
+import {
+  COMMUNITY_DISABLED,
+  communityEnabled,
+  jsonError,
+  sinceMinutes,
+} from '@/lib/community'
+import { notifyFollowRequest } from '@/lib/realtime/notify'
+import { syncUserBadges } from '@/lib/badge-awards'
+
+type RouteContext = { params: Promise<{ id: string }> }
+
+/** Send a follow request. The target must accept before it becomes a follow. */
+export async function POST(_request: Request, { params }: RouteContext) {
+  if (!communityEnabled()) {
+    return jsonError(COMMUNITY_DISABLED.status, COMMUNITY_DISABLED.code, COMMUNITY_DISABLED.message)
+  }
+
+  const session = await auth()
+  const userId = session?.user?.id
+  if (!userId) return jsonError(401, 'UNAUTHORIZED', 'Sign in to follow someone.')
+
+  const { id } = await params
+  if (id === userId) return jsonError(400, 'INVALID_REQUEST', 'You cannot follow yourself.')
+
+  const target = await prisma.user.findUnique({
+    where: { id },
+    select: { id: true },
+  })
+  if (!target) return jsonError(404, 'NOT_FOUND', 'Profile not found.')
+
+  const [existing, reverse] = await Promise.all([
+    prisma.follow.findUnique({
+      where: {
+        followerId_followingId: { followerId: userId, followingId: id },
+      },
+      select: { id: true, status: true },
+    }),
+    prisma.follow.findUnique({
+      where: {
+        followerId_followingId: { followerId: id, followingId: userId },
+      },
+      select: { id: true, status: true },
+    }),
+  ])
+
+  if (existing?.status === 'accepted') {
+    return jsonError(409, 'ALREADY_FOLLOWING', 'You already follow this learner.')
+  }
+  if (existing?.status === 'pending') {
+    return jsonError(409, 'REQUEST_PENDING', 'Your follow request is already pending.')
+  }
+  if (reverse?.status === 'pending') {
+    return jsonError(
+      409,
+      'INCOMING_REQUEST',
+      'This learner has already sent you a follow request. Accept it from your profile.'
+    )
+  }
+
+  const recent = await prisma.follow.count({
+    where: { followerId: userId, createdAt: { gte: sinceMinutes(24 * 60) } },
+  })
+  if (recent >= 30) {
+    return jsonError(429, 'RATE_LIMITED', 'You can send up to 30 follow requests per day.')
+  }
+
+  try {
+    const follow = await prisma.follow.upsert({
+      where: {
+        followerId_followingId: { followerId: userId, followingId: id },
+      },
+      create: { followerId: userId, followingId: id, status: 'pending' },
+      update: { status: 'pending' },
+      select: { id: true },
+    })
+
+    try {
+      await notifyFollowRequest(userId, id)
+    } catch (error) {
+      console.error('Failed to create follow request notification', error)
+    }
+
+    return Response.json({ data: { status: 'pending_outgoing', requestId: follow.id } })
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      return jsonError(409, 'REQUEST_PENDING', 'Your follow request is already pending.')
+    }
+    throw error
+  }
+}
+
+/** Cancel a pending request or unfollow an accepted follow. */
+export async function DELETE(_request: Request, { params }: RouteContext) {
+  if (!communityEnabled()) {
+    return jsonError(COMMUNITY_DISABLED.status, COMMUNITY_DISABLED.code, COMMUNITY_DISABLED.message)
+  }
+
+  const session = await auth()
+  const userId = session?.user?.id
+  if (!userId) return jsonError(401, 'UNAUTHORIZED', 'Sign in first.')
+
+  const { id } = await params
+  const existing = await prisma.follow.findUnique({
+    where: {
+      followerId_followingId: { followerId: userId, followingId: id },
+    },
+    select: { id: true },
+  })
+
+  if (existing) {
+    await prisma.follow.delete({ where: { id: existing.id } })
+    after(async () => {
+      try {
+        await syncUserBadges(id)
+      } catch (error) {
+        console.error('Failed to sync follower badges after unfollow', error)
+      }
+    })
+  }
+
+  return Response.json({ data: { status: 'none' } })
+}
+
+
+===== FILE: src/app/api/community/people/[id]/followers/route.ts =====
+import { prisma } from '@/lib/db'
+import {
+  COMMUNITY_DISABLED,
+  communityEnabled,
+  jsonError,
+} from '@/lib/community'
+import { resolveUserId } from '../route'
+
+type RouteContext = { params: Promise<{ id: string }> }
+
+const userSelect = {
+  id: true,
+  name: true,
+  image: true,
+  username: true,
+  bio: true,
+  createdAt: true,
+} as const
+
+export async function GET(request: Request, { params }: RouteContext) {
+  if (!communityEnabled()) {
+    return jsonError(COMMUNITY_DISABLED.status, COMMUNITY_DISABLED.code, COMMUNITY_DISABLED.message)
+  }
+
+  const { id: identifier } = await params
+  const userId = await resolveUserId(identifier)
+
+  if (!userId) {
+    return jsonError(404, 'NOT_FOUND', 'Profile not found.')
+  }
+
+  const url = new URL(request.url)
+  const limit = Math.min(parseInt(url.searchParams.get('limit') || '20'), 100)
+  const cursor = url.searchParams.get('cursor')
+
+  const followers = await prisma.follow.findMany({
+    where: {
+      followingId: userId,
+      status: 'accepted',
+    },
+    orderBy: { createdAt: 'desc' },
+    take: limit + 1,
+    cursor: cursor ? { id: cursor } : undefined,
+    include: {
+      follower: { select: userSelect },
+    },
+  })
+
+  let nextCursor: string | null = null
+  if (followers.length > limit) {
+    const next = followers.pop()
+    nextCursor = next!.id
+  }
+
+  return Response.json({
+    data: followers.map((f) => ({
+      id: f.follower.id,
+      name: f.follower.name,
+      image: f.follower.image,
+      username: f.follower.username,
+      bio: f.follower.bio,
+      createdAt: f.createdAt.toISOString(),
+    })),
+    nextCursor,
+  })
+}
+
+
+===== FILE: src/app/api/community/people/[id]/following/route.ts =====
+import { prisma } from '@/lib/db'
+import {
+  COMMUNITY_DISABLED,
+  communityEnabled,
+  jsonError,
+} from '@/lib/community'
+import { resolveUserId } from '../route'
+
+type RouteContext = { params: Promise<{ id: string }> }
+
+const userSelect = {
+  id: true,
+  name: true,
+  image: true,
+  username: true,
+  bio: true,
+  createdAt: true,
+} as const
+
+export async function GET(request: Request, { params }: RouteContext) {
+  if (!communityEnabled()) {
+    return jsonError(COMMUNITY_DISABLED.status, COMMUNITY_DISABLED.code, COMMUNITY_DISABLED.message)
+  }
+
+  const { id: identifier } = await params
+  const userId = await resolveUserId(identifier)
+
+  if (!userId) {
+    return jsonError(404, 'NOT_FOUND', 'Profile not found.')
+  }
+
+  const url = new URL(request.url)
+  const limit = Math.min(parseInt(url.searchParams.get('limit') || '20'), 100)
+  const cursor = url.searchParams.get('cursor')
+
+  const following = await prisma.follow.findMany({
+    where: {
+      followerId: userId,
+      status: 'accepted',
+    },
+    orderBy: { createdAt: 'desc' },
+    take: limit + 1,
+    cursor: cursor ? { id: cursor } : undefined,
+    include: {
+      following: { select: userSelect },
+    },
+  })
+
+  let nextCursor: string | null = null
+  if (following.length > limit) {
+    const next = following.pop()
+    nextCursor = next!.id
+  }
+
+  return Response.json({
+    data: following.map((f) => ({
+      id: f.following.id,
+      name: f.following.name,
+      image: f.following.image,
+      username: f.following.username,
+      bio: f.following.bio,
+      createdAt: f.createdAt.toISOString(),
+    })),
+    nextCursor,
+  })
+}
+
+
+===== FILE: src/app/api/community/people/[id]/route.ts =====
+import { after } from 'next/server'
+import { auth } from '@/lib/auth/auth'
+import { prisma } from '@/lib/db'
+import { getEarnedBadges } from '@/lib/badges'
+import { getPersistedBadges, syncUserBadges, type EarnedBadge } from '@/lib/badge-awards'
+import type { ProgressState } from '@/lib/progress-state'
+import {
+  COMMUNITY_DISABLED,
+  communityEnabled,
+  jsonError,
+  publicUserSelect,
+} from '@/lib/community'
+import {
+  getFollowCounts,
+  getFollowRelationship,
+  getProfileViewCounts,
+  recordProfileView,
+} from '@/lib/social'
+
+type RouteContext = { params: Promise<{ id: string }> }
+
+/**
+ * Resolve a user by either their CUID (id) or username.
+ * Returns the user's actual database id.
+ */
+export async function resolveUserId(identifier: string): Promise<string | null> {
+  // First try exact ID match (could be CUID or shortened id like "admin")
+  const byId = await prisma.user.findUnique({
+    where: { id: identifier },
+    select: { id: true },
+  })
+  if (byId) return byId.id
+
+  // Then try username match (case-insensitive)
+  if (identifier.length >= 3 && identifier.length <= 30) {
+    const byUsername = await prisma.user.findUnique({
+      where: { username: identifier.toLowerCase() },
+      select: { id: true },
+    })
+    if (byUsername) return byUsername.id
+  }
+
+  return null
+}
+
+export async function GET(request: Request, { params }: RouteContext) {
+  if (!communityEnabled()) {
+    return jsonError(COMMUNITY_DISABLED.status, COMMUNITY_DISABLED.code, COMMUNITY_DISABLED.message)
+  }
+
+  const { id: identifier } = await params
+  const userId = await resolveUserId(identifier)
+
+  if (!userId) {
+    return jsonError(404, 'NOT_FOUND', 'Profile not found.')
+  }
+
+  const session = await auth()
+  const viewerId = session?.user?.id ?? null
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      ...publicUserSelect,
+      username: true,
+      preferences: { select: { showProgress: true, featuredBadges: true } },
+    },
+  })
+
+  if (!user) return jsonError(404, 'NOT_FOUND', 'Profile not found.')
+  if (!user.name && !user.bio && !user.image && viewerId !== user.id) {
+    // Providers are allowed to omit names; avoid publishing empty shells.
+    // The viewer can always open their own profile to fill it in.
+    return jsonError(404, 'NOT_FOUND', 'Profile not found.')
+  }
+
+  const isSelf = viewerId === user.id
+  const canSeeProgress = isSelf || (user.preferences?.showProgress ?? true)
+
+  const [
+    stats,
+    completedRows,
+    projects,
+    projectCount,
+    commentCount,
+    upvoteCount,
+    followCounts,
+    relationship,
+    viewCounts,
+  ] = await Promise.all([
+    prisma.userStats.findUnique({
+      where: { userId: user.id },
+      select: { xp: true, streakCurrent: true, streakLongest: true },
+    }),
+    prisma.userProgress.findMany({
+      where: { userId: user.id, completed: true },
+      select: { lessonKey: true, completedAt: true },
+    }),
+    prisma.project.findMany({
+      where: { userId: user.id },
+      orderBy: { createdAt: 'desc' },
+      take: 6,
+      include: {
+        upvoteRows: { where: { userId: viewerId ?? '__none__' }, select: { id: true } },
+      },
+    }),
+    prisma.project.count({ where: { userId: user.id } }),
+    prisma.comment.count({ where: { userId: user.id } }),
+    prisma.projectUpvote.count({ where: { userId: user.id } }),
+    getFollowCounts(user.id),
+    getFollowRelationship(viewerId, user.id),
+    isSelf ? getProfileViewCounts(user.id) : Promise.resolve(null),
+    recordProfileView(request, user.id, viewerId),
+  ])
+
+  const progressState: ProgressState = {
+    lessons: Object.fromEntries(
+      completedRows.map((row) => [
+        row.lessonKey,
+        {
+          completed: true,
+          ...(row.completedAt ? { completedAt: row.completedAt.toISOString() } : {}),
+        },
+      ])
+    ),
+    xp: stats?.xp ?? 0,
+    streak: {
+      current: stats?.streakCurrent ?? 0,
+      longest: stats?.streakLongest ?? 0,
+      lastActiveDate: null,
+    },
+    bookmarks: [],
+    lastVisited: null,
+  }
+
+  const computedBadges = getEarnedBadges({
+    state: progressState,
+    contributions: {
+      projects: projectCount,
+      comments: commentCount,
+      upvotes: upvoteCount,
+    },
+    followers: followCounts.followers,
+    joinedAt: user.createdAt.toISOString(),
+  })
+
+  // Prefer persisted awards. Older accounts are backfilled lazily on their
+  // first profile view, while the response can still render immediately.
+  let earnedBadges: EarnedBadge[] = await getPersistedBadges(user.id)
+  if (earnedBadges.length === 0 && computedBadges.length > 0) {
+    earnedBadges = computedBadges.map((badge) => ({ ...badge, earnedAt: null }))
+    after(async () => {
+      try {
+        await syncUserBadges(user.id)
+      } catch (error) {
+        console.error('Failed to backfill profile badges', error)
+      }
+    })
+  }
+
+  const earnedKeys = new Set(computedBadges.map((badge) => badge.key))
+  const selectedFeatured = (user.preferences?.featuredBadges ?? [])
+    .filter((key) => earnedKeys.has(key))
+    .slice(0, 3)
+  const featuredBadges =
+    selectedFeatured.length > 0
+      ? selectedFeatured
+      : earnedBadges.slice(0, 3).map((badge) => badge.key)
+
+  return Response.json(
+    {
+      data: {
+        id: user.id,
+        username: user.username,
+        name: user.name,
+        image: user.image,
+        bio: user.bio,
+        website: user.website,
+        githubUrl: user.githubUrl,
+        twitterUrl: user.twitterUrl,
+        createdAt: user.createdAt.toISOString(),
+        isSelf,
+        followers: followCounts.followers,
+        following: followCounts.following,
+        relationship,
+        viewCounts,
+        progress: canSeeProgress
+          ? {
+              xp: stats?.xp ?? 0,
+              streakCurrent: stats?.streakCurrent ?? 0,
+              streakLongest: stats?.streakLongest ?? 0,
+              lessonsCompleted: completedRows.length,
+              featuredBadges,
+              badges: earnedBadges.map((badge) => ({
+                key: badge.key,
+                name: badge.name,
+                description: badge.description,
+                icon: badge.icon,
+                category: badge.category,
+                tier: badge.tier,
+                earnedAt: badge.earnedAt,
+              })),
+            }
+          : null,
+        projects: projects.map((project) => ({
+          id: project.id,
+          title: project.title,
+          description: project.description,
+          track: project.track,
+          tags: project.tags,
+          upvotes: project.upvotes,
+          createdAt: project.createdAt.toISOString(),
+          upvoted: project.upvoteRows.length > 0,
+        })),
+        contributions: {
+          projects: projectCount,
+          comments: commentCount,
+          upvotes: upvoteCount,
+        },
+      },
+    },
+    {
+      headers: {
+        // Viewer-dependent (isSelf and upvote state), so keep it private.
+        'Cache-Control': 'private, max-age=10, stale-while-revalidate=60',
+      },
+    }
+  )
+}
+
+
+===== FILE: src/app/api/community/profile/avatar/route.ts =====
+import { auth } from '@/lib/auth/auth'
+import { prisma } from '@/lib/db'
+import {
+  COMMUNITY_DISABLED,
+  communityEnabled,
+  jsonError,
+} from '@/lib/community'
+
+const MAX_BYTES = 3 * 1024 * 1024
+const ALLOWED_TYPES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/gif',
+])
+
+/** Upload or replace the signed-in user's profile photo. */
+export async function POST(request: Request) {
+  if (!communityEnabled()) {
+    return jsonError(COMMUNITY_DISABLED.status, COMMUNITY_DISABLED.code, COMMUNITY_DISABLED.message)
+  }
+
+  const session = await auth()
+  const userId = session?.user?.id
+  if (!userId) return jsonError(401, 'UNAUTHORIZED', 'Sign in first.')
+
+  const contentLength = Number(request.headers.get('content-length') ?? 0)
+  if (contentLength > MAX_BYTES + 1024 * 1024) {
+    return jsonError(413, 'FILE_TOO_LARGE', 'Choose an image smaller than 3 MB.')
+  }
+
+  const form = await request.formData().catch(() => null)
+  const file = form?.get('avatar')
+  if (!(file instanceof File)) {
+    return jsonError(422, 'VALIDATION_ERROR', 'Choose an image to upload.')
+  }
+  if (!ALLOWED_TYPES.has(file.type)) {
+    return jsonError(422, 'INVALID_FILE_TYPE', 'Use a JPG, PNG, WebP, or GIF image.')
+  }
+  if (file.size === 0 || file.size > MAX_BYTES) {
+    return jsonError(413, 'FILE_TOO_LARGE', 'Choose an image smaller than 3 MB.')
+  }
+
+  const data = Buffer.from(await file.arrayBuffer())
+  const image = `/api/community/avatar/${userId}?v=${Date.now()}`
+
+  await prisma.$transaction([
+    prisma.userAvatar.upsert({
+      where: { userId },
+      create: { userId, mime: file.type, data: data.toString('base64') },
+      update: { mime: file.type, data: data.toString('base64') },
+    }),
+    prisma.user.update({ where: { id: userId }, data: { image } }),
+  ])
+
+  return Response.json(
+    { data: { image } },
+    { headers: { 'Cache-Control': 'no-store' } }
+  )
+}
+
+/** Remove the uploaded photo. The avatar falls back to the user's initial. */
+export async function DELETE() {
+  if (!communityEnabled()) {
+    return jsonError(COMMUNITY_DISABLED.status, COMMUNITY_DISABLED.code, COMMUNITY_DISABLED.message)
+  }
+
+  const session = await auth()
+  const userId = session?.user?.id
+  if (!userId) return jsonError(401, 'UNAUTHORIZED', 'Sign in first.')
+
+  await prisma.$transaction([
+    prisma.userAvatar.deleteMany({ where: { userId } }),
+    prisma.user.update({ where: { id: userId }, data: { image: null } }),
+  ])
+
+  return Response.json(
+    { data: { image: null } },
+    { headers: { 'Cache-Control': 'no-store' } }
+  )
+}
+
+
+===== FILE: src/app/api/community/profile/route.ts =====
+import type { Prisma } from '@prisma/client'
+import { auth } from '@/lib/auth/auth'
+import { isAdmin } from '@/lib/admin'
+import { prisma } from '@/lib/db'
+import {
+  COMMUNITY_DISABLED,
+  communityEnabled,
+  jsonError,
+  profileSchema,
+} from '@/lib/community'
+import { getFollowCounts, getProfileViewCounts } from '@/lib/social'
+import {
+  earnedFromData,
+  getPersistedBadges,
+  loadBadgeData,
+  syncUserBadges,
+  type EarnedBadge,
+} from '@/lib/badge-awards'
+
+
+export async function GET() {
+  if (!communityEnabled()) {
+    return jsonError(COMMUNITY_DISABLED.status, COMMUNITY_DISABLED.code, COMMUNITY_DISABLED.message)
+  }
+
+  const session = await auth()
+  const userId = session?.user?.id
+  if (!userId) return jsonError(401, 'UNAUTHORIZED', 'Sign in first.')
+
+  const [
+    user,
+    stats,
+    completedCount,
+    followCounts,
+    viewCounts,
+    followRequests,
+    notifications,
+    persistedBadges,
+  ] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        image: true,
+        bio: true,
+        website: true,
+        githubUrl: true,
+        twitterUrl: true,
+        createdAt: true,
+        preferences: true,
+      },
+    }),
+    prisma.userStats.findUnique({
+      where: { userId },
+      select: { xp: true, streakCurrent: true, streakLongest: true },
+    }),
+    prisma.userProgress.count({ where: { userId, completed: true } }),
+    getFollowCounts(userId),
+    getProfileViewCounts(userId),
+    prisma.follow.findMany({
+      where: { followingId: userId, status: 'pending' },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+      select: {
+        id: true,
+        createdAt: true,
+        follower: { select: { id: true, name: true, image: true, bio: true } },
+      },
+    }),
+    prisma.notification.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+      select: {
+        id: true,
+        type: true,
+        message: true,
+        href: true,
+        readAt: true,
+        createdAt: true,
+        actor: { select: { id: true, name: true, image: true } },
+      },
+    }),
+    getPersistedBadges(userId),
+  ])
+
+  if (!user) return jsonError(404, 'NOT_FOUND', 'Account not found.')
+
+  // Existing accounts may predate persisted badges. Backfill once when they
+  // open settings so the pin picker has data to show.
+  let badges: EarnedBadge[] = persistedBadges
+  if (badges.length === 0) {
+    try {
+      badges = (await syncUserBadges(userId)).earned
+    } catch (error) {
+      console.error('Failed to backfill badges for settings', error)
+    }
+  }
+
+  return Response.json({
+    data: {
+      id: user.id,
+      isAdmin: isAdmin(session.user.email),
+      name: user.name,
+      email: user.email,
+      image: user.image,
+      bio: user.bio,
+      website: user.website,
+      githubUrl: user.githubUrl,
+      twitterUrl: user.twitterUrl,
+      createdAt: user.createdAt.toISOString(),
+      preferences: {
+        showProgress: user.preferences?.showProgress ?? true,
+        emailUpdates: user.preferences?.emailUpdates ?? false,
+        track: user.preferences?.track ?? 'beginner',
+        featuredBadges: user.preferences?.featuredBadges ?? [],
+      },
+      progress: {
+        xp: stats?.xp ?? 0,
+        streakCurrent: stats?.streakCurrent ?? 0,
+        streakLongest: stats?.streakLongest ?? 0,
+        lessonsCompleted: completedCount,
+        featuredBadges: user.preferences?.featuredBadges ?? [],
+        badges: badges.map((badge) => ({
+          key: badge.key,
+          name: badge.name,
+          description: badge.description,
+          icon: badge.icon,
+          category: badge.category,
+          tier: badge.tier,
+          earnedAt: badge.earnedAt,
+        })),
+      },
+      followers: followCounts.followers,
+      following: followCounts.following,
+      viewCounts,
+      followRequests: followRequests.map((request) => ({
+        id: request.id,
+        createdAt: request.createdAt.toISOString(),
+        follower: request.follower,
+      })),
+      notifications: notifications.map((notification) => ({
+        id: notification.id,
+        type: notification.type,
+        message: notification.message,
+        href: notification.href,
+        readAt: notification.readAt?.toISOString() ?? null,
+        createdAt: notification.createdAt.toISOString(),
+        actor: notification.actor,
+      })),
+    },
+  })
+}
+
+export async function PATCH(request: Request) {
+  if (!communityEnabled()) {
+    return jsonError(COMMUNITY_DISABLED.status, COMMUNITY_DISABLED.code, COMMUNITY_DISABLED.message)
+  }
+
+  const session = await auth()
+  const userId = session?.user?.id
+  if (!userId) return jsonError(401, 'UNAUTHORIZED', 'Sign in first.')
+
+  const body = await request.json().catch(() => null)
+  const parsed = profileSchema.safeParse(body)
+  if (!parsed.success) {
+    return Response.json(
+      {
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: parsed.error.issues[0]?.message ?? 'Invalid profile',
+        },
+      },
+      { status: 422 }
+    )
+  }
+
+  const { showProgress, emailUpdates, featuredBadges, ...profile } = parsed.data
+
+  if (featuredBadges) {
+    const earnedKeys = new Set(earnedFromData(await loadBadgeData(userId)).map((badge) => badge.key))
+    const invalid = featuredBadges.filter((key) => !earnedKeys.has(key))
+    if (invalid.length > 0) {
+      return jsonError(422, 'INVALID_BADGE', 'You can only pin badges you have earned.')
+    }
+  }
+
+  const userData: Prisma.UserUpdateInput = {}
+  if (profile.name !== undefined) userData.name = profile.name
+  if (profile.bio !== undefined) userData.bio = profile.bio
+  if (profile.website !== undefined) userData.website = profile.website
+  if (profile.githubUrl !== undefined) userData.githubUrl = profile.githubUrl
+  if (profile.twitterUrl !== undefined) userData.twitterUrl = profile.twitterUrl
+
+  if (Object.keys(userData).length > 0) {
+    await prisma.user.update({ where: { id: userId }, data: userData })
+  }
+
+  if (
+    showProgress !== undefined ||
+    emailUpdates !== undefined ||
+    featuredBadges !== undefined
+  ) {
+    const preferences = {
+      ...(showProgress !== undefined ? { showProgress } : {}),
+      ...(emailUpdates !== undefined ? { emailUpdates } : {}),
+      ...(featuredBadges !== undefined ? { featuredBadges } : {}),
+    }
+    await prisma.userPreferences.upsert({
+      where: { userId },
+      create: { userId, ...preferences },
+      update: preferences,
+    })
+  }
+
+  return Response.json({ data: { updated: true } })
+}
+
+
+===== FILE: src/app/api/community/projects/[id]/route.ts =====
+import { auth } from '@/lib/auth/auth'
+import { prisma } from '@/lib/db'
+import { serializeProject } from '@/lib/community-project'
+import {
+  COMMUNITY_DISABLED,
+  communityEnabled,
+  jsonError,
+  projectUpdateSchema,
+  publicUserSelect,
+} from '@/lib/community'
+
+
+
+type RouteContext = { params: Promise<{ id: string }> }
+
+export async function GET(request: Request, { params }: RouteContext) {
+  if (!communityEnabled()) {
+    return jsonError(COMMUNITY_DISABLED.status, COMMUNITY_DISABLED.code, COMMUNITY_DISABLED.message)
+  }
+
+  const { id } = await params
+  const session = await auth()
+  const userId = session?.user?.id ?? null
+
+  const [project, commentCount] = await Promise.all([
+    prisma.project.findUnique({
+      where: { id },
+      include: {
+        user: { select: publicUserSelect },
+        upvoteRows: { where: { userId: userId ?? '__none__' }, select: { id: true } },
+      },
+    }),
+    prisma.comment.count({
+      where: { targetType: 'project', targetId: id },
+    }),
+  ])
+
+  if (!project) return jsonError(404, 'NOT_FOUND', 'Project not found.')
+
+  return Response.json(
+    {
+      data: {
+        ...serializeProject(project, commentCount),
+        updatedAt: project.updatedAt.toISOString(),
+        isOwner: userId === project.userId,
+      },
+    },
+    {
+      headers: {
+        'Cache-Control': 'private, max-age=15, stale-while-revalidate=60',
+      },
+    }
+  )
+}
+
+export async function PATCH(request: Request, { params }: RouteContext) {
+  if (!communityEnabled()) {
+    return jsonError(COMMUNITY_DISABLED.status, COMMUNITY_DISABLED.code, COMMUNITY_DISABLED.message)
+  }
+
+  const session = await auth()
+  const userId = session?.user?.id
+  if (!userId) return jsonError(401, 'UNAUTHORIZED', 'Sign in first.')
+
+  const { id } = await params
+  const existing = await prisma.project.findUnique({ where: { id }, select: { userId: true } })
+  if (!existing) return jsonError(404, 'NOT_FOUND', 'Project not found.')
+  if (existing.userId !== userId) {
+    return jsonError(403, 'FORBIDDEN', 'You can only edit your own project.')
+  }
+
+  const body = await request.json().catch(() => null)
+  const parsed = projectUpdateSchema.safeParse(body)
+  if (!parsed.success) {
+    return Response.json(
+      {
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: parsed.error.issues[0]?.message ?? 'Invalid project',
+        },
+      },
+      { status: 422 }
+    )
+  }
+
+  const data = { ...parsed.data }
+  if (data.modules) data.modules = Array.from(new Set(data.modules))
+  if (data.tags) data.tags = Array.from(new Set(data.tags.map((tag) => tag.toLowerCase())))
+
+  const [project, commentCount] = await Promise.all([
+    prisma.project.update({
+      where: { id },
+      data,
+      include: {
+        user: { select: publicUserSelect },
+        upvoteRows: { where: { userId }, select: { id: true } },
+      },
+    }),
+    prisma.comment.count({
+      where: { targetType: 'project', targetId: id },
+    }),
+  ])
+
+  return Response.json({
+    data: {
+      ...serializeProject(project, commentCount),
+      updatedAt: project.updatedAt.toISOString(),
+      isOwner: true,
+    },
+  })
+}
+
+export async function DELETE(request: Request, { params }: RouteContext) {
+  if (!communityEnabled()) {
+    return jsonError(COMMUNITY_DISABLED.status, COMMUNITY_DISABLED.code, COMMUNITY_DISABLED.message)
+  }
+
+  const session = await auth()
+  const userId = session?.user?.id
+  if (!userId) return jsonError(401, 'UNAUTHORIZED', 'Sign in first.')
+
+  const { id } = await params
+  const existing = await prisma.project.findUnique({ where: { id }, select: { userId: true } })
+  if (!existing) return jsonError(404, 'NOT_FOUND', 'Project not found.')
+  if (existing.userId !== userId) {
+    return jsonError(403, 'FORBIDDEN', 'You can only delete your own project.')
+  }
+
+  await prisma.$transaction([
+    prisma.comment.deleteMany({ where: { targetType: 'project', targetId: id } }),
+    prisma.project.delete({ where: { id } }),
+  ])
+
+  return new Response(null, { status: 204 })
+}
+
+
+===== FILE: src/app/api/community/projects/[id]/upvote/route.ts =====
+import { after } from 'next/server'
+import { Prisma } from '@prisma/client'
+import { auth } from '@/lib/auth/auth'
+import { prisma } from '@/lib/db'
+import { COMMUNITY_DISABLED, communityEnabled, jsonError } from '@/lib/community'
+import { notifyProjectUpvote } from '@/lib/realtime/notify'
+import { syncUserBadges } from '@/lib/badge-awards'
+
+
+
+type RouteContext = { params: Promise<{ id: string }> }
+
+/**
+ * Toggle an upvote. The unique (projectId, userId) constraint makes concurrent
+ * double-clicks harmless; the denormalized counter moves in the same
+ * transaction so sorting by popularity stays consistent with the vote rows.
+ */
+export async function POST(request: Request, { params }: RouteContext) {
+  if (!communityEnabled()) {
+    return jsonError(COMMUNITY_DISABLED.status, COMMUNITY_DISABLED.code, COMMUNITY_DISABLED.message)
+  }
+
+  const session = await auth()
+  const userId = session?.user?.id
+  if (!userId) return jsonError(401, 'UNAUTHORIZED', 'Sign in to upvote a project.')
+
+  const { id } = await params
+  const project = await prisma.project.findUnique({ where: { id }, select: { id: true } })
+  if (!project) return jsonError(404, 'NOT_FOUND', 'Project not found.')
+
+  const existing = await prisma.projectUpvote.findUnique({
+    where: { projectId_userId: { projectId: id, userId } },
+  })
+
+  let upvoted: boolean
+  if (existing) {
+    await prisma.$transaction([
+      prisma.projectUpvote.delete({ where: { id: existing.id } }),
+      prisma.project.update({ where: { id }, data: { upvotes: { decrement: 1 } } }),
+    ])
+    upvoted = false
+  } else {
+    try {
+      await prisma.$transaction([
+        prisma.projectUpvote.create({ data: { projectId: id, userId } }),
+        prisma.project.update({ where: { id }, data: { upvotes: { increment: 1 } } }),
+      ])
+    } catch (error) {
+      // Lost a race with another click: the vote already exists, which is the
+      // desired end state. Swallow only the unique-constraint error.
+      if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') {
+        throw error
+      }
+    }
+    upvoted = true
+  }
+
+  const updated = await prisma.project.findUnique({
+    where: { id },
+    select: { upvotes: true },
+  })
+
+  after(async () => {
+    try {
+      if (upvoted) await notifyProjectUpvote(id, userId)
+      await syncUserBadges(userId)
+    } catch (error) {
+      console.error('Failed to finish upvote side effects', error)
+    }
+  })
+
+  return Response.json({ data: { upvoted, upvotes: updated?.upvotes ?? 0 } })
+}
+
+
+===== FILE: src/app/api/community/projects/route.ts =====
+import { after } from 'next/server'
+import type { Prisma } from '@prisma/client'
+import { auth } from '@/lib/auth/auth'
+import { prisma } from '@/lib/db'
+import { serializeProject } from '@/lib/community-project'
+import { syncUserBadges } from '@/lib/badge-awards'
+import { tracks } from '@/lib/curriculum'
+import {
+  COMMUNITY_DISABLED,
+  communityEnabled,
+  getLimit,
+  jsonError,
+  projectSchema,
+  publicUserSelect,
+  sinceMinutes,
+} from '@/lib/community'
+
+
+
+export async function GET(request: Request) {
+  if (!communityEnabled()) {
+    return jsonError(COMMUNITY_DISABLED.status, COMMUNITY_DISABLED.code, COMMUNITY_DISABLED.message)
+  }
+
+  const url = new URL(request.url)
+  const track = url.searchParams.get('track')
+  const tag = url.searchParams.get('tag')
+  const sort = url.searchParams.get('sort') === 'popular' ? 'popular' : 'newest'
+  const q = url.searchParams.get('q')?.trim()
+  const limit = getLimit(url)
+  const cursor = url.searchParams.get('cursor')
+
+  const session = await auth()
+  const userId = session?.user?.id ?? null
+
+  const where: Prisma.ProjectWhereInput = {}
+  if (track && tracks.some((entry) => entry.key === track)) where.track = track
+  if (tag) where.tags = { has: tag }
+  if (q) {
+    where.OR = [
+      { title: { contains: q, mode: 'insensitive' } },
+      { description: { contains: q, mode: 'insensitive' } },
+    ]
+  }
+
+  const projects = await prisma.project.findMany({
+    where,
+    take: limit + 1,
+    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+    orderBy:
+      sort === 'popular'
+        ? [{ upvotes: 'desc' }, { createdAt: 'desc' }]
+        : [{ createdAt: 'desc' }],
+    include: {
+      user: { select: publicUserSelect },
+      // A sentinel id keeps the response shape identical for signed-out visitors.
+      upvoteRows: { where: { userId: userId ?? '__none__' }, select: { id: true } },
+    },
+  })
+
+  const hasMore = projects.length > limit
+  const page = hasMore ? projects.slice(0, limit) : projects
+  const nextCursor = hasMore ? page[page.length - 1]?.id ?? null : null
+
+  const ids = page.map((project) => project.id)
+  const commentCounts = ids.length
+    ? await prisma.comment.groupBy({
+        by: ['targetId'],
+        where: { targetType: 'project', targetId: { in: ids } },
+        _count: { _all: true },
+      })
+    : []
+  const countByProject = new Map(commentCounts.map((row) => [row.targetId, row._count._all]))
+
+  return Response.json(
+    {
+      data: page.map((project) => serializeProject(project, countByProject.get(project.id) ?? 0)),
+      nextCursor,
+      sort,
+    },
+    {
+      headers: {
+        // Responses include the viewer's upvote state, so only the browser
+        // may cache them. Filters and cursors produce distinct URLs.
+        'Cache-Control': 'private, max-age=15, stale-while-revalidate=60',
+      },
+    }
+  )
+}
+
+export async function POST(request: Request) {
+  if (!communityEnabled()) {
+    return jsonError(COMMUNITY_DISABLED.status, COMMUNITY_DISABLED.code, COMMUNITY_DISABLED.message)
+  }
+
+  const session = await auth()
+  const userId = session?.user?.id
+  if (!userId) return jsonError(401, 'UNAUTHORIZED', 'Sign in to share a project.')
+
+  const body = await request.json().catch(() => null)
+  const parsed = projectSchema.safeParse(body)
+  if (!parsed.success) {
+    return Response.json(
+      {
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: parsed.error.issues[0]?.message ?? 'Invalid project',
+        },
+      },
+      { status: 422 }
+    )
+  }
+
+  const recent = await prisma.project.count({
+    where: { userId, createdAt: { gte: sinceMinutes(24 * 60) } },
+  })
+  if (recent >= 5) {
+    return jsonError(429, 'RATE_LIMITED', 'You can share up to 5 projects per day.')
+  }
+
+  const modules = Array.from(new Set(parsed.data.modules))
+  const tags = Array.from(new Set(parsed.data.tags.map((tag) => tag.toLowerCase())))
+
+  const project = await prisma.project.create({
+    data: { ...parsed.data, modules, tags, userId },
+    include: {
+      user: { select: publicUserSelect },
+      upvoteRows: { where: { userId }, select: { id: true } },
+    },
+  })
+
+  after(async () => {
+    try {
+      await syncUserBadges(userId)
+    } catch (error) {
+      console.error('Failed to sync badges after project creation', error)
+    }
+  })
+
+  return Response.json(
+    { data: { ...serializeProject(project), updatedAt: project.updatedAt.toISOString(), isOwner: true } },
+    { status: 201 }
+  )
+}
+
+
+===== FILE: src/app/api/community/reports/route.ts =====
+import { after } from 'next/server'
+import { Prisma } from '@prisma/client'
+import { z } from 'zod'
+import { auth } from '@/lib/auth/auth'
+import { prisma } from '@/lib/db'
+import {
+  COMMUNITY_DISABLED,
+  communityEnabled,
+  jsonError,
+  sinceMinutes,
+} from '@/lib/community'
+
+const reportSchema = z
+  .object({
+    targetType: z.enum(['project', 'comment', 'profile']),
+    targetId: z.string().trim().min(1).max(160),
+    reason: z.enum(['spam', 'harassment', 'inappropriate', 'copyright', 'other']),
+    details: z.string().trim().max(1000).optional(),
+  })
+  .strict()
+
+export async function POST(request: Request) {
+  if (!communityEnabled()) {
+    return jsonError(COMMUNITY_DISABLED.status, COMMUNITY_DISABLED.code, COMMUNITY_DISABLED.message)
+  }
+
+  const session = await auth()
+  const userId = session?.user?.id
+  if (!userId) return jsonError(401, 'UNAUTHORIZED', 'Sign in to report content.')
+
+  const body = await request.json().catch(() => null)
+  const parsed = reportSchema.safeParse(body)
+  if (!parsed.success) {
+    return Response.json(
+      {
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: parsed.error.issues[0]?.message ?? 'Invalid report',
+        },
+      },
+      { status: 422 }
+    )
+  }
+
+  const { targetType, targetId, reason, details } = parsed.data
+
+  let ownerId: string | null = null
+  if (targetType === 'project') {
+    const project = await prisma.project.findUnique({
+      where: { id: targetId },
+      select: { userId: true },
+    })
+    ownerId = project?.userId ?? null
+  } else if (targetType === 'comment') {
+    const comment = await prisma.comment.findUnique({
+      where: { id: targetId },
+      select: { userId: true },
+    })
+    ownerId = comment?.userId ?? null
+  } else {
+    const user = await prisma.user.findUnique({
+      where: { id: targetId },
+      select: { id: true },
+    })
+    ownerId = user?.id ?? null
+  }
+
+  if (!ownerId) return jsonError(404, 'NOT_FOUND', 'That content no longer exists.')
+  if (ownerId === userId) {
+    return jsonError(422, 'INVALID_REPORT', 'You cannot report your own content.')
+  }
+
+  const recent = await prisma.report.count({
+    where: { reporterId: userId, createdAt: { gte: sinceMinutes(24 * 60) } },
+  })
+  if (recent >= 10) {
+    return jsonError(429, 'RATE_LIMITED', 'You can submit up to 10 reports per day.')
+  }
+
+  try {
+    const report = await prisma.report.create({
+      data: {
+        reporterId: userId,
+        targetType,
+        targetId,
+        reason,
+        details: details || null,
+      },
+      select: { id: true, createdAt: true },
+    })
+
+    after(async () => {
+      try {
+        const adminEmails = new Set(
+          (process.env.ADMIN_EMAILS ?? '')
+            .split(',')
+            .map((email) => email.trim().toLowerCase())
+            .filter(Boolean)
+        )
+        adminEmails.add('admin@nyxora.local')
+        const admins = await prisma.user.findMany({
+          where: { email: { in: Array.from(adminEmails) } },
+          select: { id: true },
+        })
+        if (admins.length > 0) {
+          await prisma.notification.createMany({
+            data: admins.map((admin) => ({
+              userId: admin.id,
+              actorId: userId,
+              type: 'moderation_report',
+              message: `submitted a report on a ${targetType}.`,
+              href: '/admin/reports',
+            })),
+          })
+        }
+      } catch (error) {
+        console.error('Failed to notify admins about report', error)
+      }
+    })
+
+    return Response.json(
+      { data: { id: report.id, createdAt: report.createdAt.toISOString() } },
+      { status: 201 }
+    )
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      return jsonError(409, 'ALREADY_REPORTED', 'You already reported this content.')
+    }
+    throw error
+  }
+}
+
+
+===== FILE: src/app/api/community/stats/route.ts =====
+import { prisma } from '@/lib/db'
+import { COMMUNITY_DISABLED, communityEnabled, jsonError } from '@/lib/community'
+
+
+
+async function getCommunityStats() {
+  try {
+    const [members, projects, comments, lessonsCompleted] = await Promise.all([
+      prisma.user.count(),
+      prisma.project.count(),
+      prisma.comment.count(),
+      prisma.userProgress.count({ where: { completed: true } }),
+    ])
+    return { members, projects, comments, lessonsCompleted }
+  } catch (error) {
+    // Database not migrated yet, or connection issue — return zeros instead of crashing build
+    console.warn('Community stats DB query failed (expected at build time):', error)
+    return { members: 0, projects: 0, comments: 0, lessonsCompleted: 0 }
+  }
+}
+
+/**
+ * Real numbers for the community landing page — never invented ones.
+ * Runs at request time (dynamic by default for API routes).
+ * Cached for 60 seconds via Cache-Control header.
+ */
+export async function GET() {
+  if (!communityEnabled()) {
+    return jsonError(COMMUNITY_DISABLED.status, COMMUNITY_DISABLED.code, COMMUNITY_DISABLED.message)
+  }
+
+  const data = await getCommunityStats()
+
+  return Response.json(
+    { data },
+    {
+      headers: {
+        'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=300',
+      },
+    }
+  )
+}
+
+===== FILE: src/app/api/community/uploads/route.ts =====
+import { put } from '@vercel/blob'
+import { auth } from '@/lib/auth/auth'
+import { COMMUNITY_DISABLED, communityEnabled, jsonError } from '@/lib/community'
+
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
+
+const MAX_BYTES = 5 * 1024 * 1024
+const ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif'])
+
+export async function POST(request: Request) {
+  if (!communityEnabled()) {
+    return jsonError(COMMUNITY_DISABLED.status, COMMUNITY_DISABLED.code, COMMUNITY_DISABLED.message)
+  }
+
+  const session = await auth()
+  if (!session?.user?.id) {
+    return jsonError(401, 'UNAUTHORIZED', 'Sign in to upload an image.')
+  }
+
+  if (!process.env.BLOB_READ_WRITE_TOKEN) {
+    return jsonError(
+      503,
+      'UPLOADS_DISABLED',
+      'Image uploads are not configured on this deployment. Paste a direct image URL instead.'
+    )
+  }
+
+  const formData = await request.formData().catch(() => null)
+  const file = formData?.get('file')
+
+  if (!(file instanceof File)) {
+    return jsonError(422, 'INVALID_FILE', 'Choose an image to upload.')
+  }
+  if (!ALLOWED_TYPES.has(file.type)) {
+    return jsonError(422, 'INVALID_FILE', 'Use a JPEG, PNG, WebP, GIF, or AVIF image.')
+  }
+  if (file.size === 0 || file.size > MAX_BYTES) {
+    return jsonError(422, 'INVALID_FILE', 'Images must be smaller than 5 MB.')
+  }
+
+  try {
+    const extension = file.name.split('.').pop()?.toLowerCase() || 'img'
+    const blob = await put(
+      `community/${session.user.id}/${Date.now()}.${extension}`,
+      file,
+      {
+        access: 'public',
+        addRandomSuffix: true,
+        contentType: file.type,
+      }
+    )
+
+    return Response.json({ data: { url: blob.url } }, { status: 201 })
+  } catch (error) {
+    console.error('Project image upload failed', error)
+    return jsonError(502, 'UPLOAD_FAILED', 'Could not upload that image. Try a smaller file.')
+  }
+}
+
+
+===== FILE: src/app/api/contact/route.ts =====
+import { z } from 'zod'
+import { prisma } from '@/lib/db'
+import { jsonError, sinceMinutes } from '@/lib/community'
+import { sendContactNotification } from '@/lib/contact-email'
+
+const emailSchema = z.email('Enter a valid email address').max(254).transform((value) => value.toLowerCase())
+
+const contactSchema = z
+  .object({
+    name: z
+      .string()
+      .trim()
+      .max(80)
+      .optional()
+      .transform((value) => (value ? value : null)),
+    email: emailSchema,
+    topic: z.enum(['general', 'bug', 'content', 'conduct', 'privacy', 'security']).default('general'),
+    message: z.string().trim().min(20, 'Please add a little more detail').max(4000),
+    website: z.string().max(200).optional(),
+  })
+  .strict()
+
+export async function POST(request: Request) {
+  if (!process.env.DATABASE_URL) {
+    return jsonError(503, 'CONTACT_UNAVAILABLE', 'The contact form is temporarily unavailable.')
+  }
+
+  const body = await request.json().catch(() => null)
+  const parsed = contactSchema.safeParse(body)
+  if (!parsed.success) {
+    return Response.json(
+      {
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: parsed.error.issues[0]?.message ?? 'Check the form and try again.',
+        },
+      },
+      { status: 422 }
+    )
+  }
+
+  if (parsed.data.website) {
+    return Response.json({ data: { received: true } }, { status: 201 })
+  }
+
+  const [fromSender, recently] = await Promise.all([
+    prisma.contactMessage.count({
+      where: { email: parsed.data.email, createdAt: { gte: sinceMinutes(60) } },
+    }),
+    prisma.contactMessage.count({
+      where: { createdAt: { gte: sinceMinutes(60) } },
+    }),
+  ])
+
+  if (fromSender >= 3 || recently >= 100) {
+    return jsonError(429, 'RATE_LIMITED', 'Too many messages right now. Try again in a little while.')
+  }
+
+  await prisma.contactMessage.create({
+    data: {
+      name: parsed.data.name,
+      email: parsed.data.email,
+      topic: parsed.data.topic,
+      message: parsed.data.message,
+    },
+  })
+
+  // Stored successfully. Notification is a bonus, not a requirement.
+  try {
+    await sendContactNotification({
+      name: parsed.data.name ?? null,
+      email: parsed.data.email,
+      topic: parsed.data.topic,
+      message: parsed.data.message,
+    })
+  } catch (error) {
+    console.error('Contact notification email failed:', error instanceof Error ? error.message : error)
+  }
+
+  return Response.json({ data: { received: true } }, { status: 201 })
+}
+
+
+===== FILE: src/app/api/csp-report/route.ts =====
+/**
+ * Collects Content-Security-Policy violation reports while the policy runs in
+ * report-only mode. Reports are logged for triage and otherwise discarded.
+ */
+export async function POST(request: Request) {
+  const body = await request.text().catch(() => '')
+  if (body.length > 0 && body.length <= 10_000) {
+    try {
+      const report = JSON.parse(body)
+      const violation = report?.['csp-report'] ?? report
+      console.warn(
+        JSON.stringify({
+          type: 'csp_violation',
+          documentUri: violation?.['document-uri'],
+          directive: violation?.['violated-directive'] ?? violation?.effectiveDirective,
+          blockedUri: violation?.['blocked-uri'] ?? violation?.blockedURL,
+          sourceFile: violation?.['source-file'],
+          lineNumber: violation?.['line-number'],
+        })
+      )
+    } catch {
+      // Malformed reports are ignored.
+    }
+  }
+
+  return new Response(null, { status: 204 })
+}
+
+
+===== FILE: src/app/api/health/route.ts =====
+import { NextResponse } from 'next/server'
+import { prisma } from '@/lib/db'
+
+export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
+
+/**
+ * Lightweight liveness/readiness endpoint for uptime monitors and deploys.
+ * Never include secrets or user data in the response.
+ */
+export async function GET() {
+  const startedAt = Date.now()
+
+  try {
+    await prisma.$queryRaw`SELECT 1`
+
+    return NextResponse.json(
+      {
+        status: 'ok',
+        checks: { database: 'ok' },
+        latencyMs: Date.now() - startedAt,
+        release: process.env.VERCEL_GIT_COMMIT_SHA ?? 'local',
+        environment: process.env.VERCEL_ENV ?? process.env.NODE_ENV ?? 'unknown',
+      },
+      {
+        headers: { 'Cache-Control': 'no-store, max-age=0' },
+      }
+    )
+  } catch (error) {
+    console.error('Health check failed', error)
+
+    return NextResponse.json(
+      {
+        status: 'degraded',
+        checks: { database: 'error' },
+        latencyMs: Date.now() - startedAt,
+      },
+      {
+        status: 503,
+        headers: { 'Cache-Control': 'no-store, max-age=0' },
+      }
+    )
+  }
+}
+
+
+===== FILE: src/app/api/newsletter/confirm/route.ts =====
+import { z } from 'zod'
+import { prisma } from '@/lib/db'
+import { jsonError } from '@/lib/community'
+import { verifyNewsletterToken } from '@/lib/newsletter'
+import { NEWSLETTER_ENABLED } from '@/lib/newsletter-feature'
+
+const schema = z.object({ token: z.string().trim().min(20).max(4096) }).strict()
+
+export async function POST(request: Request) {
+  if (!NEWSLETTER_ENABLED) {
+    return jsonError(404, 'NEWSLETTER_DISABLED', 'The newsletter is not available.')
+  }
+
+  if (!process.env.DATABASE_URL) {
+    return jsonError(503, 'NEWSLETTER_UNAVAILABLE', 'Newsletter settings are temporarily unavailable.')
+  }
+
+  const body = await request.json().catch(() => null)
+  const parsed = schema.safeParse(body)
+  if (!parsed.success) {
+    return jsonError(422, 'VALIDATION_ERROR', 'That confirmation link is invalid.')
+  }
+
+  const verified = await verifyNewsletterToken(parsed.data.token, 'confirm')
+  if (!verified) {
+    return jsonError(
+      400,
+      'INVALID_TOKEN',
+      'That confirmation link is invalid or has expired. Sign up again to get a new one.'
+    )
+  }
+
+  const subscriber = await prisma.newsletterSubscriber.findUnique({
+    where: { id: verified.subscriberId },
+    select: { id: true, confirmedAt: true },
+  })
+  if (!subscriber) {
+    return jsonError(
+      404,
+      'NOT_FOUND',
+      'That subscription no longer exists. Sign up again to get a new confirmation email.'
+    )
+  }
+
+  if (!subscriber.confirmedAt) {
+    await prisma.newsletterSubscriber.update({
+      where: { id: subscriber.id },
+      data: { confirmedAt: new Date() },
+    })
+  }
+
+  return Response.json({ data: { confirmed: true } })
+}
+
+
+===== FILE: src/app/api/newsletter/route.ts =====
+import { z } from 'zod'
+import { prisma } from '@/lib/db'
+import { jsonError, sinceMinutes } from '@/lib/community'
+import {
+  newsletterEmailConfigured,
+  sendNewsletterConfirmation,
+  verifyNewsletterToken,
+} from '@/lib/newsletter'
+import { siteUrl } from '@/lib/seo'
+import { NEWSLETTER_ENABLED } from '@/lib/newsletter-feature'
+
+const emailSchema = z
+  .email('Enter a valid email address')
+  .max(254)
+  .transform((value) => value.toLowerCase())
+
+const subscribeSchema = z
+  .object({
+    email: emailSchema,
+    source: z.enum(['footer', 'newsletter', 'site']).default('site'),
+    // Honeypot. Real people never fill this in.
+    website: z.string().max(200).optional(),
+  })
+  .strict()
+
+const unsubscribeSchema = z
+  .object({
+    email: emailSchema.optional(),
+    token: z.string().trim().min(20).max(4096).optional(),
+  })
+  .strict()
+  .refine((value) => Boolean(value.email || value.token), {
+    message: 'Enter an email address or use the link from your email.',
+  })
+
+function databaseReady() {
+  return Boolean(process.env.DATABASE_URL)
+}
+
+export async function POST(request: Request) {
+  if (!NEWSLETTER_ENABLED) {
+    return jsonError(404, 'NEWSLETTER_DISABLED', 'The newsletter is not available.')
+  }
+
+  if (!databaseReady()) {
+    return jsonError(503, 'NEWSLETTER_UNAVAILABLE', 'Newsletter signup is temporarily unavailable.')
+  }
+  if (!newsletterEmailConfigured()) {
+    return jsonError(
+      503,
+      'NEWSLETTER_UNAVAILABLE',
+      'Newsletter signup is temporarily unavailable. Please try again later.'
+    )
+  }
+
+  const body = await request.json().catch(() => null)
+  const parsed = subscribeSchema.safeParse(body)
+  if (!parsed.success) {
+    return Response.json(
+      {
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: parsed.error.issues[0]?.message ?? 'Enter a valid email address.',
+        },
+      },
+      { status: 422 }
+    )
+  }
+
+  // Silently accept honeypot submissions so bots do not learn they were caught.
+  if (parsed.data.website) {
+    return Response.json({ data: { subscribed: true, confirmationRequired: false } })
+  }
+
+  const recent = await prisma.newsletterSubscriber.count({
+    where: { createdAt: { gte: sinceMinutes(60) } },
+  })
+  if (recent >= 200) {
+    return jsonError(429, 'RATE_LIMITED', 'Too many signups right now. Try again later.')
+  }
+
+  const subscriber = await prisma.newsletterSubscriber.upsert({
+    where: { email: parsed.data.email },
+    create: { email: parsed.data.email, source: parsed.data.source },
+    update: {},
+  })
+
+  if (subscriber.confirmedAt) {
+    return Response.json({
+      data: {
+        subscribed: true,
+        confirmationRequired: false,
+        alreadyConfirmed: true,
+      },
+    })
+  }
+
+  const sentRecently =
+    subscriber.confirmationSentAt &&
+    Date.now() - subscriber.confirmationSentAt.getTime() < 60_000
+
+  if (sentRecently) {
+    return Response.json({
+      data: {
+        subscribed: true,
+        confirmationRequired: true,
+        alreadySent: true,
+      },
+    })
+  }
+
+  try {
+    await sendNewsletterConfirmation({
+      email: subscriber.email,
+      subscriberId: subscriber.id,
+      origin: siteUrl,
+    })
+  } catch (error) {
+    console.error(
+      'Newsletter confirmation email failed:',
+      error instanceof Error ? error.message : error
+    )
+    return jsonError(
+      503,
+      'NEWSLETTER_UNAVAILABLE',
+      'We could not send the confirmation email. Please try again in a minute.'
+    )
+  }
+
+  await prisma.newsletterSubscriber
+    .update({
+      where: { id: subscriber.id },
+      data: { confirmationSentAt: new Date() },
+    })
+    .catch((error) => {
+      console.error(
+        'Could not record newsletter confirmation time:',
+        error instanceof Error ? error.message : error
+      )
+    })
+
+  return Response.json(
+    {
+      data: {
+        subscribed: true,
+        confirmationRequired: true,
+        alreadySent: false,
+      },
+    },
+    { status: 201 }
+  )
+}
+
+export async function DELETE(request: Request) {
+  if (!NEWSLETTER_ENABLED) {
+    return jsonError(404, 'NEWSLETTER_DISABLED', 'The newsletter is not available.')
+  }
+
+  if (!databaseReady()) {
+    return jsonError(503, 'NEWSLETTER_UNAVAILABLE', 'Newsletter settings are temporarily unavailable.')
+  }
+
+  const body = await request.json().catch(() => null)
+  const parsed = unsubscribeSchema.safeParse(body)
+  if (!parsed.success) {
+    return Response.json(
+      {
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: parsed.error.issues[0]?.message ?? 'Enter a valid email address.',
+        },
+      },
+      { status: 422 }
+    )
+  }
+
+  if (parsed.data.token) {
+    const verified = await verifyNewsletterToken(parsed.data.token, 'unsubscribe')
+    if (!verified) {
+      return jsonError(
+        400,
+        'INVALID_TOKEN',
+        'That unsubscribe link is invalid or has expired. Use the form on the newsletter page.'
+      )
+    }
+    await prisma.newsletterSubscriber.deleteMany({ where: { id: verified.subscriberId } })
+    return Response.json({ data: { unsubscribed: true } })
+  }
+
+  // Deleting a non-existent address succeeds too: never confirm who is on the list.
+  await prisma.newsletterSubscriber.deleteMany({ where: { email: parsed.data.email } })
+  return Response.json({ data: { unsubscribed: true } })
+}
+
+
+===== FILE: src/app/api/newsletter/unsubscribe/route.ts =====
+import { z } from 'zod'
+import { prisma } from '@/lib/db'
+import { jsonError } from '@/lib/community'
+import { verifyNewsletterToken } from '@/lib/newsletter'
+import { NEWSLETTER_ENABLED } from '@/lib/newsletter-feature'
+
+const bodySchema = z
+  .object({ token: z.string().trim().min(20).max(4096) })
+  .strict()
+
+export async function POST(request: Request) {
+  if (!NEWSLETTER_ENABLED) {
+    return jsonError(404, 'NEWSLETTER_DISABLED', 'The newsletter is not available.')
+  }
+
+  if (!process.env.DATABASE_URL) {
+    return jsonError(503, 'NEWSLETTER_UNAVAILABLE', 'Newsletter settings are temporarily unavailable.')
+  }
+
+  // Mailbox providers send an empty POST to the List-Unsubscribe URL, so the
+  // token may arrive in the query string instead of a JSON body.
+  const url = new URL(request.url)
+  const queryToken = url.searchParams.get('token')
+  const body = queryToken ? null : await request.json().catch(() => null)
+  const token = queryToken || body?.token
+
+  const parsed = bodySchema.safeParse({ token })
+  if (!parsed.success) {
+    return jsonError(422, 'VALIDATION_ERROR', 'That unsubscribe link is invalid.')
+  }
+
+  const verified = await verifyNewsletterToken(parsed.data.token, 'unsubscribe')
+  if (!verified) {
+    return jsonError(
+      400,
+      'INVALID_TOKEN',
+      'That unsubscribe link is invalid or has expired. Use the form on the newsletter page.'
+    )
+  }
+
+  await prisma.newsletterSubscriber.deleteMany({ where: { id: verified.subscriberId } })
+  return Response.json({ data: { unsubscribed: true } })
+}
+
+
+===== FILE: src/app/api/notifications/read/route.ts =====
+import { auth } from '@/lib/auth/auth'
+import { prisma } from '@/lib/db'
+import {
+  COMMUNITY_DISABLED,
+  communityEnabled,
+  jsonError,
+} from '@/lib/community'
+
+/** Mark one notification, or every unread notification, as read. */
+export async function POST(request: Request) {
+  if (!communityEnabled()) {
+    return jsonError(COMMUNITY_DISABLED.status, COMMUNITY_DISABLED.code, COMMUNITY_DISABLED.message)
+  }
+
+  const session = await auth()
+  const userId = session?.user?.id
+  if (!userId) return jsonError(401, 'UNAUTHORIZED', 'Sign in first.')
+
+  const body = await request.json().catch(() => null)
+  if (!body || (body.all !== true && typeof body.id !== 'string')) {
+    return jsonError(422, 'VALIDATION_ERROR', 'Provide a notification id or all: true.')
+  }
+
+  const updated = await prisma.notification.updateMany({
+    where: {
+      userId,
+      readAt: null,
+      ...(body.all === true ? {} : { id: body.id }),
+    },
+    data: { readAt: new Date() },
+  })
+
+  return Response.json(
+    { data: { updated: updated.count } },
+    { headers: { 'Cache-Control': 'no-store' } }
+  )
+}
+
+
+===== FILE: src/app/api/notifications/route.ts =====
+import { auth } from '@/lib/auth/auth'
+import { prisma } from '@/lib/db'
+import {
+  COMMUNITY_DISABLED,
+  communityEnabled,
+  jsonError,
+} from '@/lib/community'
+
+export async function GET() {
+  if (!communityEnabled()) {
+    return jsonError(COMMUNITY_DISABLED.status, COMMUNITY_DISABLED.code, COMMUNITY_DISABLED.message)
+  }
+
+  const session = await auth()
+  const userId = session?.user?.id
+  if (!userId) return jsonError(401, 'UNAUTHORIZED', 'Sign in first.')
+
+  const [notifications, unread] = await Promise.all([
+    prisma.notification.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+      select: {
+        id: true,
+        type: true,
+        message: true,
+        href: true,
+        readAt: true,
+        createdAt: true,
+        actor: { select: { id: true, name: true, image: true } },
+      },
+    }),
+    prisma.notification.count({ where: { userId, readAt: null } }),
+  ])
+
+  return Response.json(
+    {
+      data: {
+        notifications: notifications.map((notification) => ({
+          id: notification.id,
+          type: notification.type,
+          message: notification.message,
+          href: notification.href,
+          readAt: notification.readAt?.toISOString() ?? null,
+          createdAt: notification.createdAt.toISOString(),
+          actor: notification.actor,
+        })),
+        unread,
+      },
+    },
+    { headers: { 'Cache-Control': 'no-store' } }
+  )
+}
+
+
+===== FILE: src/app/api/progress/route.ts =====
+import { after } from 'next/server'
+import { z } from 'zod'
+import { auth } from '@/lib/auth/auth'
+import { prisma } from '@/lib/db'
+import { syncUserBadges } from '@/lib/badge-awards'
+import { syncUserCertificates } from '@/lib/certificates'
+import { tracks } from '@/lib/curriculum'
+import type { ProgressState } from '@/lib/progress-state'
+
+
+
+const lessonProgressSchema = z.object({
+  completed: z.boolean(),
+  completedAt: z.string().max(40).nullish(),
+  notes: z.string().max(10_000).nullish(),
+})
+
+const progressStateSchema = z.object({
+  lessons: z
+    .record(z.string().min(1).max(160), lessonProgressSchema)
+    .refine((lessons) => Object.keys(lessons).length <= 500, {
+      message: 'Too many lessons in payload',
+    }),
+  xp: z.number().int().min(0).max(10_000_000),
+  streak: z.object({
+    current: z.number().int().min(0).max(100_000),
+    longest: z.number().int().min(0).max(100_000),
+    lastActiveDate: z.string().max(10).nullable(),
+  }),
+  bookmarks: z.array(z.string().min(1).max(160)).max(500),
+  lastVisited: z
+    .object({
+      track: z.string().max(160),
+      module: z.string().max(160),
+      lesson: z.string().max(160),
+      timestamp: z.string().max(40),
+    })
+    .nullish(),
+})
+
+const xpByLesson = new Map<string, number>()
+for (const track of tracks) {
+  for (const mod of track.modules) {
+    for (const lesson of mod.lessons) {
+      xpByLesson.set(lesson.id, lesson.xpReward)
+    }
+  }
+}
+
+function toDate(value?: string | null): Date | null {
+  if (!value) return null
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+const TRANSIENT_DB_CODES = new Set(['P1001', 'P1017', 'P2002', 'P2028', 'P2034'])
+
+function isTransientDbError(error: unknown): boolean {
+  return Boolean(
+    error &&
+      typeof error === 'object' &&
+      'code' in error &&
+      typeof (error as { code?: unknown }).code === 'string' &&
+      TRANSIENT_DB_CODES.has((error as { code: string }).code)
+  )
+}
+
+async function replaceProgress(
+  userId: string,
+  entries: [string, z.infer<typeof lessonProgressSchema>][],
+  statsData: {
+    xp: number
+    streakCurrent: number
+    streakLongest: number
+    streakLastActive: Date | null
+    bookmarks: string[]
+    lastVisitedTrack: string | null
+    lastVisitedModule: string | null
+    lastVisitedLesson: string | null
+    lastVisitedAt: Date | null
+  }
+) {
+  // Two tabs can save at the same time. A transaction-scoped advisory lock
+  // serializes replacement per learner, so delete + bulk insert cannot race
+  // into a unique-constraint failure on (userId, lessonKey).
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await prisma.$transaction(
+        async (tx) => {
+          await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${userId}))::text AS lock`
+
+          await tx.userProgress.deleteMany({ where: { userId } })
+
+          if (entries.length > 0) {
+            await tx.userProgress.createMany({
+              data: entries.map(([lessonKey, progress]) => ({
+                userId,
+                lessonKey,
+                completed: progress.completed,
+                notes: progress.notes?.trim() ? progress.notes : null,
+                xpEarned: progress.completed ? (xpByLesson.get(lessonKey) ?? 0) : 0,
+                completedAt: progress.completed
+                  ? toDate(progress.completedAt) ?? new Date()
+                  : null,
+              })),
+            })
+          }
+
+          await tx.userStats.upsert({
+            where: { userId },
+            create: { userId, ...statsData },
+            update: statsData,
+          })
+        },
+        { maxWait: 10_000, timeout: 30_000 }
+      )
+      return
+    } catch (error) {
+      if (attempt < 2 && isTransientDbError(error)) {
+        await new Promise((resolve) => setTimeout(resolve, 150 * (attempt + 1)))
+        continue
+      }
+      throw error
+    }
+  }
+}
+
+export async function GET() {
+  const session = await auth()
+  const userId = session?.user?.id ?? null
+  if (!userId) {
+    return Response.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const [rows, stats] = await Promise.all([
+    prisma.userProgress.findMany({ where: { userId } }),
+    prisma.userStats.findUnique({ where: { userId } }),
+  ])
+
+  const state: ProgressState = {
+    lessons: Object.fromEntries(
+      rows.map((row) => [
+        row.lessonKey,
+        {
+          completed: row.completed,
+          ...(row.completedAt ? { completedAt: row.completedAt.toISOString() } : {}),
+          ...(row.notes ? { notes: row.notes } : {}),
+        },
+      ])
+    ),
+    xp: stats?.xp ?? 0,
+    streak: {
+      current: stats?.streakCurrent ?? 0,
+      longest: stats?.streakLongest ?? 0,
+      lastActiveDate: stats?.streakLastActive
+        ? stats.streakLastActive.toISOString().split('T')[0]
+        : null,
+    },
+    bookmarks: stats?.bookmarks ?? [],
+    lastVisited:
+      stats?.lastVisitedTrack &&
+      stats.lastVisitedModule &&
+      stats.lastVisitedLesson &&
+      stats.lastVisitedAt
+        ? {
+            track: stats.lastVisitedTrack,
+            module: stats.lastVisitedModule,
+            lesson: stats.lastVisitedLesson,
+            timestamp: stats.lastVisitedAt.toISOString(),
+          }
+        : null,
+  }
+
+  return Response.json({ state })
+}
+
+export async function PUT(request: Request) {
+  const session = await auth()
+  const userId = session?.user?.id ?? null
+  if (!userId) {
+    return Response.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const body = await request.json().catch(() => null)
+  const parsed = progressStateSchema.safeParse(
+    body && typeof body === 'object' && 'state' in body ? body.state : null
+  )
+  if (!parsed.success) {
+    return Response.json({ error: 'Invalid progress payload' }, { status: 400 })
+  }
+
+  const payload = parsed.data
+
+  // Only persist lessons that have been completed or annotated.
+  const entries = Object.entries(payload.lessons).filter(
+    ([, progress]) => progress.completed || Boolean(progress.notes?.trim())
+  )
+  // Never trust a client-provided XP total: recompute it from the curriculum.
+  const xp = entries.reduce(
+    (sum, [key, progress]) =>
+      progress.completed ? sum + (xpByLesson.get(key) ?? 0) : sum,
+    0
+  )
+
+  const lastVisited = payload.lastVisited
+    ? {
+        lastVisitedTrack: payload.lastVisited.track,
+        lastVisitedModule: payload.lastVisited.module,
+        lastVisitedLesson: payload.lastVisited.lesson,
+        lastVisitedAt: toDate(payload.lastVisited.timestamp),
+      }
+    : {
+        lastVisitedTrack: null,
+        lastVisitedModule: null,
+        lastVisitedLesson: null,
+        lastVisitedAt: null,
+      }
+
+  const streakLastActive = toDate(payload.streak.lastActiveDate)
+
+  const statsData = {
+    xp,
+    streakCurrent: payload.streak.current,
+    streakLongest: payload.streak.longest,
+    streakLastActive,
+    bookmarks: Array.from(new Set(payload.bookmarks)),
+    ...lastVisited,
+  }
+
+  await replaceProgress(userId, entries, statsData)
+
+  const sanitizedLessons: ProgressState['lessons'] = {}
+  for (const [lessonKey, progress] of entries) {
+    sanitizedLessons[lessonKey] = {
+      completed: progress.completed,
+      ...(progress.completed
+        ? { completedAt: toDate(progress.completedAt)?.toISOString() ?? new Date().toISOString() }
+        : {}),
+      ...(progress.notes?.trim() ? { notes: progress.notes } : {}),
+    }
+  }
+
+  const state: ProgressState = {
+    lessons: sanitizedLessons,
+    xp,
+    streak: payload.streak,
+    bookmarks: Array.from(new Set(payload.bookmarks)),
+    lastVisited: payload.lastVisited
+      ? { ...payload.lastVisited, timestamp: toDate(payload.lastVisited.timestamp)?.toISOString() ?? new Date().toISOString() }
+      : null,
+  }
+
+  // Persist earned badges after the response has been sent so saving progress
+  // stays fast. The client toast still unlocks instantly from local state.
+  after(async () => {
+    try {
+      await Promise.all([syncUserBadges(userId), syncUserCertificates(userId)])
+    } catch (error) {
+      console.error('Failed to sync badges or certificates after progress update', error)
+    }
+  })
+
+  return Response.json({ state })
+}
+

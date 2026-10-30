@@ -57,6 +57,13 @@ export async function loadBadgeData(userId: string) {
     },
     bookmarks: [],
     lastVisited: null,
+    practice: {
+      flashcards: {},
+      katas: {},
+      projects: {},
+      drills: {},
+      streak: { current: 0, longest: 0, lastActiveDate: null },
+    },
   }
 
   return {

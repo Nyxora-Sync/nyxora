@@ -1,0 +1,260 @@
+Never write a line of code without a signed agreement and a 50% deposit. This lesson covers the exact contract clauses, invoicing workflow, and payment rails that protect you — especially when working across borders from emerging markets.
+
+## The Non-Negotiables
+
+| Rule | Why |
+|------|-----|
+| **50% deposit before any work** | Filters tire-kickers, covers your opportunity cost |
+| **Scope of Work (SoW) attached to contract** | Prevents "can you also add..." scope creep |
+| **Intellectual Property (IP) transfer on final payment** | You own code until paid in full |
+| **Revision cap (2 rounds included)** | Unlimited revisions = unpaid labor |
+| **Kill fee clause** | If client cancels, you keep deposit + work-to-date |
+
+---
+
+## Contract Template (Copy → Customize → PDF)
+
+```markdown
+# Freelance Development Agreement
+
+**Between:** [Your Name/Entity] ("Developer") — [Address, Country]
+**And:** [Client Name/Entity] ("Client") — [Address, Country]
+**Date:** [Date]
+
+## 1. Scope of Work
+Developer will deliver the services described in **Exhibit A: Scope of Work** (attached).
+Any work outside Exhibit A requires a written Change Order signed by both parties.
+
+## 2. Timeline & Milestones
+| Milestone | Deliverable | Due Date | Payment |
+|-----------|-------------|----------|---------|
+| 1. Project Start | Signed agreement + deposit received | [Date] | 50% |
+| 2. Staging Demo | Working app on staging URL | [Date + 2–4 weeks] | 40% |
+| 3. Production Deploy | Live on client domain + handoff | [Date + 1 week] | 10% |
+
+Developer not liable for delays caused by: client feedback > 3 business days, third-party API changes, scope changes.
+
+## 3. Payment Terms
+- **Currency:** USD
+- **Method:** Wise / Stripe / Payoneer (details on invoice)
+- **Late fee:** 1.5%/month after 7 days overdue
+- **Deposit:** Non-refundable. Covers scheduling, setup, opportunity cost.
+- **Final IP transfer:** Upon 100% payment receipt. Until then, Developer retains all rights.
+
+## 4. Revisions & Changes
+- **Included:** 2 rounds of revisions on staging demo (max 4 hours each)
+- **Additional revisions:** $150/hr, minimum 1 hour, via Change Order
+- **Scope creep examples (require Change Order):**
+  - New features not in Exhibit A
+  - Design changes > 20% of original mockups
+  - Additional integrations / platforms
+  - Data migration not specified
+
+## 5. Intellectual Property
+- Developer owns all code, assets, and work product until final payment clears
+- Upon full payment: Client receives perpetual, worldwide, exclusive license to use, modify, distribute
+- Developer retains right to: showcase in portfolio (anonymized if NDA), reuse generic components (auth, UI kit)
+
+## 6. Confidentiality
+- Both parties keep proprietary info confidential for 2 years post-termination
+- Developer may mention Client name/logo in portfolio unless NDA signed separately
+
+## 7. Warranty & Liability
+- **30-day warranty:** Developer fixes bugs in delivered scope at no cost (excluding client-caused issues)
+- **No warranty** for: third-party services, client-hosted infra, browser/OS changes
+- **Liability cap:** Total liability ≤ total fees paid (standard freelance protection)
+
+## 8. Termination
+- Either party may terminate with 5 business days written notice
+- **On termination:** Client pays for all work completed + expenses incurred
+- Deposit non-refundable if Client terminates before Milestone 2
+
+## 9. Independent Contractor
+- Developer is independent, not employee/agent
+- Developer provides own tools, insurance, taxes
+- No exclusivity — Developer may work with other clients
+
+## 10. Governing Law & Disputes
+- Governing law: [Your Country/State] — e.g., "Bangladesh" / "Delaware, USA"
+- Disputes: Good-faith negotiation → Mediation → Binding arbitration (ICC rules)
+- **Developer's legal costs recoverable if prevailing party**
+
+---
+**Signed:**
+_________________________          _________________________
+Developer                                    Client
+Date: ___________                          Date: ___________
+```
+
+---
+
+## Exhibit A: Scope of Work Template
+
+```markdown
+# Scope of Work — [Project Name]
+
+## Project Summary
+[2–3 sentences: what, for whom, key outcome]
+
+## Inclusions (What's Built)
+| Feature | Description | Acceptance Criteria |
+|---------|-------------|---------------------|
+| 1. [Auth] | Email/password + OAuth (Google, GitHub) | Users can register, login, reset password |
+| 2. [Dashboard] | React + TanStack Query, 3 charts | Loads < 2s, data refreshes on interval |
+| 3. [API] | REST + webhook endpoints | All endpoints return 200/400/500 correctly |
+| 4. [Deploy] | Vercel (frontend) + Render (API) | Staging + prod URLs, HTTPS, custom domain |
+
+## Exclusions (What's NOT Built)
+- UI/UX design (client provides Figma/mocks)
+- Content writing / copywriting
+- Third-party license fees (Stripe, SendGrid, etc.)
+- Mobile app (React Native / native)
+- SEO implementation beyond technical basics
+- Ongoing hosting costs after handoff
+
+## Technical Constraints
+- Stack: Next.js 14, TypeScript, PostgreSQL, Prisma, Tailwind
+- Browser support: Last 2 Chrome/Firefox/Safari/Edge
+- Accessibility: WCAG 2.1 AA (semantic HTML, focus, contrast)
+- Testing: Vitest (unit) + Playwright (E2E) — 80% coverage target
+
+## Client Responsibilities
+- Provide design assets / copy by [date]
+- Grant repo / cloud access by [date]
+- Review staging demo within 3 business days
+- Configure DNS for custom domain
+
+## Acceptance Criteria
+Project accepted when:
+1. All features in Inclusions pass acceptance criteria
+2. Staging demo approved by Client (or 3 days elapsed)
+3. Production deployed to Client domain
+4. Handoff document delivered (see below)
+```
+
+---
+
+## Handoff Document (Deliver at Milestone 3)
+
+```markdown
+# Project Handoff — [Project Name]
+
+## Access Credentials (Rotate After Handoff)
+| Service | URL | Username | Notes |
+|---------|-----|----------|-------|
+| GitHub Repo | github.com/... | — | Private, Client added as collaborator |
+| Vercel (Frontend) | vercel.com/... | — | Team transferred to Client |
+| Render (API) | dashboard.render.com/... | — | Team transferred |
+| Database | Neon / Atlas / Supabase | — | Connection string in .env.production |
+| Stripe | dashboard.stripe.com/... | — | Client added as team member |
+| Domain/DNS | Cloudflare / Namecheap | — | A/CNAME records documented |
+
+## Local Development
+```bash
+git clone [repo]
+cd [project]
+cp .env.example .env.local
+# Fill in keys from 1Password / Bitwarden
+npm install
+npm run dev
+```
+
+## Deployment
+- **Frontend:** `vercel --prod` (auto on main branch)
+- **API:** `git push render main` (auto deploy)
+- **Database Migrations:** `npx prisma migrate deploy` (run manually)
+
+## Monitoring & Alerts
+- Uptime: UptimeRobot (free) — alerts to [client email]
+- Errors: Sentry (free tier) — DSN in .env
+- Logs: Render / Vercel dashboard
+
+## Maintenance Checklist (Monthly)
+- [ ] `npm audit` → fix vulnerabilities
+- [ ] Dependency updates (`npm update` → test → deploy)
+- [ ] Database backup verify (Neon/Atlas auto, but check)
+- [ ] SSL cert expiry (Vercel/Cloudflare auto)
+- [ ] Stripe webhook endpoint health
+
+## Known Limitations / Technical Debt
+- [Honest list — e.g., "No rate limiting on public API yet"]
+- [Recommended next steps]
+
+## Support Terms (If Retainer)
+- Response time: 1 business day (critical), 3 business days (normal)
+- Included: bug fixes, minor tweaks, dependency updates
+- Excluded: new features, design changes, infrastructure scaling
+```
+
+---
+
+## Invoicing Workflow
+
+### Tools (Pick One Stack)
+| Stack | Best For | Cost |
+|-------|----------|------|
+| **Wise Invoice + Stripe** | Direct clients, card payments | Free + Stripe fees (2.9% + $0.30) |
+| **Bonsai / Hello Bonsai** | All-in-one (contracts, invoices, taxes) | $19–$39/mo |
+| **Notion + PDF + Wise** | Zero cost, full control | Free |
+
+### Invoice Template (Minimal Fields)
+```
+INVOICE #[YYYYMMDD-001]
+
+From: [Your Name/Entity] — [Address] — [Tax ID if any]
+To: [Client Name/Entity] — [Address]
+Date: [Date] | Due: [Date + 7 days] | Currency: USD
+
+| Item | Description | Qty | Rate | Amount |
+|------|-------------|-----|------|--------|
+| 1 | [Project Name] — Milestone 2: Staging Demo | 1 | $X,XXX | $X,XXX |
+
+Subtotal: $X,XXX
+Tax (if applicable): $0
+Total: $X,XXX USD
+
+Payment: Wise (preferred) / Stripe Link / Payoneer
+[Payment details / link]
+
+Terms: Net 7. Late fee 1.5%/mo after due date.
+```
+
+---
+
+## Payment Rails for Emerging Markets (2024)
+
+| Country | Best Primary | Backup | Withdrawal to Local Bank |
+|---------|--------------|--------|--------------------------|
+| **Bangladesh** | Wise (BDT) | Payoneer | Wise → local bank (0.5–1%) |
+| **India** | Wise (INR) / Stripe (via entity) | Payoneer | Wise → UPI/NEFT (instant) |
+| **Pakistan** | Wise (PKR) | Payoneer | Wise → local bank (1–2%) |
+| **Nigeria** | Wise (NGN) / Grey.co | Payoneer | Wise → local bank (1%) |
+| **Philippines** | Wise (PHP) / PayMongo | Payoneer | Wise → GCash/bank (instant) |
+| **Global (US entity)** | Stripe + Mercury/Wise | — | USD → Wise → local |
+
+**Critical**: Open Wise Business account *before* first client. Verification takes 3–7 days.
+
+---
+
+## Exercise: Prepare Your Contract Pack This Week
+
+1. **Copy the contract template** → fill in your details → save as `contract-template.md`
+2. **Create Exhibit A template** → save as `sow-template.md`
+3. **Create Handoff template** → save as `handoff-template.md`
+4. **Generate 3 invoices** in Wise/Stripe/Bonsai for your 3 tiers
+5. **Test payment flow**: Send $1 invoice to yourself, pay, withdraw
+
+**Time**: 2–3 hours. Do it once, reuse forever.
+
+## Key Takeaways
+- **Contract = scope boundary** — without it, every request is "in scope"
+- **50% deposit = commitment signal** — clients who won't pay it won't pay the rest
+- **IP transfer on final payment** — your leverage until paid
+- **Wise + Stripe = global payment stack** — works from almost any country
+- **Handoff document = professional closer** — clients remember smooth offboarding
+
+## Resources
+- [AIGA Standard Agreement](https://www.aiga.org/) — Industry standard (adapt for dev)
+- [Bonsai Contract Templates](https://www.hellobonsai.com/contracts) — Freelance-specific
+- [Wise for Freelancers](https://wise.com/help/) — Official guide
+- [Stripe Invoicing](https://stripe.com/invoicing) — Card payments + hosted invoice page

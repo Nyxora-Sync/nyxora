@@ -5,8 +5,10 @@ import { ArrowLeft, Award, BadgeCheck, CalendarDays, ExternalLink, ShieldCheck }
 import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
 import { Button } from '@/components/ui/button'
+import { CertificateNotice } from '@/components/certificates/certificate-notice'
 import { PrintButton } from '@/components/certificates/print-button'
 import { getCertificateByVerificationId } from '@/lib/certificates'
+import { CERTIFICATE_DISCLAIMER, CERTIFICATE_DISCLAIMER_SHORT } from '@/lib/certificate-copy'
 import { siteUrl } from '@/lib/seo'
 import { shortDate } from '@/lib/time'
 
@@ -25,7 +27,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 
   return {
     title: `${certificate.trackName} certificate`,
-    description: `Verified Nyxora Sync certificate for ${certificate.recipientName ?? 'a learner'}.`,
+    description: `Informal, non-accredited Nyxora Sync completion record for ${certificate.recipientName ?? 'a learner'}. Showcase only; not a recognized qualification.`,
     robots: { index: false, follow: false },
   }
 }
@@ -75,10 +77,13 @@ export default async function CertificatePage({ params, searchParams }: PageProp
                   Nyxora Sync
                 </p>
                 <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">Certificate of Completion</h1>
+                <p className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+                  Informal completion record · Not an accredited certificate
+                </p>
               </div>
 
               <div className="space-y-2">
-                <p className="text-sm uppercase tracking-wide text-muted-foreground">This certifies that</p>
+                <p className="text-sm uppercase tracking-wide text-muted-foreground">This is to acknowledge that</p>
                 <p className="text-3xl font-bold tracking-tight sm:text-5xl">{recipient}</p>
                 <p className="mx-auto max-w-2xl text-muted-foreground">
                   has successfully completed every lesson in the
@@ -105,7 +110,7 @@ export default async function CertificatePage({ params, searchParams }: PageProp
 
               <div className="mx-auto max-w-xl rounded-xl border border-dashed border-border/70 bg-background/60 p-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Verify this certificate
+                  Verification link
                 </p>
                 <Link
                   href={`/certificates/${certificate.verificationId}`}
@@ -114,12 +119,18 @@ export default async function CertificatePage({ params, searchParams }: PageProp
                   {verifyUrl}
                   <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                 </Link>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  This link confirms that the record exists on Nyxora Sync. It does not verify
+                  identity, accreditation, or any formal qualification.
+                </p>
               </div>
+
+              <CertificateNotice className="mx-auto max-w-2xl text-left" text={CERTIFICATE_DISCLAIMER} />
             </div>
           </article>
 
           <p className="text-center text-xs text-muted-foreground" data-print-hide>
-            Nyxora Sync certificates verify track completion, not formal accreditation.
+            {CERTIFICATE_DISCLAIMER_SHORT}
           </p>
         </div>
       </main>

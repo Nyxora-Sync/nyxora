@@ -21,9 +21,12 @@ const languageIcons: Record<string, LucideIcon> = {
   python: Terminal,
 }
 
-const languageTracks = tracks.filter(
-  (track) => track.category === 'programming-languages'
-)
+const languageTracks = tracks
+  .filter((track) => track.category === 'programming-languages')
+  .map((track) => ({
+    ...track,
+    modules: track.modules.filter((module) => module.status !== 'advanced' && module.status !== 'planned'),
+  }))
 
 export function LanguagePaths({ className }: { className?: string }) {
   if (languageTracks.length === 0) return null

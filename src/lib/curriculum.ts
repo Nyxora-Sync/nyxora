@@ -114,6 +114,25 @@ export interface Lesson {
   }
   keyTakeaways: string[]
   isProject?: boolean
+  // Portfolio / Fast-Track enhancements
+  portfolioChecklist?: string[]          // What makes this project "portfolio grade"
+  liveDemoUrl?: string                   // Example live deployment URL
+  repoUrl?: string                       // Example GitHub repo URL
+  architectureDiagram?: string           // Text diagram of system architecture
+  techStack?: string[]                   // Key technologies used
+  difficultyNote?: string                // e.g., "Fast-track: 2-3 weeks" or "Deep-dive: 4-6 weeks"
+}
+
+export type ModuleStatus = 'core' | 'advanced' | 'planned'
+
+export interface CapstoneProject {
+  title: string
+  description: string
+  liveDemoUrl: string
+  repoUrl: string
+  techStack: string[]
+  portfolioChecklist: string[]
+  difficultyNote: string
 }
 
 export interface Module {
@@ -123,9 +142,17 @@ export interface Module {
   description: string
   order: number
   estimatedHours: number
+  estimatedHoursRange?: string  // e.g., "40-60 hrs" for realistic ranges
   icon: string
   color: string
   lessons: Lesson[]
+  status?: ModuleStatus // defaults to 'core'
+  // Outcome-driven fields
+  outcomes?: string[]           // "What you'll be able to build/earn"
+  capstoneProject?: CapstoneProject
+  isCapstone?: boolean
+  isFastTrackModule?: boolean   // Part of job-ready fast track
+  isExperimental?: boolean      // Advanced/experimental content, hidden by default in UI
 }
 
 export interface Track {
@@ -137,6 +164,12 @@ export interface Track {
   icon: string
   color: string
   modules: Module[]
+  isFastTrack?: boolean          // Highlights the job-ready fast track
+  fastTrackDescription?: string  // What the fast track covers
+  // Computed properties (added when transformed for display)
+  duration?: string
+  lessons?: number
+  modulesList?: Array<{ key: string; name: string; weeks: number; lessons: number }>
 }
 
 // ============================================================
@@ -151,8 +184,35 @@ const beginnerModules: Module[] = [
     description: 'HTML, CSS, JavaScript, Git, and developer tools. Start from absolute zero.',
     order: 1,
     estimatedHours: 120,
+    estimatedHoursRange: '40-60 hrs',
     icon: 'BookOpen',
     color: 'emerald',
+    isFastTrackModule: true,
+    outcomes: [
+      'Build responsive, accessible static websites with HTML5 and CSS3',
+      'Write modern JavaScript (ES6+) for DOM manipulation and API calls',
+      'Use Git/GitHub for version control and collaboration',
+      'Deploy static sites to Vercel, Netlify, or GitHub Pages',
+    ],
+    capstoneProject: {
+      title: 'Personal Portfolio Website',
+      description: 'A responsive, accessible portfolio showcasing your projects and skills — deployed live with a clean Git history.',
+      liveDemoUrl: 'https://yourname.vercel.app',
+      repoUrl: 'https://github.com/yourusername/portfolio',
+      techStack: ['HTML5', 'CSS3 (Flexbox/Grid)', 'Vanilla JS', 'Vercel/Netlify'],
+      portfolioChecklist: [
+        'Live deployment on Vercel/Netlify/GitHub Pages',
+        'README with: who you are, what you\'re learning, project links, contact info',
+        'GitHub repo with meaningful commits (not a single dump)',
+        'Mobile-first responsive design (375px, 768px, 1440px)',
+        'Semantic HTML5 structure (header, main, section, footer)',
+        'Clean CSS: custom properties, consistent spacing, no !important abuse',
+        'Accessible: alt text on images, heading hierarchy, focus styles',
+        'At least 3 portfolio projects featured (even if placeholders for now)',
+        'Favicon, meta tags, Open Graph tags for social sharing',
+      ],
+      difficultyNote: 'Fast-track: 1-2 weeks · Deep-dive: 3-4 weeks',
+    },
     lessons: [
       {
         id: 'foundations-how-web-works',
@@ -495,6 +555,24 @@ const beginnerModules: Module[] = [
             isVerified: true,
           },
         ],
+        // Portfolio / Fast-Track metadata
+        isProject: true,
+        portfolioChecklist: [
+          'Live deployment on Vercel/Netlify/GitHub Pages',
+          'README with: who you are, what you\'re learning, project links, contact info',
+          'GitHub repo with meaningful commits (not a single dump)',
+          'Mobile-first responsive design (375px, 768px, 1440px)',
+          'Semantic HTML5 structure (header, main, section, footer)',
+          'Clean CSS: custom properties, consistent spacing, no !important abuse',
+          'Accessible: alt text on images, heading hierarchy, focus styles',
+          'At least 3 portfolio projects featured (even if placeholders for now)',
+          'Favicon, meta tags, Open Graph tags for social sharing',
+        ],
+        liveDemoUrl: 'https://yourname.vercel.app',
+        repoUrl: 'https://github.com/yourusername/portfolio',
+        architectureDiagram: `Static HTML/CSS/JS → Vercel/Netlify → CDN`,
+        techStack: ['HTML5', 'CSS3 (Flexbox/Grid)', 'Vanilla JS', 'Vercel/Netlify'],
+        difficultyNote: 'Fast-track: 1-2 weeks · Deep-dive: 3-4 weeks',
       },
     ],
   },
@@ -505,8 +583,35 @@ const beginnerModules: Module[] = [
     description: 'Server-side JavaScript, REST APIs, authentication, and testing.',
     order: 2,
     estimatedHours: 60,
+    estimatedHoursRange: '30-45 hrs',
     icon: 'Server',
     color: 'emerald',
+    isFastTrackModule: true,
+    outcomes: [
+      'Build and deploy REST APIs with Express.js',
+      'Implement JWT authentication with bcrypt password hashing',
+      'Write unit and integration tests with Jest and Supertest',
+      'Handle errors gracefully with centralized error middleware',
+    ],
+    capstoneProject: {
+      title: 'Task Manager REST API',
+      description: 'A complete REST API with authentication, CRUD operations, validation, and tests — ready for a frontend to consume.',
+      liveDemoUrl: 'https://task-api.onrender.com',
+      repoUrl: 'https://github.com/yourusername/task-api',
+      techStack: ['Node.js', 'Express', 'JWT', 'Zod', 'Jest', 'Supertest', 'MongoDB', 'Render'],
+      portfolioChecklist: [
+        'Live deployment on Render/Railway with health endpoint',
+        'README with: problem statement, API docs, setup instructions, demo credentials',
+        'GitHub repo with clean commit history',
+        'Authentication: register, login, logout, protected routes',
+        'Full CRUD for at least 2 resources with validation (Zod)',
+        'Error handling: proper HTTP status codes, consistent error format',
+        'Tests: unit + integration (auth, CRUD) with >80% coverage',
+        'CI pipeline (GitHub Actions) running tests on every push',
+        'Environment variables documented (.env.example)',
+      ],
+      difficultyNote: 'Fast-track: 2-3 weeks · Deep-dive: 4-5 weeks',
+    },
     lessons: [
       {
         id: 'node-intro',
@@ -710,8 +815,33 @@ const beginnerModules: Module[] = [
     description: 'NoSQL databases, data modeling, relationships, and aggregations.',
     order: 3,
     estimatedHours: 40,
+    estimatedHoursRange: '20-30 hrs',
     icon: 'Database',
     color: 'emerald',
+    isFastTrackModule: true,
+    outcomes: [
+      'Model data with Mongoose schemas, validation, and middleware',
+      'Design relationships with referencing vs embedding strategies',
+      'Build aggregation pipelines for analytics and reporting',
+      'Secure MongoDB with authentication, indexes, and least-privilege users',
+    ],
+    capstoneProject: {
+      title: 'Blog Platform API with MongoDB',
+      description: 'A content API demonstrating advanced Mongoose patterns: relationships, virtuals, aggregation, and middleware.',
+      liveDemoUrl: 'https://blog-api.onrender.com',
+      repoUrl: 'https://github.com/yourusername/blog-api',
+      techStack: ['MongoDB', 'Mongoose', 'Express', 'Aggregation Pipeline', 'MongoDB Atlas'],
+      portfolioChecklist: [
+        'Models for User, Post, Comment with proper relationships',
+        'Virtuals for computed fields (e.g., post.authorName)',
+        'Middleware for slugs, timestamps, cascade deletes',
+        'Aggregation: posts by category, popular tags, author stats',
+        'Indexes for query performance (compound, text, partial)',
+        'Validation at schema and controller level',
+        'Seed script for reproducible development data',
+      ],
+      difficultyNote: 'Fast-track: 1-2 weeks · Deep-dive: 2-3 weeks',
+    },
     lessons: [
       {
         id: 'mongodb-intro',
@@ -806,7 +936,7 @@ const beginnerModules: Module[] = [
           {
             type: 'article',
             title: 'MongoDB Data Modeling Best Practices',
-            url: 'https://www.mongodb.com/developer/products/mongodb/mongodb-schema-design-best-practices/',
+            url: 'https://www.mongodb.com/docs/manual/data-modeling/',
             provider: 'MongoDB',
             isVerified: true,
           },
@@ -852,8 +982,36 @@ const beginnerModules: Module[] = [
     description: 'Modern React with hooks, routing, state management, and performance.',
     order: 4,
     estimatedHours: 80,
+    estimatedHoursRange: '40-60 hrs',
     icon: 'Atom',
     color: 'emerald',
+    isFastTrackModule: true,
+    outcomes: [
+      'Build interactive UIs with React hooks, Context, and React Router',
+      'Manage forms with React Hook Form + Zod validation',
+      'Fetch and cache server state with TanStack Query',
+      'Optimize performance with memo, lazy loading, and profiling',
+    ],
+    capstoneProject: {
+      title: 'E-Commerce Frontend',
+      description: 'A production-ready React SPA with cart, checkout flow, authentication, and product catalog — ready to connect to any backend.',
+      liveDemoUrl: 'https://shop.vercel.app',
+      repoUrl: 'https://github.com/yourusername/ecommerce-frontend',
+      techStack: ['React 19', 'React Router', 'TanStack Query', 'React Hook Form', 'Zod', 'Tailwind', 'Zustand', 'Vercel'],
+      portfolioChecklist: [
+        'Live deployment on Vercel with preview deployments',
+        'README with: architecture diagram, tech stack, setup instructions',
+        'GitHub repo with clean commits and PR template',
+        'Pages: Home, Products, Product Detail, Cart, Checkout, Account, Login/Register',
+        'State management: cart (Zustand), server state (TanStack Query), forms (RHF + Zod)',
+        'Authentication flow: protected routes, token refresh, logout',
+        'Responsive: mobile-first at 375px, 768px, 1440px',
+        'Accessible: semantic HTML, ARIA labels, focus management, contrast',
+        'Performance: code-split routes, lazy-loaded images, optimized bundle',
+        'Error boundaries, loading skeletons, empty states on all data screens',
+      ],
+      difficultyNote: 'Fast-track: 2-3 weeks · Deep-dive: 4-6 weeks',
+    },
     lessons: [
       {
         id: 'react-intro',
@@ -987,7 +1145,7 @@ const beginnerModules: Module[] = [
           {
             type: 'docs',
             title: 'Zustand Documentation',
-            url: 'https://zustand.docs.pmnd.rs/getting-started/introduction',
+            url: 'https://zustand.docs.pmnd.rs/',
             provider: 'Zustand',
             isVerified: true,
           },
@@ -1061,8 +1219,9 @@ const beginnerModules: Module[] = [
           {
             type: 'article',
             title: 'React Performance Optimization Guide',
-            url: 'https://www.debugbear.com/blog/react-performance',
-            provider: 'DebugBear',
+            url: 'https://react.dev/learn/render-and-commit',
+            provider: 'React',
+            isVerified: true,
           },
         ],
       },
@@ -1075,8 +1234,35 @@ const beginnerModules: Module[] = [
     description: 'Integrate everything: architecture, real-time, deployment, and CI/CD.',
     order: 5,
     estimatedHours: 50,
+    estimatedHoursRange: '30-45 hrs',
     icon: 'Layers',
     color: 'emerald',
+    isFastTrackModule: true,
+    outcomes: [
+      'Connect React frontend to Express backend with typed API client',
+      'Implement real-time features with Socket.io',
+      'Deploy full MERN stack: MongoDB Atlas, Render/Railway, Vercel',
+      'Set up CI/CD pipeline with GitHub Actions',
+    ],
+    capstoneProject: {
+      title: 'TeamBoard — Real-Time Collaboration App',
+      description: 'A Trello-like board with real-time updates, drag-and-drop, authentication, and full deployment pipeline.',
+      liveDemoUrl: 'https://teamboard.vercel.app',
+      repoUrl: 'https://github.com/yourusername/teamboard',
+      techStack: ['React 19', 'React Router', 'TanStack Query', 'Tailwind', 'Node 20', 'Express', 'Socket.io', 'Mongoose', 'Zod', 'Vitest', 'MongoDB Atlas', 'Render', 'Vercel', 'GitHub Actions'],
+      portfolioChecklist: [
+        'Live deployment on Vercel/Render/Neon (not localhost)',
+        'README with: problem statement, architecture diagram, tech stack, setup instructions, demo credentials',
+        'GitHub repo with clean commit history (no single "initial commit" dumps)',
+        'At least 3 meaningful integration tests (auth, CRUD, real-time)',
+        'CI pipeline (GitHub Actions) running tests on every push',
+        'Error handling: loading, empty, and error states on every data screen',
+        'Mobile-responsive layout (375px, 768px, 1440px breakpoints)',
+        'Accessibility basics: semantic HTML, labels, contrast, focus management',
+        '30-second demo video or GIF of the core user flow',
+      ],
+      difficultyNote: 'Fast-track: 2-3 weeks · Deep-dive: 4-6 weeks',
+    },
     lessons: [
       {
         id: 'fullstack-architecture',
@@ -1270,11 +1456,30 @@ const beginnerModules: Module[] = [
           {
             type: 'project',
             title: 'Build a MERN E-commerce Store',
-            url: 'https://www.freecodecamp.org/news/how-to-build-a-mern-stack-ecommerce-website/',
+            url: 'https://www.freecodecamp.org/news/search/?query=build+mern+ecommerce',
             provider: 'freeCodeCamp',
             isVerified: true,
           },
         ],
+        // Portfolio / Fast-Track metadata
+        isProject: true,
+        portfolioChecklist: [
+          'Live deployment on Vercel/Render/Neon (not localhost)',
+          'README with: problem statement, architecture diagram, tech stack, setup instructions, demo credentials',
+          'GitHub repo with clean commit history (no single "initial commit" dumps)',
+          'At least 3 meaningful integration tests (auth, CRUD, real-time)',
+          'CI pipeline (GitHub Actions) running tests on every push',
+          'Error handling: loading, empty, and error states on every data screen',
+          'Mobile-responsive layout (375px, 768px, 1440px breakpoints)',
+          'Accessibility basics: semantic HTML, labels, contrast, focus management',
+          '30-second demo video or GIF of the core user flow',
+        ],
+        liveDemoUrl: 'https://teamboard.vercel.app',
+        repoUrl: 'https://github.com/yourusername/teamboard',
+        architectureDiagram: `Client (React + TanStack Query) → API (Express + Socket.io) → MongoDB Atlas
+                                    ↘ WebSocket (real-time)         ↘ Redis (optional, for scaling)`,
+        techStack: ['React 19', 'React Router', 'TanStack Query', 'Tailwind', 'Node 20', 'Express', 'Socket.io', 'Mongoose', 'Zod', 'Vitest', 'MongoDB Atlas', 'Render', 'Vercel', 'GitHub Actions'],
+        difficultyNote: 'Fast-track: 2-3 weeks · Deep-dive: 4-6 weeks',
       },
     ],
   },
@@ -1292,8 +1497,16 @@ const masteryModules: Module[] = [
     description: 'Static types across the whole stack: fundamentals, typed Express APIs, React with TypeScript, and end-to-end type safety.',
     order: 5,
     estimatedHours: 12,
+    estimatedHoursRange: '20-30 hrs',
     icon: 'FileCode',
     color: 'blue',
+    status: 'advanced' as ModuleStatus,
+    outcomes: [
+      'Add static types to JavaScript projects with confidence',
+      'Type Express APIs end-to-end with Zod schema inference',
+      'Write type-safe React components, hooks, and forms',
+      'Share types across client and server for contract-first development',
+    ],
     lessons: [
       {
         id: 'typescript-foundations',
@@ -1432,8 +1645,8 @@ const masteryModules: Module[] = [
           },
           {
             type: 'docs',
-            title: 'OpenAPI TypeScript',
-            url: 'https://openapi-ts.dev/introduction',
+            title: 'OpenAPI TypeScript Generator',
+            url: 'https://github.com/ferdikoomen/openapi-typescript-codegen',
             provider: 'OpenAPI TypeScript',
           },
         ],
@@ -1444,11 +1657,19 @@ const masteryModules: Module[] = [
     id: 'testing',
     key: 'testing',
     name: 'Testing in Depth',
-    description: 'From the testing trophy to Playwright: unit tests, API integration tests, component tests, and end-to-end coverage that runs in CI.',
+    description: 'From the testing trophy to Playwright: unit tests, API integration tests, component tests, and end-to-end coverage that runs in CI. Covers fundamentals; mastery takes months of practice.',
     order: 6,
     estimatedHours: 14,
+    estimatedHoursRange: '25-40 hrs',
     icon: 'FlaskConical',
     color: 'rose',
+    status: 'advanced' as ModuleStatus,
+    outcomes: [
+      'Write unit tests with Vitest that catch real bugs',
+      'Build API integration tests with Supertest and in-memory databases',
+      'Test React components with Testing Library and MSW',
+      'Run end-to-end tests in CI with Playwright',
+    ],
     lessons: [
       {
         id: 'testing-strategy',
@@ -1599,11 +1820,19 @@ const masteryModules: Module[] = [
     id: 'security',
     key: 'security',
     name: 'Security',
-    description: 'Think like an attacker and defend like an engineer: web vulnerabilities, API hardening, advanced auth, and protecting stored data.',
+    description: 'Think like an attacker and defend like an engineer: web vulnerabilities, API hardening, advanced auth, and protecting stored data. Covers fundamentals; mastery takes months of practice.',
     order: 7,
     estimatedHours: 13,
+    estimatedHoursRange: '25-35 hrs',
     icon: 'ShieldCheck',
     color: 'amber',
+    status: 'advanced' as ModuleStatus,
+    outcomes: [
+      'Identify and prevent OWASP Top 10 vulnerabilities (XSS, CSRF, injection)',
+      'Harden Express APIs with Helmet, rate limiting, and validation',
+      'Implement advanced auth: refresh tokens, 2FA/TOTP, OAuth 2.0',
+      'Protect data with encryption, least-privilege DB users, and audit logs',
+    ],
     lessons: [
       {
         id: 'security-web-fundamentals',
@@ -1755,11 +1984,19 @@ const masteryModules: Module[] = [
     id: 'devops',
     key: 'devops',
     name: 'DevOps',
-    description: 'Ship and operate with confidence: containers in depth, production CI/CD, observability, and scaling past a single server.',
+    description: 'Ship and operate with confidence: containers in depth, production CI/CD, observability, and scaling past a single server. Covers fundamentals; mastery takes months of practice.',
     order: 8,
     estimatedHours: 11,
+    estimatedHoursRange: '20-30 hrs',
     icon: 'Container',
     color: 'cyan',
+    status: 'advanced' as ModuleStatus,
+    outcomes: [
+      'Dockerize full-stack apps with multi-stage builds and Compose',
+      'Build production CI/CD pipelines with environments and rollbacks',
+      'Add observability: structured logging, metrics, tracing, and alerts',
+      'Scale horizontally with zero-downtime deployments',
+    ],
     lessons: [
       {
         id: 'devops-docker-deep',
@@ -1792,9 +2029,10 @@ const masteryModules: Module[] = [
           },
           {
             type: 'interactive',
-            title: 'Play with Docker',
-            url: 'https://labs.play-with-docker.com',
+            title: 'Docker Get Started Tutorial',
+            url: 'https://docs.docker.com/get-started/',
             provider: 'Docker',
+            isVerified: true,
           },
         ],
       },
@@ -1879,11 +2117,19 @@ const masteryModules: Module[] = [
     id: 'architecture',
     key: 'architecture',
     name: 'Architecture & System Design',
-    description: 'Design systems that last: modular architecture, background jobs and caching, evolving APIs, and data modeling at scale.',
+    description: 'Design systems that last: modular architecture, background jobs and caching, evolving APIs, and data modeling at scale. Covers fundamentals; mastery takes months of practice.',
     order: 9,
     estimatedHours: 12,
+    estimatedHoursRange: '20-30 hrs',
     icon: 'Network',
     color: 'indigo',
+    status: 'advanced' as ModuleStatus,
+    outcomes: [
+      'Design modular monoliths and extract services when justified',
+      'Implement background jobs with BullMQ and Redis',
+      'Design caching layers with invalidation strategies',
+      'Model data for access patterns at scale',
+    ],
     lessons: [
       {
         id: 'architecture-system-design',
@@ -2007,8 +2253,16 @@ const masteryModules: Module[] = [
     description: 'Measure, then make it fast everywhere: Node.js internals, database queries, and frontend delivery with caching.',
     order: 10,
     estimatedHours: 11,
+    estimatedHoursRange: '20-30 hrs',
     icon: 'Gauge',
     color: 'violet',
+    status: 'advanced' as ModuleStatus,
+    outcomes: [
+      'Profile Node.js apps and fix memory leaks',
+      'Optimize MongoDB queries with indexes and explain plans',
+      'Improve Core Web Vitals: images, fonts, bundles, caching',
+      'Implement Redis cache-aside patterns with invalidation',
+    ],
     lessons: [
       {
         id: 'performance-node-runtime',
@@ -2133,8 +2387,37 @@ const masteryModules: Module[] = [
     description: 'The final build: a multi-tenant SaaS application — then ship it, document it, and use it to open doors.',
     order: 11,
     estimatedHours: 19,
+    estimatedHoursRange: '40-60 hrs',
     icon: 'Rocket',
     color: 'emerald',
+    status: 'advanced' as ModuleStatus,
+    isCapstone: true,
+    outcomes: [
+      'Build a production-grade multi-tenant SaaS with orgs, roles, and billing',
+      'Implement audit logs, background jobs, and real-time features',
+      'Deploy with monitoring, health checks, and CI/CD',
+      'Write a compelling case study that opens doors',
+    ],
+    capstoneProject: {
+      title: 'PulseBoard — Multi-Tenant SaaS Platform',
+      description: 'A production-grade multi-tenant collaboration platform with organizations, role-based access, invites, audit logs, background jobs, and a billing stub.',
+      liveDemoUrl: 'https://pulseboard.vercel.app',
+      repoUrl: 'https://github.com/yourusername/pulseboard',
+      techStack: ['React 19', 'React Router', 'TanStack Query', 'Tailwind', 'Node 20', 'Express', 'Socket.io', 'BullMQ', 'Mongoose', 'Zod', 'Vitest', 'Playwright', 'MongoDB Atlas', 'Redis', 'Render', 'Vercel', 'GitHub Actions', 'Stripe'],
+      portfolioChecklist: [
+        'Live deployment with health monitoring endpoint',
+        'README with: multi-tenant problem statement, architecture diagram, tech stack, setup instructions, demo credentials',
+        'GitHub repo with clean, incremental commit history showing progression',
+        'Cross-tenant isolation tests proving data separation (critical for SaaS)',
+        'CI pipeline with test + lint + type-check on every push',
+        'Four states (loading, empty, error, success) on every data screen',
+        'Mobile-responsive at 375px, 768px, 1440px',
+        'Accessibility: semantic HTML, labels, ARIA where needed, keyboard navigation',
+        '3-minute demo video showing: signup → org creation → invite member → core feature flow',
+        'Case study document: problem, constraints, decisions, outcome, what you\'d change',
+      ],
+      difficultyNote: 'Fast-track: 3-4 weeks · Deep-dive: 6-8 weeks',
+    },
     lessons: [
       {
         id: 'capstone-saas-app',
@@ -2167,11 +2450,32 @@ const masteryModules: Module[] = [
           {
             type: 'project',
             title: 'Build a MERN E-commerce Store',
-            url: 'https://www.freecodecamp.org/news/how-to-build-a-mern-stack-ecommerce-website/',
+            url: 'https://www.freecodecamp.org/news/search/?query=build+mern+ecommerce',
             provider: 'freeCodeCamp',
             isVerified: true,
           },
         ],
+        // Portfolio / Fast-Track metadata
+        isProject: true,
+        portfolioChecklist: [
+          'Live deployment with health monitoring endpoint',
+          'README with: multi-tenant problem statement, architecture diagram, tech stack, setup instructions, demo credentials',
+          'GitHub repo with clean, incremental commit history showing progression',
+          'Cross-tenant isolation tests proving data separation (critical for SaaS)',
+          'CI pipeline with test + lint + type-check on every push',
+          'Four states (loading, empty, error, success) on every data screen',
+          'Mobile-responsive at 375px, 768px, 1440px',
+          'Accessibility: semantic HTML, labels, ARIA where needed, keyboard navigation',
+          '3-minute demo video showing: signup → org creation → invite member → core feature flow',
+          'Case study document: problem, constraints, decisions, outcome, what you\'d change',
+        ],
+        liveDemoUrl: 'https://pulseboard.vercel.app',
+        repoUrl: 'https://github.com/yourusername/pulseboard',
+        architectureDiagram: `Client (React + TanStack Query) → API (Express + Socket.io + BullMQ) → MongoDB Atlas
+                                    ↘ WebSocket (real-time)          ↘ Redis (queue + cache)
+                                    ↘ Worker (background jobs)       ↘ Stripe (billing stub)`,
+        techStack: ['React 19', 'React Router', 'TanStack Query', 'Tailwind', 'Node 20', 'Express', 'Socket.io', 'BullMQ', 'Mongoose', 'Zod', 'Vitest', 'Playwright', 'MongoDB Atlas', 'Redis', 'Render', 'Vercel', 'GitHub Actions', 'Stripe'],
+        difficultyNote: 'Fast-track: 3-4 weeks · Deep-dive: 6-8 weeks',
       },
       {
         id: 'capstone-portfolio-career',
@@ -2216,8 +2520,316 @@ const masteryModules: Module[] = [
 ]
 
 // ============================================================
-// SPECIALIZATIONS TRACK (after the core MERN curriculum)
+// FIRST CLIENT TRACK (8-week freelancing system)
 // ============================================================
+
+const firstClientModules: Module[] = [
+  {
+    id: 'client-m1-offer',
+    key: 'offer-positioning',
+    name: 'Week 1: Offer & Positioning',
+    description: 'Define your high-value freelance offer, select a profitable niche, and price your services for international clients.',
+    order: 1,
+    estimatedHours: 10,
+    icon: 'Briefcase',
+    color: 'indigo',
+    lessons: [
+      {
+        id: 'client-niche-selection',
+        title: 'Choosing a Profitable Freelance Niche',
+        description: 'Why generalists struggle and specialists thrive. How to position yourself around business outcomes, not just code.',
+        order: 1,
+        estimatedMinutes: 120,
+        difficulty: 'beginner',
+        xpReward: 25,
+        keyTakeaways: [
+          'The problem with "full stack developer for hire"',
+          'Matching technical skills to business problems (e.g. e-commerce conversion, SaaS dashboards)',
+          'Targeting international clients on platforms and direct outreach',
+        ],
+        resources: [
+          {
+            type: 'article',
+            title: 'The Positioning Manual for Technical Freelancers',
+            url: 'https://www.freecodecamp.org/news/freelance-web-developer-guide/',
+            provider: 'freeCodeCamp',
+            isVerified: true,
+          },
+        ],
+      },
+      {
+        id: 'client-pricing-strategy',
+        title: 'Pricing for International Clients',
+        description: 'Value-based pricing vs. hourly vs. fixed-scope. How to charge $1,000+ per project instead of competing on $5/hr races to the bottom.',
+        order: 2,
+        estimatedMinutes: 150,
+        difficulty: 'intermediate',
+        xpReward: 30,
+        keyTakeaways: [
+          'Why hourly pricing punishes efficiency',
+          'How to calculate project fees based on client ROI',
+          'Handling currency conversion, Wise, Payoneer, and Stripe safely from emerging markets',
+        ],
+        resources: [
+          {
+            type: 'article',
+            title: 'Double Your Freelancing Rate',
+            url: 'https://doubleyourfreelancing.com/rate/',
+            provider: 'Brennan Dunn',
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'client-m2-portfolio',
+    key: 'portfolio-proof',
+    name: 'Week 2: Portfolio & Case Studies',
+    description: 'Transform your capstone projects into compelling case studies that prove reliability and competence.',
+    order: 2,
+    estimatedHours: 10,
+    icon: 'FileCode',
+    color: 'indigo',
+    lessons: [
+      {
+        id: 'client-case-studies',
+        title: 'Writing Case Studies That Sell',
+        description: 'Structure your projects around Problem → Solution → Outcome. What clients look for before hiring.',
+        order: 1,
+        estimatedMinutes: 120,
+        difficulty: 'beginner',
+        xpReward: 25,
+        keyTakeaways: [
+          'Anatomy of a high-converting freelance portfolio piece',
+          'Highlighting trade-offs, testing, and production deployments',
+          'Recording a 60-second Loom walkthrough for each project',
+        ],
+        resources: [
+          {
+            type: 'article',
+            title: 'How to Showcase Projects in Your Portfolio',
+            url: 'https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-readmes',
+            provider: 'GitHub Guides',
+            isVerified: true,
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'client-m3-outreach',
+    key: 'outreach-channels',
+    name: 'Week 3: Platforms & Cold Outreach',
+    description: 'Master Upwork proposals, Contra/Fiverr profiles, and personalized cold email/DM strategies.',
+    order: 3,
+    estimatedHours: 12,
+    icon: 'Network',
+    color: 'indigo',
+    lessons: [
+      {
+        id: 'client-upwork-mastery',
+        title: 'Winning Upwork Proposals',
+        description: 'How to beat 50+ applicants by focusing the first two sentences entirely on the client\'s problem.',
+        order: 1,
+        estimatedMinutes: 180,
+        difficulty: 'intermediate',
+        xpReward: 35,
+        keyTakeaways: [
+          'Spotting legitimate clients vs. time-wasters',
+          'The 3-part proposal formula (Hook, Relevant Proof, Clear Call to Action)',
+          'Setting up JSS (Job Success Score) foundations from day one',
+        ],
+        resources: [
+          {
+            type: 'article',
+            title: 'Upwork Proposal Guide',
+            url: 'https://www.upwork.com/freelancers/',
+            provider: 'Upwork',
+            isVerified: true,
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'client-m4-proposals',
+    key: 'discovery-proposals',
+    name: 'Week 4: Discovery Calls & Proposals',
+    description: 'Run professional discovery calls, uncover hidden requirements, and send proposals that close.',
+    order: 4,
+    estimatedHours: 10,
+    icon: 'FileCode',
+    color: 'indigo',
+    lessons: [
+      {
+        id: 'client-discovery-call',
+        title: 'Running a 15-Minute Discovery Call',
+        description: 'Ask the right questions, listen 80% of the time, and diagnose whether the client is a good fit.',
+        order: 1,
+        estimatedMinutes: 120,
+        difficulty: 'intermediate',
+        xpReward: 30,
+        keyTakeaways: [
+          'The BANT framework (Budget, Authority, Need, Timeline) adapted for web dev',
+          'Red flags: clients who want everything yesterday for $100',
+          'Transitioning from call to paid proposal',
+        ],
+        resources: [
+          {
+            type: 'article',
+            title: 'The Freelance Discovery Call Blueprint',
+            url: 'https://www.freecodecamp.org/news/tag/freelancing/',
+            provider: 'freeCodeCamp',
+            isVerified: true,
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'client-m5-workflow',
+    key: 'delivery-workflow',
+    name: 'Week 5: Contracts, Milestones & Invoices',
+    description: 'Protect yourself with solid contracts, milestone payments, and professional client communication.',
+    order: 5,
+    estimatedHours: 10,
+    icon: 'ShieldCheck',
+    color: 'indigo',
+    lessons: [
+      {
+        id: 'client-contracts-invoicing',
+        title: 'Contracts, Deposits & Scope Control',
+        description: 'Never write a line of code without a 50% upfront deposit and a signed scope of work.',
+        order: 1,
+        estimatedMinutes: 150,
+        difficulty: 'advanced',
+        xpReward: 35,
+        keyTakeaways: [
+          'Essential clauses in a freelance dev contract (IP ownership, revisions cap, termination)',
+          'Managing scope creep politely and profitably',
+          'Invoicing and payment rails for international work',
+        ],
+        resources: [
+          {
+            type: 'docs',
+            title: 'AIGA Standard Form of Agreement',
+            url: 'https://www.aiga.org/standard-agreement/',
+            provider: 'AIGA',
+            isVerified: true,
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'client-m6-execution',
+    key: 'project-execution',
+    name: 'Week 6: Simulated Client Execution',
+    description: 'Execute an end-to-end simulated client project following strict acceptance criteria and staging deploys.',
+    order: 6,
+    estimatedHours: 15,
+    icon: 'Rocket',
+    color: 'indigo',
+    lessons: [
+      {
+        id: 'client-simulation-capstone',
+        title: 'Capstone: Client Project Simulation',
+        description: 'Build, test, stage, and hand off a client project with zero friction.',
+        order: 1,
+        estimatedMinutes: 450,
+        difficulty: 'advanced',
+        xpReward: 100,
+        keyTakeaways: [
+          'Staging environments on Vercel/Render',
+          'Client feedback loops and Loom video updates',
+          'Production handover and documentation',
+        ],
+        resources: [
+          {
+            type: 'project',
+            title: 'Simulated Client Brief & Spec',
+            url: 'https://github.com/nyxora-sync',
+            provider: 'Nyxora Sync',
+          },
+        ],
+        isProject: true,
+        portfolioChecklist: [
+          'Staging URL provided to client',
+          'Loom video demo recorded and shared',
+          'Clean handoff document with credentials and maintenance notes',
+        ],
+      },
+    ],
+  },
+  {
+    id: 'client-m7-retention',
+    key: 'retention-upsells',
+    name: 'Week 7: Retention, Upsells & Referrals',
+    description: 'Turn one-off project clients into recurring monthly retainer clients and generate referral flywheels.',
+    order: 7,
+    estimatedHours: 8,
+    icon: 'Trophy',
+    color: 'indigo',
+    lessons: [
+      {
+        id: 'client-retainers-referrals',
+        title: 'Turning One-Offs into Monthly Retainers',
+        description: 'Maintenance packages, SEO audits, security updates, and the 60-day post-launch check-in.',
+        order: 1,
+        estimatedMinutes: 120,
+        difficulty: 'intermediate',
+        xpReward: 25,
+        keyTakeaways: [
+          'Structuring monthly maintenance retainers ($200-$500/mo)',
+          'The exact script to ask for referrals and LinkedIn recommendations',
+        ],
+        resources: [
+          {
+            type: 'article',
+            title: 'Building Recurring Revenue as a Freelancer',
+            url: 'https://www.freecodecamp.org/news/freelance-web-developer-guide/',
+            provider: 'freeCodeCamp',
+            isVerified: true,
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'client-m8-scale',
+    key: 'systems-scale',
+    name: 'Week 8: Systems & Agency Scaling',
+    description: 'Build SOPs for your freelance business, automate invoicing, and decide whether to hire subcontractors.',
+    order: 8,
+    estimatedHours: 8,
+    icon: 'Cloud',
+    color: 'indigo',
+    lessons: [
+      {
+        id: 'client-sops-scaling',
+        title: 'SOPs, Automation & Scaling Solo',
+        description: 'Standard Operating Procedures for client onboarding, code standards, and deployment checklists.',
+        order: 1,
+        estimatedMinutes: 120,
+        difficulty: 'advanced',
+        xpReward: 30,
+        keyTakeaways: [
+          'Documenting your repeatable workflow',
+          'When and how to bring on a junior developer or designer contractor',
+        ],
+        resources: [
+          {
+            type: 'docs',
+            title: 'The E-Myth Revisited (Summary)',
+            url: 'https://www.michaelegerber.com/',
+            provider: 'Michael E. Gerber',
+          },
+        ],
+      },
+    ],
+  },
+]
+
 
 const specializationModules: Module[] = [
   {
@@ -2853,6 +3465,8 @@ export const tracks: Track[] = [
     icon: 'BookOpen',
     color: 'emerald',
     modules: beginnerModules,
+    isFastTrack: true,
+    fastTrackDescription: 'HTML/CSS/JS → Node/Express → MongoDB → React → Full-Stack MERN → Capstone. ~14 weeks to job-ready portfolio.',
   },
   {
     id: 'developer',
@@ -2860,6 +3474,8 @@ export const tracks: Track[] = [
     name: 'Developer Track',
     description: 'Already know JavaScript? Skip the basics, master the MERN stack, then go deeper with TypeScript, testing, security, DevOps, architecture, performance, and a master capstone.',
     category: 'web-development',
+    isFastTrack: false,
+    fastTrackDescription: 'Node/Express → MongoDB → React → Full-Stack MERN → Mastery (TS, Testing, Security, DevOps, Architecture). ~10 weeks to senior-level portfolio.',
     icon: 'Code2',
     color: 'violet',
     modules: developerModules,
@@ -2873,6 +3489,18 @@ export const tracks: Track[] = [
     icon: 'Sparkles',
     color: 'cyan',
     modules: specializationModules,
+  },
+  {
+    id: 'first-client',
+    key: 'first-client',
+    name: 'First Client Track',
+    description: 'From portfolio to paid work: an 8-week system to land your first freelance client, deliver professionally, and build a repeatable pipeline. Designed for developers in emerging markets targeting international clients.',
+    category: 'web-development',
+    icon: 'Briefcase',
+    color: 'indigo',
+    isFastTrack: true,
+    fastTrackDescription: '8 weeks to first paid client: positioning → portfolio → outreach → proposals → delivery → retention → scale.',
+    modules: firstClientModules,
   },
   ...languageTracks,
   {
@@ -2893,6 +3521,7 @@ export const tracks: Track[] = [
         estimatedHours: 40,
         icon: 'Cpu',
         color: 'amber',
+        status: 'planned' as ModuleStatus,
         lessons: [
           {
             id: 'embedded-placeholder',
@@ -2938,4 +3567,18 @@ export function getTotalXP(trackKey: string): number {
 
 export function getTotalMinutes(trackKey: string): number {
   return getAllLessons(trackKey).reduce((sum, lesson) => sum + lesson.estimatedMinutes, 0)
+}
+
+// Helper to compute display properties for a track
+export function getTrackDisplay(track: Track) {
+  const totalHours = track.modules.reduce((sum, m) => sum + m.estimatedHours, 0)
+  const totalLessons = track.modules.reduce((sum, m) => sum + m.lessons.length, 0)
+  const duration = `~${Math.round(totalHours / 10)} wks` // assuming ~10 hrs/week
+  const modulesList = track.modules.map((m) => ({
+    key: m.key,
+    name: m.name,
+    weeks: Math.max(1, Math.round(m.estimatedHours / 10)),
+    lessons: m.lessons.length,
+  }))
+  return { duration, lessons: totalLessons, modulesList }
 }

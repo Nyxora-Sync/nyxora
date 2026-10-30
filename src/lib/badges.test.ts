@@ -18,6 +18,13 @@ function context(overrides: Partial<BadgeContext> = {}): BadgeContext {
       streak: { current: 0, longest: 0, lastActiveDate: null },
       bookmarks: [],
       lastVisited: null,
+      practice: {
+        flashcards: {},
+        katas: {},
+        projects: {},
+        drills: {},
+        streak: { current: 0, longest: 0, lastActiveDate: null },
+      },
     },
     contributions: { projects: 0, comments: 0, upvotes: 0 },
     followers: 0,

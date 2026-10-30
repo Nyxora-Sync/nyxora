@@ -161,7 +161,9 @@ export default async function TrackPage({ params }: { params: Promise<{ track: s
           <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <h2 className="text-2xl font-bold tracking-tight mb-8">Curriculum</h2>
             <div className="space-y-4">
-              {track.modules.map((module, index) => {
+              {track.modules
+                .filter((module) => module.status !== 'advanced' && module.status !== 'planned')
+                .map((module, index) => {
                 const Icon = iconMap[module.icon] || Layers
                 const moduleLessons = module.lessons.length
                 const moduleXP = module.lessons.reduce((sum, l) => sum + l.xpReward, 0)

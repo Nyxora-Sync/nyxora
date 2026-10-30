@@ -8,15 +8,18 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
+import { CertificateNotice } from '@/components/certificates/certificate-notice'
 import { auth } from '@/lib/auth/auth'
 import { prisma } from '@/lib/db'
 import { tracks } from '@/lib/curriculum'
 import { syncUserCertificates, trackProgress } from '@/lib/certificates'
+import { CERTIFICATE_ISSUANCE_NOTE } from '@/lib/certificate-copy'
 import { shortDate } from '@/lib/time'
 
 export const metadata: Metadata = {
   title: 'Certificates',
-  description: 'Your Nyxora Sync completion certificates and track progress.',
+  description:
+    'Your Nyxora Sync track progress and informal, non-accredited completion certificates. For showcase only; not a recognized qualification.',
   robots: { index: false, follow: false },
 }
 
@@ -56,19 +59,28 @@ export default async function CertificatesPage() {
           <div className="space-y-3">
             <Badge variant="outline" className="gap-1.5">
               <Award className="h-3.5 w-3.5" aria-hidden="true" />
-              Verified achievement
+              Showcase record
             </Badge>
             <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">Certificates</h1>
             <p className="max-w-2xl text-muted-foreground">
-              Complete every lesson in a track to earn a shareable certificate with a public
-              verification link. Certificates are issued automatically as your progress syncs.
+              Complete every lesson in a track to earn a printable certificate with a public
+              verification link. {CERTIFICATE_ISSUANCE_NOTE}
+            </p>
+            <p className="max-w-2xl text-sm text-muted-foreground">
+              These are informal completion records, not accredited certificates. Read the{' '}
+              <Link href="/faq#certificates" className="font-medium text-foreground underline-offset-4 hover:underline">
+                certificate FAQ
+              </Link>{' '}
+              before sharing one.
             </p>
           </div>
+
+          <CertificateNotice className="mt-6 max-w-3xl" />
 
           {certificates.length > 0 && (
             <section className="mt-10 space-y-4" aria-labelledby="earned-certificates">
               <h2 id="earned-certificates" className="text-xl font-bold tracking-tight">
-                Earned ({certificates.length})
+                Earned certificates ({certificates.length})
               </h2>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 {certificates.map((certificate) => (
@@ -140,8 +152,9 @@ export default async function CertificatesPage() {
                 <div>
                   <p className="text-lg font-semibold">Your first certificate is one track away</p>
                   <p className="mt-1 max-w-md text-sm text-muted-foreground">
-                    Complete a lesson to start tracking progress. Certificates unlock when every
-                    lesson in a track is complete.
+                    Complete a lesson to start tracking progress. A certificate unlocks when every
+                    lesson in a track is complete and your progress has synced to your account.
+                    It is an informal, non-accredited record for showcase only.
                   </p>
                 </div>
                 <Button asChild>

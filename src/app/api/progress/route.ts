@@ -5,14 +5,52 @@ import { prisma } from '@/lib/db'
 import { syncUserBadges } from '@/lib/badge-awards'
 import { syncUserCertificates } from '@/lib/certificates'
 import { tracks } from '@/lib/curriculum'
-import type { ProgressState } from '@/lib/progress-state'
-
+import type { ProgressState, PracticeProgress } from '@/lib/progress-state'
 
 
 const lessonProgressSchema = z.object({
   completed: z.boolean(),
   completedAt: z.string().max(40).nullish(),
   notes: z.string().max(10_000).nullish(),
+})
+
+const flashcardProgressSchema = z.object({
+  easeFactor: z.number().min(1.3).max(10),
+  interval: z.number().int().min(1).max(3650),
+  repetitions: z.number().int().min(0).max(1000),
+  nextReview: z.string().max(40),
+  lastReviewed: z.string().max(40).nullable(),
+  lastGrade: z.number().int().min(0).max(3).nullable(),
+})
+
+const kataProgressSchema = z.object({
+  completed: z.boolean(),
+  completedAt: z.string().max(40),
+  attempts: z.number().int().min(0).max(1000),
+})
+
+const projectProgressSchema = z.object({
+  completed: z.boolean(),
+  completedAt: z.string().max(40),
+  submissionUrl: z.string().max(500).optional(),
+})
+
+const drillProgressSchema = z.object({
+  completed: z.boolean(),
+  completedAt: z.string().max(40),
+  notes: z.string().max(10_000).optional(),
+})
+
+const practiceProgressSchema = z.object({
+  flashcards: z.record(z.string().min(1).max(160), flashcardProgressSchema),
+  katas: z.record(z.string().min(1).max(160), kataProgressSchema),
+  projects: z.record(z.string().min(1).max(160), projectProgressSchema),
+  drills: z.record(z.string().min(1).max(160), drillProgressSchema),
+  streak: z.object({
+    current: z.number().int().min(0).max(100_000),
+    longest: z.number().int().min(0).max(100_000),
+    lastActiveDate: z.string().max(10).nullable(),
+  }),
 })
 
 const progressStateSchema = z.object({
@@ -36,6 +74,7 @@ const progressStateSchema = z.object({
       timestamp: z.string().max(40),
     })
     .nullish(),
+  practice: practiceProgressSchema.nullish(),
 })
 
 const xpByLesson = new Map<string, number>()
@@ -78,6 +117,13 @@ async function replaceProgress(
     lastVisitedModule: string | null
     lastVisitedLesson: string | null
     lastVisitedAt: Date | null
+    practiceFlashcards: PracticeProgress['flashcards']
+    practiceKatas: PracticeProgress['katas']
+    practiceProjects: PracticeProgress['projects']
+    practiceDrills: PracticeProgress['drills']
+    practiceStreakCurrent: number
+    practiceStreakLongest: number
+    practiceStreakLastActive: Date | null
   }
 ) {
   // Two tabs can save at the same time. A transaction-scoped advisory lock
@@ -137,6 +183,12 @@ export async function GET() {
     prisma.userStats.findUnique({ where: { userId } }),
   ])
 
+  // Parse practice JSON fields
+  const practiceFlashcards = (stats?.practiceFlashcards as PracticeProgress['flashcards']) ?? {}
+  const practiceKatas = (stats?.practiceKatas as PracticeProgress['katas']) ?? {}
+  const practiceProjects = (stats?.practiceProjects as PracticeProgress['projects']) ?? {}
+  const practiceDrills = (stats?.practiceDrills as PracticeProgress['drills']) ?? {}
+
   const state: ProgressState = {
     lessons: Object.fromEntries(
       rows.map((row) => [
@@ -169,6 +221,19 @@ export async function GET() {
             timestamp: stats.lastVisitedAt.toISOString(),
           }
         : null,
+    practice: {
+      flashcards: practiceFlashcards,
+      katas: practiceKatas,
+      projects: practiceProjects,
+      drills: practiceDrills,
+      streak: {
+        current: stats?.practiceStreakCurrent ?? 0,
+        longest: stats?.practiceStreakLongest ?? 0,
+        lastActiveDate: stats?.practiceStreakLastActive
+          ? stats.practiceStreakLastActive.toISOString().split('T')[0]
+          : null,
+      },
+    },
   }
 
   return Response.json({ state })
@@ -218,6 +283,16 @@ export async function PUT(request: Request) {
 
   const streakLastActive = toDate(payload.streak.lastActiveDate)
 
+  const practice = payload.practice ?? {
+    flashcards: {},
+    katas: {},
+    projects: {},
+    drills: {},
+    streak: { current: 0, longest: 0, lastActiveDate: null },
+  }
+
+  const practiceStreakLastActive = toDate(practice.streak.lastActiveDate)
+
   const statsData = {
     xp,
     streakCurrent: payload.streak.current,
@@ -225,6 +300,13 @@ export async function PUT(request: Request) {
     streakLastActive,
     bookmarks: Array.from(new Set(payload.bookmarks)),
     ...lastVisited,
+    practiceFlashcards: practice.flashcards,
+    practiceKatas: practice.katas,
+    practiceProjects: practice.projects,
+    practiceDrills: practice.drills,
+    practiceStreakCurrent: practice.streak.current,
+    practiceStreakLongest: practice.streak.longest,
+    practiceStreakLastActive,
   }
 
   await replaceProgress(userId, entries, statsData)
@@ -248,6 +330,13 @@ export async function PUT(request: Request) {
     lastVisited: payload.lastVisited
       ? { ...payload.lastVisited, timestamp: toDate(payload.lastVisited.timestamp)?.toISOString() ?? new Date().toISOString() }
       : null,
+    practice: {
+      flashcards: practice.flashcards,
+      katas: practice.katas,
+      projects: practice.projects,
+      drills: practice.drills,
+      streak: practice.streak,
+    },
   }
 
   // Persist earned badges after the response has been sent so saving progress

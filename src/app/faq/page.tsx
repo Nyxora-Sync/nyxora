@@ -13,7 +13,7 @@ import { absoluteUrl, pageMetadata } from '@/lib/seo'
 export const metadata: Metadata = pageMetadata({
   title: 'Frequently Asked Questions',
   description:
-    'Answers about Nyxora Sync: cost, accounts, tracks, progress, the playground, contributing, accessibility, and licenses.',
+    'Answers about Nyxora Sync: cost, accounts, tracks, progress, certificates, the playground, contributing, accessibility, and licenses.',
   path: '/faq',
 })
 
@@ -56,8 +56,8 @@ export default function FaqPage() {
               Frequently asked questions
             </h1>
             <p className="mt-4 text-lg text-muted-foreground">
-              Short answers about the lessons, accounts, progress, community, and the limits of a
-              free curriculum. If your question is not here, the contact form is open.
+              Short answers about the lessons, accounts, progress, certificates, community, and the
+              limits of a free curriculum. If your question is not here, the contact form is open.
             </p>
             <p className="mt-4 text-sm text-muted-foreground">
               Last reviewed <time dateTime={FAQ_LAST_REVIEWED}>{reviewedDate}</time>

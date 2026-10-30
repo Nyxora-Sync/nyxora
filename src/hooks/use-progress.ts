@@ -7,9 +7,33 @@ import {
   loadProgressState,
   saveProgressState,
   type ProgressState,
+  type PracticeProgress,
 } from '@/lib/progress-state'
 
-export type { LessonProgress, ProgressState } from '@/lib/progress-state'
+export type { LessonProgress, ProgressState, PracticeProgress } from '@/lib/progress-state'
+
+function updatePracticeStreak(current: PracticeProgress): PracticeProgress {
+  const today = getToday()
+  const { lastActiveDate, current: currentStreak, longest } = current.streak
+
+  if (lastActiveDate === today) return current
+
+  const yesterday = new Date()
+  yesterday.setDate(yesterday.getDate() - 1)
+  const yesterdayStr = yesterday.toISOString().split('T')[0]
+
+  const newCurrent = lastActiveDate === yesterdayStr ? currentStreak + 1 : 1
+  const newLongest = Math.max(newCurrent, longest)
+
+  return {
+    ...current,
+    streak: {
+      current: newCurrent,
+      longest: newLongest,
+      lastActiveDate: today,
+    },
+  }
+}
 
 export function useProgress() {
   const [state, setState] = useState<ProgressState>(defaultProgressState)
@@ -118,6 +142,159 @@ export function useProgress() {
     })
   }, [])
 
+  // Practice-specific actions
+  const gradeFlashcard = useCallback((flashcardId: string, grade: number, xpReward: number) => {
+    setState((prev) => {
+      const now = new Date().toISOString()
+      const card = prev.practice.flashcards[flashcardId] ?? {
+        easeFactor: 2.5,
+        interval: 1,
+        repetitions: 0,
+        nextReview: now,
+        lastReviewed: null,
+        lastGrade: null,
+      }
+
+      // SM-2 algorithm
+      let { easeFactor, interval, repetitions } = card
+      if (grade < 2) {
+        repetitions = 0
+        interval = 1
+      } else {
+        repetitions += 1
+        if (repetitions === 1) interval = 1
+        else if (repetitions === 2) interval = 6
+        else interval = Math.ceil(interval * easeFactor)
+      }
+
+      easeFactor = Math.max(1.3, easeFactor + (0.1 - (2.5 - grade) * (0.08 + (2.5 - grade) * 0.02)))
+
+      const nextDate = new Date()
+      nextDate.setDate(nextDate.getDate() + interval)
+
+      const xpDelta = grade >= 2 ? xpReward : 0
+
+      let next: ProgressState = {
+        ...prev,
+        practice: {
+          ...prev.practice,
+          flashcards: {
+            ...prev.practice.flashcards,
+            [flashcardId]: {
+              easeFactor,
+              interval,
+              repetitions,
+              nextReview: nextDate.toISOString(),
+              lastReviewed: now,
+              lastGrade: grade,
+            },
+          },
+        },
+        xp: Math.max(0, prev.xp + xpDelta),
+      }
+
+      if (grade >= 2) {
+        next = { ...next, practice: updatePracticeStreak(next.practice) }
+      }
+
+      saveProgressState(next)
+      return next
+    })
+  }, [])
+
+  const completeKata = useCallback((kataId: string, xpReward: number) => {
+    setState((prev) => {
+      const now = new Date().toISOString()
+      const wasCompleted = prev.practice.katas[kataId]?.completed ?? false
+      const xpDelta = wasCompleted ? 0 : xpReward
+
+      let next: ProgressState = {
+        ...prev,
+        practice: {
+          ...prev.practice,
+          katas: {
+            ...prev.practice.katas,
+            [kataId]: {
+              completed: true,
+              completedAt: now,
+              attempts: (prev.practice.katas[kataId]?.attempts ?? 0) + 1,
+            },
+          },
+        },
+        xp: Math.max(0, prev.xp + xpDelta),
+      }
+
+      if (!wasCompleted) {
+        next = { ...next, practice: updatePracticeStreak(next.practice) }
+      }
+
+      saveProgressState(next)
+      return next
+    })
+  }, [])
+
+  const completeProject = useCallback((projectId: string, xpReward: number, submissionUrl?: string) => {
+    setState((prev) => {
+      const now = new Date().toISOString()
+      const wasCompleted = prev.practice.projects[projectId]?.completed ?? false
+      const xpDelta = wasCompleted ? 0 : xpReward
+
+      let next: ProgressState = {
+        ...prev,
+        practice: {
+          ...prev.practice,
+          projects: {
+            ...prev.practice.projects,
+            [projectId]: {
+              completed: true,
+              completedAt: now,
+              submissionUrl,
+            },
+          },
+        },
+        xp: Math.max(0, prev.xp + xpDelta),
+      }
+
+      if (!wasCompleted) {
+        next = { ...next, practice: updatePracticeStreak(next.practice) }
+      }
+
+      saveProgressState(next)
+      return next
+    })
+  }, [])
+
+  const completeDrill = useCallback((drillId: string, xpReward: number, notes?: string) => {
+    setState((prev) => {
+      const now = new Date().toISOString()
+      const wasCompleted = prev.practice.drills[drillId]?.completed ?? false
+      const xpDelta = wasCompleted ? 0 : xpReward
+
+      let next: ProgressState = {
+        ...prev,
+        practice: {
+          ...prev.practice,
+          drills: {
+            ...prev.practice.drills,
+            [drillId]: {
+              completed: true,
+              completedAt: now,
+              notes,
+            },
+          },
+        },
+        xp: Math.max(0, prev.xp + xpDelta),
+      }
+
+      if (!wasCompleted) {
+        next = { ...next, practice: updatePracticeStreak(next.practice) }
+      }
+
+      saveProgressState(next)
+      return next
+    })
+  }, [])
+
   const resetProgress = useCallback(() => {
     saveProgressState(defaultProgressState)
     setState(defaultProgressState)
@@ -130,6 +307,39 @@ export function useProgress() {
   const getCompletedCount = useCallback(() => {
     return Object.values(state.lessons).filter((l) => l.completed).length
   }, [state.lessons])
+
+  // Practice getters
+  const getFlashcardProgress = useCallback((flashcardId: string) => {
+    return state.practice.flashcards[flashcardId]
+  }, [state.practice.flashcards])
+
+  const getKataProgress = useCallback((kataId: string) => {
+    return state.practice.katas[kataId]
+  }, [state.practice.katas])
+
+  const getProjectProgress = useCallback((projectId: string) => {
+    return state.practice.projects[projectId]
+  }, [state.practice.projects])
+
+  const getDrillProgress = useCallback((drillId: string) => {
+    return state.practice.drills[drillId]
+  }, [state.practice.drills])
+
+  const getPracticeStats = useCallback(() => {
+    const p = state.practice
+    const flashcardsReviewed = Object.values(p.flashcards).filter(f => f.lastReviewed).length
+    const katasCompleted = Object.values(p.katas).filter(k => k.completed).length
+    const projectsCompleted = Object.values(p.projects).filter(p => p.completed).length
+    const drillsCompleted = Object.values(p.drills).filter(d => d.completed).length
+    return {
+      flashcardsReviewed,
+      katasCompleted,
+      projectsCompleted,
+      drillsCompleted,
+      practiceStreak: p.streak.current,
+      practiceLongestStreak: p.streak.longest,
+    }
+  }, [state.practice])
 
   return {
     state,
@@ -144,6 +354,17 @@ export function useProgress() {
     bookmarks: state.bookmarks,
     xp: state.xp,
     streak: state.streak,
+    // Practice
+    gradeFlashcard,
+    completeKata,
+    completeProject,
+    completeDrill,
+    getFlashcardProgress,
+    getKataProgress,
+    getProjectProgress,
+    getDrillProgress,
+    getPracticeStats,
+    practice: state.practice,
   }
 }
 

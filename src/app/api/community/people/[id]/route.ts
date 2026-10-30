@@ -131,6 +131,13 @@ export async function GET(request: Request, { params }: RouteContext) {
     },
     bookmarks: [],
     lastVisited: null,
+    practice: {
+      flashcards: {},
+      katas: {},
+      projects: {},
+      drills: {},
+      streak: { current: 0, longest: 0, lastActiveDate: null },
+    },
   }
 
   const computedBadges = getEarnedBadges({
