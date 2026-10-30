@@ -126,7 +126,7 @@ export default async function CategoryPage({ params }: CategoryPageProps) {
         {/* Tracks in this category */}
         <section className="py-16 sm:py-20">
           <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-            <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
+            <div className="grid grid-cols-1 gap-6 sm:gap-8 lg:grid-cols-2 xl:grid-cols-3">
               {tracks.map((track) => (
                 <Link key={track.key} href={`/learn/${track.key}`} className="group">
                   <Card className="relative overflow-hidden transition-all motion-safe:hover:-translate-y-1 hover:shadow-xl h-full border-border/50">
