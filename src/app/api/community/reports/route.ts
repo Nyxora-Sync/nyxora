@@ -9,6 +9,7 @@ import {
   jsonError,
   sinceMinutes,
 } from '@/lib/community'
+import { getAdminNotificationEmails } from '@/lib/admin'
 
 const reportSchema = z
   .object({
@@ -91,15 +92,10 @@ export async function POST(request: Request) {
 
     after(async () => {
       try {
-        const adminEmails = new Set(
-          (process.env.ADMIN_EMAILS ?? '')
-            .split(',')
-            .map((email) => email.trim().toLowerCase())
-            .filter(Boolean)
-        )
-        adminEmails.add('admin@nyxora.local')
+        const notificationEmails = getAdminNotificationEmails()
+        notificationEmails.push('admin@nyxora.local')
         const admins = await prisma.user.findMany({
-          where: { email: { in: Array.from(adminEmails) } },
+          where: { email: { in: notificationEmails } },
           select: { id: true },
         })
         if (admins.length > 0) {

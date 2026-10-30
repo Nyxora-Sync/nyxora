@@ -1,18 +1,24 @@
 /**
- * Maintainer access is controlled by a comma-separated ADMIN_EMAILS
- * environment variable. Keep this server-only; never expose it to clients.
- * The admin user (admin@nyxora.local) is always considered an admin.
+ * Admin access is ONLY granted to the dedicated admin account (admin@nyxora.local).
+ * The ADMIN_EMAILS environment variable is used ONLY for notification purposes
+ * (e.g., where to send moderation reports), NOT for granting admin privileges.
+ * This prevents OAuth users (Google/GitHub) from accidentally gaining admin access.
  */
 export function isAdmin(email: string | null | undefined): boolean {
   if (!email) return false
 
-  // The dedicated admin account always has access
-  if (email.toLowerCase() === 'admin@nyxora.local') return true
+  // Only the dedicated admin account has admin privileges
+  return email.toLowerCase() === 'admin@nyxora.local'
+}
 
-  const admins = (process.env.ADMIN_EMAILS || '')
+/**
+ * Get list of email addresses that should receive admin notifications.
+ * This is separate from admin privileges - these emails receive notifications
+ * but do NOT get admin access to /admin routes.
+ */
+export function getAdminNotificationEmails(): string[] {
+  return (process.env.ADMIN_EMAILS || '')
     .split(',')
     .map((value) => value.trim().toLowerCase())
     .filter(Boolean)
-
-  return admins.includes(email.trim().toLowerCase())
 }
