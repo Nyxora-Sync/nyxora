@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="public/site-logo.jpg" alt="Nyxora Sync" width="480" />
+  <img src="https://nyxora-sync.tech/site-logo.jpg" alt="Nyxora Sync" width="480" />
 </p>
 
 <h1 align="center">Nyxora Sync</h1>
@@ -21,13 +21,33 @@
 <p align="center">
   <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" />
   <img src="https://img.shields.io/badge/content-CC%20BY--SA%204.0-green.svg" alt="CC BY-SA 4.0" />
+  <img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome" />
 </p>
 
-## Learn directly on the site
+---
+
+## ⚠️ This Repository
+
+**This is the public-facing informational repository for Nyxora Sync.**
+
+The actual application source code, curriculum content (MDX lessons), and development infrastructure are in a private repository. This repository contains only:
+
+- 📄 Documentation for contributors and community members
+- 🗺️ Public roadmap and planned tracks
+- 📝 Contribution guidelines and code of conduct
+- 📋 License information
+
+**If you're a learner**, visit the live site: **[nyxora-sync.tech](https://nyxora-sync.tech)**
+
+**If you want to contribute**, read [CONTRIBUTING.md](CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md), then open an issue or discussion.
+
+---
+
+## Learn on the Live Site
 
 Nyxora Sync is built for people who want to learn by reading, practicing, and building — not by assembling a local development environment.
 
-Everything you need is on the live site:
+Everything you need is on the live site at **https://nyxora-sync.tech**:
 
 - **194 unique written lessons** across web development, specializations, and programming language paths
 - **Free, curated resources** in every lesson, with optional "go deeper" links
@@ -38,7 +58,9 @@ Everything you need is on the live site:
 
 No paywalls. No ads. No account required to start.
 
-## Choose a path
+---
+
+## Choose a Path
 
 ### Web Development
 
@@ -70,19 +92,35 @@ Four complete paths from beginner to mastery. Each path has three levels (Founda
 - **C#** — .NET toolchain, OOP, LINQ, EF Core, ASP.NET Core, background services, and a production API capstone
 - **Python** — Syntax, collections, typing, testing, async, packaging, automation, and a data pipeline capstone
 
-## How progress works
-
-You can use the entire curriculum without signing in. Progress is saved in your browser automatically.
-
-If you want your progress on another device, sign in with GitHub. Your completed lessons, XP, streaks, notes, bookmarks, badges, and certificates sync to your account. You can keep your profile private or make your progress public from Settings. Up to three earned badges can be pinned to your public profile.
+---
 
 ## Community
 
-- Ask questions and share notes in lesson discussions
-- Browse real projects in the [showcase](https://nyxora-sync.tech/community/showcase)
-- Meet other learners through public profiles
-- Report bugs, suggest resources, or improve a lesson through the [contribution guide](https://nyxora-sync.tech/contribute)
+- Ask questions and share notes in **lesson discussions**
+- Browse real projects in the **[showcase](https://nyxora-sync.tech/community/showcase)**
+- Meet other learners through **public profiles**
+- Report bugs, suggest resources, or improve a lesson through the **[contribution guide](https://nyxora-sync.tech/contribute)**
 - Report projects, comments, or profiles from the UI; maintainers review them at `/admin/reports`
+
+See [docs/community-features.md](docs/community-features.md) for details.
+
+---
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [ROADMAP.md](ROADMAP.md) | Planned and future tracks |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute |
+| [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | Community standards |
+| [docs/lesson-authoring.md](docs/lesson-authoring.md) | Writing lessons (MDX) |
+| [docs/lesson-content.md](docs/lesson-content.md) | Content standards |
+| [docs/community-features.md](docs/community-features.md) | Community system overview |
+| [docs/newsletter-contact.md](docs/newsletter-contact.md) | Newsletter & contact system |
+| [docs/seo.md](docs/seo.md) | SEO strategy |
+| [docs/privacy.md](docs/privacy.md) | Privacy policy |
+
+---
 
 ## Contributing
 
@@ -94,81 +132,38 @@ Nyxora Sync is open source and welcomes contributions:
 - Share a project for the showcase
 - Help with translations or design improvements
 
-Open a [GitHub issue](https://github.com/Nyxora-Sync/nyxora/issues) or submit a pull request. Read the [contribution guide](https://nyxora-sync.tech/contribute) and [Code of Conduct](https://nyxora-sync.tech/code-of-conduct) first.
+Open a [GitHub issue](https://github.com/Nyxora-Sync/nyxora/issues) or submit a pull request. Read the [contribution guide](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md) first.
 
-## Deployment
+---
 
-Production: https://nyxora-sync.tech
+## Roadmap
 
-The public URL is served by the custom domain `nyxora-sync.tech` pointing directly to Vercel (bypassing the Cloudflare Worker proxy for POST support). The Next.js app runs on **Vercel** in the `iad1` region, co-located with the Neon database in `us-east-1`.
+See [ROADMAP.md](ROADMAP.md) for planned tracks including:
+- Embedded Systems & IoT
+- Mobile Development (Cross-Platform)
+- Data Science & AI
+- Game Development
+- Desktop Applications
+- Advanced modules for C, C++, C#, Python
 
-### App (Vercel)
-
-```bash
-npx vercel login
-npx vercel link --scope miyazaki-akis-projects --project nyxora-sync
-npm run deploy:web
-```
-
-The project is `miyazaki-akis-projects/nyxora-sync`. Production builds apply pending Prisma migrations via the Vercel build command, guarded by `VERCEL_ENV=production`; preview builds run `npm run build` without touching the database. The old `postbuild` `prisma db push --accept-data-loss` step has been removed.
-
-Set these environment variables for Production:
-
-- `DATABASE_URL` and `DIRECT_URL` (Neon)
-- `AUTH_SECRET`, `AUTH_TRUST_HOST=true`
-- `AUTH_URL=https://nyxora-sync.tech`
-- `NEXTAUTH_URL=https://nyxora-sync.tech`
-- `NEXT_PUBLIC_SITE_URL=https://nyxora-sync.tech`
-- `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`
-- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
-- `ADMIN_EMAILS` (comma-separated maintainer emails; gates `/admin/messages`, `/admin/newsletter`, and `/admin/reports`)
-- `BLOB_READ_WRITE_TOKEN` (enables project screenshot uploads through Vercel Blob; the `nyxora-uploads` store is connected to Production and Preview. Pull it with `vercel env pull` when testing uploads locally.)
-
-`AUTH_URL`, `NEXTAUTH_URL`, and `NEXT_PUBLIC_SITE_URL` must all be the public origin (`https://nyxora-sync.tech`). The apex domain is the canonical host; `www.nyxora-sync.tech` permanently redirects to it. Vercel is configured for the `iad1` region so functions run next to the Neon database. Disable **Deployment Protection → Vercel Authentication** for production. Connecting the GitHub repository in the Vercel dashboard enables automatic deploys; otherwise run `npm run deploy:web`.
-
-### Health and monitoring
-
-`GET /api/health` checks database connectivity and returns `200` with `{ status: "ok" }` or `503` when degraded. Point an uptime monitor at it. Vercel Speed Insights and function logs cover performance and server errors; set up a Sentry DSN only if you need long-retention client error traces.
-
-### Tests and CI
-
-```bash
-npm run typecheck   # TypeScript
-npm run lint:ci     # ESLint (warnings allowed, errors fail)
-npm test            # Vitest unit tests
-npx playwright install chromium
-npm run build
-npm run test:e2e    # Playwright smoke + mobile overflow checks
-```
-
-GitHub Actions runs typecheck, lint, unit tests, a production build, and Playwright against a fresh build. Add `DATABASE_URL` and `DIRECT_URL` repository secrets so database-backed build checks can connect.
-
-### Contact inbox
-
-The floating contact button opens `/contact`. Each submission is stored in the `ContactMessage` table before an email notification is attempted. Maintainers listed in `ADMIN_EMAILS` can read messages, reply by email, and mark them handled at `/admin/messages`. The same page is linked from **Settings → Privacy → Maintainer tools**.
-
-Email notifications are optional. Set `EMAIL_SERVER_*`, `EMAIL_FROM`, and `CONTACT_INBOX` to also receive a copy; without SMTP, the admin inbox is still the source of truth.
-
-### Public URL proxy (Cloudflare)
-
-```bash
-npm run deploy:proxy
-```
-
-The proxy configuration lives in `proxy-worker/wrangler.jsonc`. Set `UPSTREAM_ORIGIN` there to the Vercel production URL. The proxy has no KV or database bindings; it only forwards HTTP requests and responses.
-
-OAuth callback URLs (set these in the provider consoles):
-
-- GitHub: `https://nyxora-sync.tech/api/auth/callback/github`
-- Google: `https://nyxora-sync.tech/api/auth/callback/google`
-
-The old `NEXT_INC_CACHE_KV` namespace is no longer used by the live site. The CI workflow deploys only the proxy; it needs a Cloudflare API token with **Workers Scripts: Edit**.
+---
 
 ## License
 
-- **Code:** MIT — see [`LICENSE`](LICENSE)
-- **Lesson content:** CC BY-SA 4.0 — see [`LICENSE-CONTENT`](LICENSE-CONTENT)
+- **Code:** MIT — see [LICENSE](LICENSE)
+- **Lesson content:** CC BY-SA 4.0 — see [LICENSE-CONTENT](LICENSE-CONTENT)
+
+---
 
 ## Acknowledgements
 
 Resources are curated from freeCodeCamp, MDN, The Odin Project, Full Stack Open, Net Ninja, Traversy Media, Web Dev Simplified, official documentation, and many other generous educators.
+
+---
+
+## Links
+
+- **Live Site:** https://nyxora-sync.tech
+- **Issues:** https://github.com/Nyxora-Sync/nyxora/issues
+- **Discussions:** https://github.com/Nyxora-Sync/nyxora/discussions
+- **Contact:** https://nyxora-sync.tech/contact
