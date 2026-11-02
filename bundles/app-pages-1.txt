@@ -154,7 +154,7 @@ export default function AboutPage() {
                 </Link>
               </Button>
               <Button asChild variant="ghost" className="gap-2">
-                <a href="https://github.com/Nyxora-Sync/nyxora-sync" target="_blank" rel="noopener noreferrer">
+                <a href="https://github.com/Nyxora-Sync/nyxora" target="_blank" rel="noopener noreferrer">
                   <GithubIcon className="h-4 w-4" aria-hidden="true" />
                   View source
                 </a>
@@ -353,7 +353,7 @@ export default function AboutPage() {
                   <Link href="/contribute">Contribute</Link>
                 </Button>
                 <Button asChild variant="outline" className="gap-2">
-                  <a href="https://github.com/Nyxora-Sync/nyxora-sync" target="_blank" rel="noopener noreferrer">
+                  <a href="https://github.com/Nyxora-Sync/nyxora" target="_blank" rel="noopener noreferrer">
                     <GithubIcon className="h-4 w-4" aria-hidden="true" />
                     Open the repository
                   </a>
@@ -1680,7 +1680,7 @@ const trackIcons: Record<string, typeof Globe> = {
 
 export async function generateStaticParams() {
   return trackCategories
-    .filter((cat) => curriculumTracks.some((t) => t.category === cat.id))
+    .filter((cat) => cat.id !== 'embedded-systems' && curriculumTracks.some((t) => t.category === cat.id))
     .map((cat) => ({ category: cat.id }))
 }
 
@@ -1766,7 +1766,7 @@ export default async function CategoryPage({ params }: CategoryPageProps) {
         {/* Tracks in this category */}
         <section className="py-16 sm:py-20">
           <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-            <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
+            <div className="grid grid-cols-1 gap-6 sm:gap-8 lg:grid-cols-2 xl:grid-cols-3">
               {tracks.map((track) => (
                 <Link key={track.key} href={`/learn/${track.key}`} className="group">
                   <Card className="relative overflow-hidden transition-all motion-safe:hover:-translate-y-1 hover:shadow-xl h-full border-border/50">
@@ -1917,16 +1917,16 @@ const categoryIcons: Record<string, typeof Globe> = {
 
 export const metadata: Metadata = {
   title: 'Learning Categories | Nyxora Sync',
-  description: 'Explore all learning categories: Web Development, Programming Languages, Embedded Systems, Mobile Development, Data Science, DevOps, Game Development, and Desktop Apps.',
+  description: 'Explore all learning categories: Web Development, Programming Languages, Mobile Development, Data Science, DevOps, Game Development, and Desktop Apps.',
   openGraph: {
     title: 'Learning Categories | Nyxora Sync',
-    description: 'Explore all learning categories: Web Development, Programming Languages, Embedded Systems, Mobile Development, Data Science, DevOps, Game Development, and Desktop Apps.',
+    description: 'Explore all learning categories: Web Development, Programming Languages, Mobile Development, Data Science, DevOps, Game Development, and Desktop Apps.',
   },
 }
 
 export default function CategoriesPage() {
   const categoriesWithTracks = trackCategories
-    .filter((cat) => curriculumTracks.some((t) => t.category === cat.id))
+    .filter((cat) => cat.id !== 'embedded-systems' && curriculumTracks.some((t) => t.category === cat.id))
     .map((category) => {
       const categoryTracks = curriculumTracks.filter((t) => t.category === category.id)
       const totalLessons = categoryTracks.reduce((sum, t) => sum + t.modules.reduce((s, m) => s + m.lessons.length, 0), 0)
@@ -1956,7 +1956,7 @@ export default function CategoriesPage() {
         {/* Categories Grid */}
         <section className="py-16 sm:py-20">
           <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
               {categoriesWithTracks.map(({ category, totalLessons, totalTracks }) => {
                 const Icon = categoryIcons[category.id] ?? Globe
                 return (
@@ -2590,7 +2590,7 @@ const channels = [
     icon: GithubIcon,
     color: 'slate',
     cta: 'Open the repository',
-    href: 'https://github.com/Nyxora-Sync/nyxora-sync',
+    href: 'https://github.com/Nyxora-Sync/nyxora',
     external: true,
   },
   {
@@ -2616,7 +2616,7 @@ const guidelines = [
 const waysToContribute = [
   { icon: Code2, title: 'Contribute Lessons', description: 'Write or improve lesson content via pull request.', color: 'emerald', href: '/contribute' },
   { icon: ExternalLink, title: 'Submit Resources', description: 'Found an amazing free resource? Add it to the directory.', color: 'blue', href: '/contribute#resources' },
-  { icon: Star, title: 'Star the Repo', description: 'Help others discover the project on GitHub.', color: 'amber', href: 'https://github.com/Nyxora-Sync/nyxora-sync' },
+  { icon: Star, title: 'Star the Repo', description: 'Help others discover the project on GitHub.', color: 'amber', href: 'https://github.com/Nyxora-Sync/nyxora' },
   { icon: HandHeart, title: 'Translate', description: 'Help translate lessons into Spanish, Portuguese, Hindi, and more.', color: 'rose', href: '/contribute#translate' },
 ]
 
@@ -3188,7 +3188,7 @@ export default function ContactPage() {
                     </p>
                     <Button asChild variant="outline" size="sm" className="mt-4 gap-2">
                       <a
-                        href="https://github.com/Nyxora-Sync/nyxora-sync/issues"
+                        href="https://github.com/Nyxora-Sync/nyxora/issues"
                         target="_blank"
                         rel="noopener noreferrer"
                       >
@@ -3211,7 +3211,7 @@ export default function ContactPage() {
                     </p>
                     <Button asChild variant="outline" size="sm" className="mt-4 gap-2">
                       <a
-                        href="https://github.com/Nyxora-Sync/nyxora-sync/security"
+                        href="https://github.com/Nyxora-Sync/nyxora/security"
                         target="_blank"
                         rel="noopener noreferrer"
                       >
@@ -3300,7 +3300,7 @@ const ways = [
     title: 'Improve a lesson',
     description:
       'Fix an error, sharpen an explanation, add a worked example, or write a missing lesson. The authoring guide covers the format.',
-    href: 'https://github.com/Nyxora-Sync/nyxora-sync/blob/main/docs/lesson-authoring.md',
+    href: 'https://github.com/Nyxora-Sync/nyxora/blob/main/docs/lesson-authoring.md',
     external: true,
     color: 'emerald',
   },
@@ -3327,7 +3327,7 @@ const ways = [
     title: 'Report a bug',
     description:
       'Broken code sample, incorrect claim, inaccessible control, or a 404. Include the page and what you expected.',
-    href: 'https://github.com/Nyxora-Sync/nyxora-sync/issues',
+    href: 'https://github.com/Nyxora-Sync/nyxora/issues',
     external: true,
     color: 'amber',
   },
@@ -3401,7 +3401,7 @@ export default function ContributePage() {
             </p>
             <div className="mt-6 flex flex-wrap gap-3">
               <Button asChild className="gap-2">
-                <a href="https://github.com/Nyxora-Sync/nyxora-sync" target="_blank" rel="noopener noreferrer">
+                <a href="https://github.com/Nyxora-Sync/nyxora" target="_blank" rel="noopener noreferrer">
                   <GithubIcon className="h-4 w-4" aria-hidden="true" />
                   Open the repository
                 </a>
@@ -3522,7 +3522,7 @@ export default function ContributePage() {
                   </p>
                   <Button asChild variant="outline" size="sm" className="mt-4 gap-2">
                     <a
-                      href="https://github.com/Nyxora-Sync/nyxora-sync/pulls"
+                      href="https://github.com/Nyxora-Sync/nyxora/pulls"
                       target="_blank"
                       rel="noopener noreferrer"
                     >
@@ -3543,7 +3543,7 @@ export default function ContributePage() {
               <div className="mt-5 flex flex-col items-center justify-center gap-3 sm:flex-row">
                 <Button asChild className="gap-2">
                   <a
-                    href="https://github.com/Nyxora-Sync/nyxora-sync/issues/new"
+                    href="https://github.com/Nyxora-Sync/nyxora/issues/new"
                     target="_blank"
                     rel="noopener noreferrer"
                   >
@@ -4521,7 +4521,7 @@ const siteSchema = [
     logo: absoluteUrl('/icon-512.png'),
     description:
       'A free, open-source curriculum for the MERN stack, C, C++, C#, and Python, with written lessons, playgrounds, progress tracking, and a project showcase.',
-    sameAs: ['https://github.com/Nyxora-Sync/nyxora-sync'],
+    sameAs: ['https://github.com/Nyxora-Sync/nyxora'],
   },
   {
     '@context': 'https://schema.org',
@@ -5146,7 +5146,9 @@ export default async function TrackPage({ params }: { params: Promise<{ track: s
           <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <h2 className="text-2xl font-bold tracking-tight mb-8">Curriculum</h2>
             <div className="space-y-4">
-              {track.modules.map((module, index) => {
+              {track.modules
+                .filter((module) => module.status !== 'advanced' && module.status !== 'planned')
+                .map((module, index) => {
                 const Icon = iconMap[module.icon] || Layers
                 const moduleLessons = module.lessons.length
                 const moduleXP = module.lessons.reduce((sum, l) => sum + l.xpReward, 0)
@@ -5388,7 +5390,7 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
-import { BookOpen, Code2, ArrowRight, CheckCircle, Clock, Users, Trophy, Code2 as Code2Icon, Sparkles, Cpu, Smartphone, Brain, Cloud, Gamepad2, Monitor, Globe } from 'lucide-react'
+import { BookOpen, Code2, ArrowRight, CheckCircle, Clock, Users, Trophy, Code2 as Code2Icon, Sparkles, Smartphone, Brain, Cloud, Gamepad2, Monitor, Globe } from 'lucide-react'
 import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
 import { LanguagePaths } from '@/components/language-paths'
@@ -5401,7 +5403,6 @@ import { pageMetadata } from '@/lib/seo'
 const categoryIcons: Record<string, typeof Globe> = {
   'web-development': Globe,
   'programming-languages': Code2,
-  'embedded-systems': Cpu,
   'mobile-development': Smartphone,
   'data-science': Brain,
   'devops-cloud': Cloud,
@@ -5417,23 +5418,23 @@ const trackIcons: Record<string, typeof BookOpen> = {
   cpp: Code2,
   csharp: Code2,
   python: BookOpen,
-  embedded: Cpu,
 }
 
 const tracks = curriculumTracks.map((track) => {
-  const lessons = track.modules.reduce((sum, m) => sum + m.lessons.length, 0)
-  const totalHours = track.modules.reduce((sum, m) => sum + m.estimatedHours, 0)
+  const coreModules = track.modules.filter((m) => m.status !== 'advanced' && m.status !== 'planned')
+  const lessons = coreModules.reduce((sum, m) => sum + m.lessons.length, 0)
+  const totalHours = coreModules.reduce((sum, m) => sum + m.estimatedHours, 0)
   return {
     key: track.key,
     name: track.name,
     description: track.description,
     category: track.category,
     duration: `~${Math.round(totalHours / 10)} wks`,
-    modules: track.modules.length,
+    modules: coreModules.length,
     lessons,
     color: track.color,
     icon: trackIcons[track.key] ?? BookOpen,
-    modulesList: track.modules.map((m) => ({
+    modulesList: coreModules.map((m) => ({
       key: m.key,
       name: m.name,
       weeks: Math.max(1, Math.round(m.estimatedHours / 10)),
@@ -5485,9 +5486,9 @@ export default function LearnPage() {
                 Pick a category to explore its learning paths. Each path takes you from beginner to mastery.
               </p>
             </div>
-            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {trackCategories
-                .filter((cat) => curriculumTracks.some((t) => t.category === cat.id))
+                .filter((cat) => cat.id !== 'embedded-systems' && curriculumTracks.some((t) => t.category === cat.id))
                 .map((category) => {
                   const categoryTracks = tracks.filter((t) => t.category === category.id)
                   const totalLessons = categoryTracks.reduce((sum, t) => sum + t.lessons, 0)
@@ -5642,56 +5643,6 @@ export default function LearnPage() {
           </Reveal>
         </section>
 
-        {/* Embedded Systems */}
-        <section id="embedded" className="py-16 sm:py-20 scroll-mt-20">
-          <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-            <div className="mb-10 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-              <div className="max-w-2xl">
-                <p className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
-                  Embedded Systems & IoT
-                </p>
-                <h2 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">
-                  Code that touches the physical world
-                </h2>
-                <p className="mt-3 text-muted-foreground">
-                  Arduino, ESP32, sensors, actuators, and IoT cloud.
-                </p>
-              </div>
-              <Button asChild variant="outline" className="gap-2 self-start sm:self-auto">
-                <Link href="/categories/embedded-systems">
-                  View embedded tracks
-                  <ArrowRight className="h-4 w-4" aria-hidden="true" />
-                </Link>
-              </Button>
-            </div>
-            <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
-              {[
-                { title: 'Arduino Fundamentals', desc: 'GPIO, PWM, I2C/SPI, interrupts, and libraries', color: 'amber' },
-                { title: 'ESP32 WiFi & Bluetooth', desc: 'Web servers, BLE, MQTT, OTA updates', color: 'amber' },
-                { title: 'Sensors & Actuators', desc: 'Temperature, distance, motors, displays', color: 'amber' },
-                { title: 'RTOS & FreeRTOS', desc: 'Tasks, queues, semaphores, timing', color: 'amber' },
-                { title: 'IoT Cloud Integration', desc: 'AWS IoT, Azure, MQTT brokers', color: 'amber' },
-                { title: 'PCB Design Basics', desc: 'KiCad, schematics, layout, manufacturing', color: 'amber' },
-              ].map((item) => (
-                <Card key={item.title} className="group transition-all motion-safe:hover:-translate-y-0.5 hover:shadow-lg h-full border-border/50">
-                  <CardHeader>
-                    <div className={cn('mb-3 flex h-12 w-12 items-center justify-center rounded-xl', getAccent(item.color).icon)}>
-                      <Cpu className="h-6 w-6" aria-hidden="true" />
-                    </div>
-                    <CardTitle>{item.title}</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <CardDescription className="text-base">{item.desc}</CardDescription>
-                  </CardContent>
-                  <CardFooter className="border-t-0 pt-0">
-                    <span className="text-xs text-muted-foreground">Coming Soon</span>
-                  </CardFooter>
-                </Card>
-              ))}
-            </div>
-          </Reveal>
-        </section>
-
         {/* Coming Soon Categories */}
         <section className="py-16 sm:py-20 bg-muted/30">
           <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
@@ -5737,7 +5688,7 @@ export default function LearnPage() {
                 We aren&apos;t just another tutorial site. We&apos;re a complete, free learning platform.
               </p>
             </div>
-            <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
               {[
                 { icon: CheckCircle, title: '100% Free Forever', desc: 'No paywalls, no subscriptions, no upsells. All content is free and open source.', color: 'emerald' },
                 { icon: Clock, title: 'Self-Paced Learning', desc: 'Learn on your schedule. Track progress, earn an informal, non-accredited completion certificate, and pick up where you left off.', color: 'violet' },
@@ -5951,7 +5902,7 @@ export default function NewsletterPage() {
                       inbox subscription.
                     </p>
                     <Button asChild variant="outline" size="sm" className="mt-4 gap-2">
-                      <a href="https://github.com/Nyxora-Sync/nyxora-sync" target="_blank" rel="noopener noreferrer">
+                      <a href="https://github.com/Nyxora-Sync/nyxora" target="_blank" rel="noopener noreferrer">
                         <GithubIcon className="h-4 w-4" aria-hidden="true" />
                         Watch on GitHub
                       </a>
@@ -6227,7 +6178,7 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
-import { Code2, Database, Globe, CheckCircle, ArrowRight, Users, Trophy, Zap, BookOpen, ExternalLink, Cpu, Smartphone, Brain, Cloud, Gamepad2, Monitor, Award } from 'lucide-react'
+import { CheckCircle, ArrowRight, Users, Trophy, Zap, BookOpen, ExternalLink, Globe, Code2, Database, Award, Construction, AlertCircle, Cpu, Smartphone, FileCode, Rocket, Clock } from 'lucide-react'
 import { GithubIcon } from '@/components/icons/brand'
 import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
@@ -6236,110 +6187,52 @@ import { LanguagePaths } from '@/components/language-paths'
 import { SpecializationsBanner } from '@/components/specializations-banner'
 import { Reveal } from '@/components/motion/reveal'
 import { cn, getAccent } from '@/lib/utils'
-import { tracks as curriculumTracks, trackCategories } from '@/lib/curriculum'
+import { tracks as curriculumTracks, trackCategories, getTrackDisplay } from '@/lib/curriculum'
 import { pageMetadata } from '@/lib/seo'
 
-const categoryIcons: Record<string, typeof Globe> = {
-  'web-development': Globe,
-  'programming-languages': Code2,
-  'embedded-systems': Cpu,
-  'mobile-development': Smartphone,
-  'data-science': Brain,
-  'devops-cloud': Cloud,
-  'game-development': Gamepad2,
-  'desktop-apps': Monitor,
-}
+const stats = [
+  { value: '100%', label: 'Free Forever' },
+  { value: '200+', label: 'Written Lessons' },
+  { value: '500+', label: 'Free Resources' },
+  { value: '12', label: 'Portfolio Projects' },
+]
+
+const primaryTracks = curriculumTracks
+  .filter((t) => t.category === 'web-development' && t.key !== 'specializations')
+  .slice(0, 2)
 
 const features = [
   {
-    icon: Code2,
-    title: 'Curated Free Resources',
-    description: 'Hand-picked tutorials, videos, and docs from the best free sources. No paywalls, no fluff.',
+    icon: BookOpen,
+    title: 'Written Lessons',
+    description: '200+ free, structured lessons — no video walls, no fluff. Read at your own pace, on any connection.',
     color: 'emerald',
   },
   {
-    icon: BookOpen,
-    title: 'Structured Learning Paths',
-    description: 'From web development to embedded systems — every path takes you from beginner to mastery with real projects.',
-    color: 'violet',
-  },
-  {
     icon: Zap,
-    title: 'Interactive Playgrounds',
-    description: 'Run HTML, CSS, JavaScript, React, Node, Express, Python, and more directly in your browser.',
+    title: 'In-Browser Playgrounds',
+    description: 'Run HTML, CSS, JS, React, Node, Express, Python instantly. Zero setup, works on slow connections.',
     color: 'amber',
   },
   {
     icon: Trophy,
-    title: 'Progress, Badges & Certificates',
-    description: 'Track completion, earn XP, unlock badges, and collect informal, non-accredited certificates when you finish a track.',
-    color: 'rose',
+    title: 'Portfolio Projects',
+    description: 'Every track ends with a real, deployable capstone. Live demos, clean Git history, case study templates included.',
+    color: 'violet',
   },
   {
     icon: Users,
-    title: 'Community Support',
-    description: 'Lesson discussions, a project showcase, and public learner profiles. No invite-only chat required.',
+    title: 'Community & Progress',
+    description: 'Track completion, earn XP, unlock badges, get informal certificates. Discuss lessons, showcase projects.',
     color: 'blue',
   },
-  {
-    icon: Database,
-    title: 'Project-Based Learning',
-    description: 'Build real projects for your portfolio — web apps, CLI tools, IoT devices, and more.',
-    color: 'indigo',
-  },
-]
-
-const tracks = curriculumTracks.map((track) => {
-  const lessons = track.modules.reduce((sum, m) => sum + m.lessons.length, 0)
-  const totalHours = track.modules.reduce((sum, m) => sum + m.estimatedHours, 0)
-  return {
-    key: track.key,
-    name: track.name,
-    description: track.description,
-    category: track.category,
-    duration: `~${Math.round(totalHours / 10)} wks`,
-    modules: track.modules.length,
-    lessons,
-    color: track.color,
-    icon: track.icon,
-    modulesList: track.modules.map(
-      (m) => `${m.name} (~${Math.round(m.estimatedHours / 10)} wks)`
-    ),
-  }
-})
-
-const lessonIds = new Set<string>()
-const resourceUrls = new Set<string>()
-const projectLessonIds = new Set<string>()
-
-for (const track of curriculumTracks) {
-  for (const mod of track.modules) {
-    for (const lesson of mod.lessons) {
-      lessonIds.add(lesson.id)
-      for (const resource of lesson.resources) resourceUrls.add(resource.url)
-      if (lesson.isProject || lesson.resources.some((resource) => resource.type === 'project')) {
-        projectLessonIds.add(lesson.id)
-      }
-    }
-  }
-}
-
-const totalLessons = lessonIds.size
-const totalResources = resourceUrls.size
-const projectCount = projectLessonIds.size
-
-const stats = [
-  { value: '100%', label: 'Free Forever' },
-  { value: `${totalLessons}`, label: 'Written Lessons' },
-  { value: `${totalResources}`, label: 'Free Resources' },
-  { value: `${projectCount}`, label: 'Project Lessons' },
 ]
 
 export const metadata = pageMetadata({
   title: 'Nyxora Sync — Free Learning Paths for Developers',
-  description: `Learn web development, programming languages, embedded systems, and more with ${totalLessons} free written lessons, real projects, playgrounds, progress tracking, and informal completion certificates.`,
+  description: 'Learn web development and programming languages with 200+ free written lessons, real portfolio projects, in-browser playgrounds, and progress tracking. 100% free, no paywalls.',
   path: '/',
-  keywords: ['web development', 'programming languages', 'embedded systems', 'IoT', 'Arduino', 'ESP32', 'C', 'C++', 'C#', 'Python', 'MERN', 'React', 'Node.js', 'free coding curriculum', 'completion certificate'],
+  keywords: ['web development', 'programming languages', 'MERN', 'React', 'Node.js', 'free coding curriculum', 'portfolio projects'],
 })
 
 export default function HomePage() {
@@ -6351,12 +6244,12 @@ export default function HomePage() {
         <section className="relative overflow-hidden py-20 sm:py-32 lg:pb-32 xl:pb-36">
           <HeroVisual />
           <div className="relative mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-            <div className="text-center">
+            <div className="text-center max-w-4xl mx-auto">
               <div className="inline-flex items-center gap-2 rounded-full bg-emerald-100/50 px-4 py-1.5 text-sm font-medium text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400 mb-6">
                 <span className="relative flex h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" aria-hidden="true" />
-                <span>Now with C, C++, C#, Python, and Embedded Systems paths</span>
+                <span>New: Job-Ready Fast Track — portfolio projects included</span>
               </div>
-              <h1 className="mt-6 text-4xl font-bold tracking-tight sm:text-6xl lg:text-7xl">
+              <h1 className="mt-6 text-4xl font-bold tracking-tight sm:text-6xl lg:text-7xl leading-tight">
                 Learn to build.{' '}
                 <span className="bg-gradient-to-r from-emerald-500 via-violet-500 to-amber-500 bg-clip-text text-transparent">
                   Go deeper.
@@ -6364,9 +6257,8 @@ export default function HomePage() {
                 Master the craft.
               </h1>
               <p className="mt-6 max-w-2xl mx-auto text-lg text-muted-foreground sm:text-xl">
-                Master web development, programming languages, embedded systems, and more through written lessons,
-                real projects, interactive playgrounds, progress tracking, informal completion certificates,
-                and a supportive community. 100% free, open source, no paywalls.
+                Master web development and programming languages through written lessons, real portfolio projects,
+                interactive playgrounds, and progress tracking. 100% free, open source, no paywalls.
               </p>
               <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
                 <Button size="lg" asChild className="gap-2 w-full sm:w-auto">
@@ -6379,129 +6271,77 @@ export default function HomePage() {
                   <Link href="/roadmap">View Full Roadmap</Link>
                 </Button>
               </div>
-              <div className="mt-10 flex flex-wrap items-center justify-center gap-8 text-sm text-muted-foreground">
+
+              {/* Stats Bar */}
+              <div className="mt-12 flex flex-wrap items-center justify-center gap-6 sm:gap-10 text-center">
                 {stats.map((stat) => (
-                  <div key={stat.label} className="flex items-center gap-2">
-                    <span className="text-2xl font-bold text-foreground">{stat.value}</span>
-                    <span>{stat.label}</span>
+                  <div key={stat.label} className="flex flex-col items-center gap-1">
+                    <span className="text-3xl font-bold text-foreground sm:text-4xl">{stat.value}</span>
+                    <span className="text-sm text-muted-foreground">{stat.label}</span>
                   </div>
                 ))}
               </div>
-            </div>
 
-            {/* Trust indicators */}
-            <div className="mt-16 flex flex-wrap items-center justify-center gap-4 text-center text-xs text-muted-foreground/60 sm:gap-8">
-              <div className="flex items-center gap-1.5">
-                <GithubIcon className="h-3.5 w-3.5" aria-hidden="true" />
-                <span>Open Source</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <CheckCircle className="h-3.5 w-3.5 text-emerald-500" aria-hidden="true" />
-                <span>No Account Required</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
-                <span>Curated External Resources</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <Zap className="h-3.5 w-3.5 text-amber-500" aria-hidden="true" />
-                <span>In-Browser Playgrounds</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <Award className="h-3.5 w-3.5 text-rose-500" aria-hidden="true" />
-                <span>Showcase Certificates</span>
+              {/* Trust indicators */}
+              <div className="mt-10 flex flex-wrap items-center justify-center gap-4 text-center text-xs text-muted-foreground/60 sm:gap-8">
+                <div className="flex items-center gap-1.5">
+                  <GithubIcon className="h-3.5 w-3.5" aria-hidden="true" />
+                  <span>Open Source</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <CheckCircle className="h-3.5 w-3.5 text-emerald-500" aria-hidden="true" />
+                  <span>No Account Required</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                  <span>Curated External Resources</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <Zap className="h-3.5 w-3.5 text-amber-500" aria-hidden="true" />
+                  <span>In-Browser Playgrounds</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <Award className="h-3.5 w-3.5 text-rose-500" aria-hidden="true" />
+                  <span>Showcase Certificates</span>
+                </div>
               </div>
             </div>
           </div>
         </section>
 
-        {/* Learning Categories */}
+        {/* Primary Learning Tracks */}
         <section className="py-20 sm:py-24 bg-muted/30">
           <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-            <div className="text-center max-w-3xl mx-auto mb-16">
-              <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">Choose Your Path</h2>
+            <div className="mb-12 text-center max-w-3xl mx-auto">
+              <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">
+                Two paths. One goal: a hiring portfolio.
+              </h2>
               <p className="mt-4 text-lg text-muted-foreground">
-                Every category contains structured learning paths from beginner to mastery.
-                Pick a category, pick a track, start building.
+                Both tracks end with deployable capstones. Pick based on your starting point.
               </p>
             </div>
-            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
-              {trackCategories
-                .filter((cat) => curriculumTracks.some((t) => t.category === cat.id))
-                .map((category) => {
-                  const categoryTracks = tracks.filter((t) => t.category === category.id)
-                  const totalLessons = categoryTracks.reduce((sum, t) => sum + t.lessons, 0)
-                  const totalTracks = categoryTracks.length
-                  const Icon = categoryIcons[category.id] ?? Globe
-                  return (
-                    <Link
-                      key={category.id}
-                      href={`/categories/${category.id}`}
-                      className="group relative block"
-                    >
-                      <Card className="relative h-full overflow-hidden transition-all motion-safe:hover:-translate-y-1 hover:shadow-xl border-border/50">
-                        <div
-                          className={cn(
-                            'absolute inset-x-0 top-0 h-1 bg-gradient-to-r',
-                            getAccent(category.color).gradient
-                          )}
-                        />
-                        <CardContent className="pt-6 pb-8 flex flex-col h-full">
-                          <div className={cn('mb-4 flex h-12 w-12 items-center justify-center rounded-xl', getAccent(category.color).icon)}>
-                            <Icon className="h-6 w-6" aria-hidden="true" />
-                          </div>
-                          <h3 className="text-xl font-bold group-hover:text-primary transition-colors">
-                            {category.name}
-                          </h3>
-                          <p className="mt-2 text-sm text-muted-foreground flex-1">
-                            {category.description}
-                          </p>
-                          <div className="mt-4 flex items-center justify-between text-xs text-muted-foreground border-t border-border/50 pt-4">
-                            <span>{totalTracks} tracks</span>
-                            <span>{totalLessons} lessons</span>
-                          </div>
-                          <ArrowRight
-                            className="absolute bottom-4 right-4 h-5 w-5 text-muted-foreground/50 group-hover:text-foreground group-hover:right-3 transition-all"
-                            aria-hidden="true"
-                          />
-                        </CardContent>
-                      </Card>
-                    </Link>
-                  )
-                })}
-            </div>
-          </Reveal>
-        </section>
 
-        {/* Featured Tracks from Web Development */}
-        <section className="py-20 sm:py-24">
-          <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-            <div className="mb-12 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-              <div className="max-w-2xl">
-                <p className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
-                  Web Development
-                </p>
-                <h2 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">
-                  Start with the Web
-                </h2>
-                <p className="mt-4 text-lg text-muted-foreground">
-                  Two core MERN tracks, same destination. Pick based on your experience level.
-                </p>
-              </div>
-            </div>
             <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8" delay={0.1}>
               <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
-                {tracks
-                  .filter((t) => t.category === 'web-development' && t.key !== 'specializations')
-                  .map((track) => (
+                {primaryTracks.map((track) => {
+                  const display = getTrackDisplay(track)
+                  return (
                     <Link key={track.key} href={`/learn/${track.key}`} className="group">
-                      <Card className="relative overflow-hidden transition-all motion-safe:hover:-translate-y-1 hover:shadow-xl h-full border-border/50">
+                      <Card className={cn('relative overflow-hidden transition-all motion-safe:hover:-translate-y-1 hover:shadow-xl h-full border-border/50', track.isFastTrack && 'ring-1 ring-emerald-500/30')}>
                         <div
                           className={cn(
                             'absolute inset-x-0 top-0 h-1 bg-gradient-to-r',
                             getAccent(track.color).gradient
                           )}
                         />
+                        {track.isFastTrack && (
+                          <div className="absolute top-4 right-4 z-10">
+                            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500 px-2.5 py-0.5 text-xs font-semibold text-white">
+                              <Zap className="h-3 w-3" aria-hidden="true" />
+                              Fast Track
+                            </span>
+                          </div>
+                        )}
                         <CardHeader>
                           <div className={cn('flex items-center gap-2 text-sm font-medium', getAccent(track.color).text)}>
                             <span className="relative flex h-5 w-5" aria-hidden="true">
@@ -6514,48 +6354,85 @@ export default function HomePage() {
                           <CardDescription className="text-base">{track.description}</CardDescription>
                         </CardHeader>
                         <CardContent className="space-y-4">
+                          {track.fastTrackDescription && (
+                            <div className="p-3 rounded-lg bg-emerald-500/5 border border-emerald-500/20">
+                              <p className="text-sm text-emerald-700 dark:text-emerald-400 font-medium">
+                                {track.fastTrackDescription}
+                              </p>
+                            </div>
+                          )}
                           <div className="grid grid-cols-3 gap-4 text-center">
                             <div className="p-3 rounded-lg bg-muted/50">
-                              <p className="text-2xl font-bold">{track.duration}</p>
+                              <p className="text-2xl font-bold">{display.duration}</p>
                               <p className="text-xs text-muted-foreground">Estimated Time</p>
                             </div>
                             <div className="p-3 rounded-lg bg-muted/50">
-                              <p className="text-2xl font-bold">{track.modules}</p>
-                              <p className="text-xs text-muted-foreground">Modules</p>
+                              <p className="text-2xl font-bold">{track.modules.length}</p>
+                              <p className="text-xs text-muted-foreground">Core Modules</p>
                             </div>
                             <div className="p-3 rounded-lg bg-muted/50">
-                              <p className="text-2xl font-bold">{track.lessons}</p>
+                              <p className="text-2xl font-bold">{display.lessons}</p>
                               <p className="text-xs text-muted-foreground">Lessons</p>
                             </div>
                           </div>
                           <Separator />
                           <ul className="space-y-2" role="list">
-                            {track.modulesList.map((module, i) => (
+                            {display.modulesList.map((module, i) => (
                               <li key={i} className="flex items-center gap-2 text-sm text-muted-foreground group-hover:text-foreground transition-colors">
                                 <CheckCircle className="h-4 w-4 text-emerald-500 shrink-0" aria-hidden="true" />
-                                {module}
+                                {module.name}
                               </li>
                             ))}
                           </ul>
                         </CardContent>
                         <CardFooter className="border-t-0 pt-0">
-                          <Button className="w-full" variant="outline">
-                            Start {track.name} <ArrowRight className="ml-2 h-4 w-4" aria-hidden="true" />
+                          <Button className="w-full" variant={track.isFastTrack ? 'default' : 'outline'}>
+                            {track.isFastTrack ? 'Start Fast Track' : 'Start Track'} <ArrowRight className="ml-2 h-4 w-4" aria-hidden="true" />
                           </Button>
                         </CardFooter>
                       </Card>
                     </Link>
-                  ))}
-            </div>
-            <SpecializationsBanner className="mt-8" />
-          </Reveal>
+                  )
+                })}
+              </div>
+              <SpecializationsBanner className="mt-8" />
+            </Reveal>
           </Reveal>
         </section>
 
-        {/* Programming Languages */}
-        <section id="languages" className="py-20 sm:py-24 scroll-mt-20 bg-muted/30">
+        {/* Key Features */}
+        <section className="py-20 sm:py-24">
           <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-            <div className="mb-12 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+            <div className="text-center max-w-3xl mx-auto mb-16">
+              <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">
+                Built for how you actually learn
+              </h2>
+              <p className="mt-4 text-lg text-muted-foreground">
+                No video walls, no paywalls, no fluff. Just structured paths that respect your time and connection speed.
+              </p>
+            </div>
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+              {features.map((feature) => (
+                <Card key={feature.title} className="group transition-all motion-safe:hover:-translate-y-0.5 hover:shadow-lg border-border/50">
+                  <CardHeader>
+                    <div className={cn('mb-3 flex h-12 w-12 items-center justify-center rounded-xl', getAccent(feature.color).icon)}>
+                      <feature.icon className="h-6 w-6" aria-hidden="true" />
+                    </div>
+                    <CardTitle className="text-lg">{feature.title}</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <CardDescription className="text-base">{feature.description}</CardDescription>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </Reveal>
+        </section>
+
+        {/* Language Paths (condensed) */}
+        <section id="languages" className="py-20 sm:py-24 bg-muted/30">
+          <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <div className="mb-10 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
               <div className="max-w-2xl">
                 <p className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
                   Programming Languages
@@ -6563,14 +6440,13 @@ export default function HomePage() {
                 <h2 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">
                   Go deeper than the framework
                 </h2>
-                <p className="mt-4 text-lg text-muted-foreground">
-                  Four complete paths from beginner to mastery. Learn memory, types, concurrency, and
-                  production tooling — then build something real in each language.
+                <p className="mt-3 text-muted-foreground">
+                  Four complete beginner-to-mastery paths. Each level ends with a project, each path with a capstone.
                 </p>
               </div>
               <Button asChild variant="outline" className="gap-2 self-start sm:self-auto">
                 <Link href="/learn/languages">
-                  Explore languages
+                  Explore all language paths
                   <ArrowRight className="h-4 w-4" aria-hidden="true" />
                 </Link>
               </Button>
@@ -6579,49 +6455,46 @@ export default function HomePage() {
           </Reveal>
         </section>
 
-        {/* Embedded Systems Preview */}
-        <section id="embedded" className="py-20 sm:py-24 scroll-mt-20">
+        {/* What's Planned (condensed) */}
+        <section id="planned" className="py-20 sm:py-24">
           <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-            <div className="mb-12 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+            <div className="mb-10 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
               <div className="max-w-2xl">
-                <p className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
-                  Embedded Systems & IoT
-                </p>
-                <h2 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">
-                  Code that touches the physical world
+                <div className="inline-flex items-center gap-1.5 rounded-full bg-amber-100/50 px-3 py-1 text-xs font-medium text-amber-700 dark:bg-amber-900/20 dark:text-amber-400 mb-3">
+                  <Construction className="h-3 w-3" aria-hidden="true" />
+                  <span>Planned Content</span>
+                </div>
+                <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">
+                  What comes next
                 </h2>
-                <p className="mt-4 text-lg text-muted-foreground">
-                  Arduino, ESP32, sensors, actuators, and IoT cloud. Coming soon.
+                <p className="mt-3 text-muted-foreground">
+                  Mobile, Data Science, Game Dev, Desktop Apps, and advanced language modules are planned.
+                  <Link href="/planned" className="font-medium text-primary underline hover:text-primary-foreground ml-1">
+                    View all planned tracks →
+                  </Link>
                 </p>
               </div>
-              <Button asChild variant="outline" className="gap-2 self-start sm:self-auto">
-                <Link href="/categories/embedded-systems">
-                  View embedded tracks
-                  <ArrowRight className="h-4 w-4" aria-hidden="true" />
-                </Link>
-              </Button>
             </div>
-            <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {[
-                { title: 'Arduino Fundamentals', desc: 'GPIO, PWM, I2C/SPI, interrupts, and libraries', icon: Cpu, color: 'amber' },
-                { title: 'ESP32 WiFi & Bluetooth', desc: 'Web servers, BLE, MQTT, OTA updates', icon: Cloud, color: 'amber' },
-                { title: 'Sensors & Actuators', desc: 'Temperature, distance, motors, displays', icon: Cpu, color: 'amber' },
-                { title: 'RTOS & FreeRTOS', desc: 'Tasks, queues, semaphores, timing', icon: Cpu, color: 'amber' },
-                { title: 'IoT Cloud Integration', desc: 'AWS IoT, Azure, MQTT brokers', icon: Cloud, color: 'amber' },
-                { title: 'PCB Design Basics', desc: 'KiCad, schematics, layout, manufacturing', icon: Cpu, color: 'amber' },
+                { title: 'Mobile Development', desc: 'React Native, Expo, offline sync, store deployment', icon: Smartphone, color: 'violet' },
+                { title: 'Data Science & AI', desc: 'Python data stack, ML, LLMs, RAG, MLOps', icon: FileCode, color: 'rose' },
+                { title: 'Game Development', desc: '2D/3D engines, multiplayer, networking', icon: Globe, color: 'orange' },
+                { title: 'Desktop Apps', desc: 'Tauri, Rust, system integration, distribution', icon: Globe, color: 'slate' },
+                { title: 'Advanced Language Modules', desc: 'C kernel, C++ SIMD, C# Orleans, Python internals', icon: AlertCircle, color: 'blue' },
               ].map((item) => (
                 <Card key={item.title} className="group transition-all motion-safe:hover:-translate-y-0.5 hover:shadow-lg h-full border-border/50">
                   <CardHeader>
-                    <div className={cn('mb-3 flex h-12 w-12 items-center justify-center rounded-xl', getAccent(item.color).icon)}>
-                      <item.icon className="h-6 w-6" aria-hidden="true" />
+                    <div className={cn('mb-3 flex h-10 w-10 items-center justify-center rounded-xl', getAccent(item.color).icon)}>
+                      <item.icon className="h-5 w-5" aria-hidden="true" />
                     </div>
-                    <CardTitle>{item.title}</CardTitle>
+                    <CardTitle className="text-base">{item.title}</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <CardDescription className="text-base">{item.desc}</CardDescription>
+                    <CardDescription className="text-sm">{item.desc}</CardDescription>
                   </CardContent>
                   <CardFooter className="border-t-0 pt-0">
-                    <span className="text-xs text-muted-foreground">Coming Soon</span>
+                    <span className="text-xs text-muted-foreground">Planned</span>
                   </CardFooter>
                 </Card>
               ))}
@@ -6629,39 +6502,7 @@ export default function HomePage() {
           </Reveal>
         </section>
 
-        {/* Features */}
-        <section className="py-20 sm:py-24">
-          <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-            <div className="text-center max-w-3xl mx-auto mb-16">
-              <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">Everything You Need to Succeed</h2>
-              <p className="mt-4 text-lg text-muted-foreground">
-                Built by developers, for developers. Every feature designed to help you learn faster.
-              </p>
-            </div>
-            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-              {features.map((feature) => (
-                <Card key={feature.title} className="group transition-all motion-safe:hover:-translate-y-0.5 hover:shadow-lg">
-                  <CardHeader>
-                    <div className={cn('mb-3 flex h-12 w-12 items-center justify-center rounded-xl', getAccent(feature.color).icon)}>
-                      <feature.icon className="h-6 w-6" aria-hidden="true" />
-                    </div>
-                    <CardTitle>{feature.title}</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <CardDescription className="text-base">{feature.description}</CardDescription>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-            <p className="mx-auto mt-8 max-w-2xl text-center text-xs text-muted-foreground">
-              Completion certificates are informal, non-accredited records for showcase only.
-              Nyxora Sync is not a recognized institution, and a certificate may hold no value in
-              real life.
-            </p>
-          </Reveal>
-        </section>
-
-        {/* CTA */}
+        {/* Final CTA */}
         <section className="py-20 sm:py-24">
           <Reveal className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <Card className="relative overflow-hidden bg-gradient-to-br from-emerald-500/10 via-violet-500/10 to-amber-500/10 border-border/50">
@@ -6671,7 +6512,7 @@ export default function HomePage() {
                     Ready to start learning?
                   </h2>
                   <p className="mt-4 text-lg text-muted-foreground">
-                    Join thousands of learners building real projects — free, self-paced, and open source.
+                    Join learners worldwide building real projects — free, self-paced, and open source.
                   </p>
                   <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
                     <Button size="lg" asChild className="gap-2 w-full sm:w-auto">
@@ -6681,7 +6522,7 @@ export default function HomePage() {
                       </Link>
                     </Button>
                     <Button size="lg" variant="outline" asChild className="gap-2 w-full sm:w-auto">
-                      <Link href="https://github.com/Nyxora-Sync/nyxora-sync" target="_blank" rel="noopener noreferrer">
+                      <Link href="https://github.com/Nyxora-Sync/nyxora" target="_blank" rel="noopener noreferrer">
                         <GithubIcon className="h-5 w-5" aria-hidden="true" />
                         View on GitHub
                       </Link>
@@ -6691,6 +6532,369 @@ export default function HomePage() {
               </CardContent>
             </Card>
           </Reveal>
+        </section>
+      </main>
+      <Footer />
+    </div>
+  )
+}
+
+===== FILE: src/app/planned/page.tsx =====
+import { Metadata } from 'next'
+import Link from 'next/link'
+import { Header } from '@/components/header'
+import { Footer } from '@/components/footer'
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { ArrowRight, Clock, BookOpen, Construction, AlertCircle, CheckCircle2 } from 'lucide-react'
+import { cn, getAccent } from '@/lib/utils'
+import { pageMetadata } from '@/lib/seo'
+
+export const metadata = pageMetadata({
+  title: 'Planned & Future Tracks',
+  description: 'See what\'s coming next on Nyxora Sync. These tracks are planned but not yet ready for learners.',
+  path: '/planned',
+  noIndex: true,
+})
+
+interface PlannedTrack {
+  key: string
+  name: string
+  description: string
+  category: string
+  color: string
+  estimatedLessons: number
+  estimatedHours: number
+  status: 'planned' | 'in-progress' | 'needs-contributors'
+  modules: { name: string; description: string }[]
+  notes?: string
+}
+
+const plannedTracks: PlannedTrack[] = [
+  {
+    key: 'embedded',
+    name: 'Embedded Systems & IoT',
+    description: 'Program microcontrollers, build IoT devices, and control hardware with code.',
+    category: 'embedded-systems',
+    color: 'amber',
+    estimatedLessons: 40,
+    estimatedHours: 120,
+    status: 'planned',
+    modules: [
+      { name: 'Arduino Fundamentals', description: 'GPIO, PWM, I2C/SPI, interrupts, and libraries' },
+      { name: 'ESP32 WiFi & Bluetooth', description: 'Web servers, BLE, MQTT, OTA updates' },
+      { name: 'Sensors & Actuators', description: 'Temperature, distance, motors, displays' },
+      { name: 'RTOS & FreeRTOS', description: 'Tasks, queues, semaphores, timing' },
+      { name: 'IoT Cloud Integration', description: 'AWS IoT, Azure, MQTT brokers' },
+      { name: 'PCB Design Basics', description: 'KiCad, schematics, layout, manufacturing' },
+    ],
+    notes: 'Requires hardware (Arduino/ESP32) or simulator (Wokwi). Content not yet written.',
+  },
+  {
+    key: 'mobile-development',
+    name: 'Mobile Development (Cross-Platform)',
+    description: 'Build native and cross-platform apps for iOS and Android.',
+    category: 'mobile-development',
+    color: 'violet',
+    estimatedLessons: 30,
+    estimatedHours: 90,
+    status: 'planned',
+    modules: [
+      { name: 'Expo & React Native Basics', description: 'Setup, navigation, core components' },
+      { name: 'Native Modules & Device APIs', description: 'Camera, location, push notifications' },
+      { name: 'Offline-First & Sync', description: 'Local storage, background sync, conflict resolution' },
+      { name: 'Store Deployment', description: 'App Store, Play Store, EAS Build' },
+    ],
+    notes: 'React Native specialization track exists but is incomplete.',
+  },
+  {
+    key: 'data-science',
+    name: 'Data Science & AI',
+    description: 'Analyze data, build ML models, and create intelligent applications.',
+    category: 'data-science',
+    color: 'rose',
+    estimatedLessons: 35,
+    estimatedHours: 100,
+    status: 'planned',
+    modules: [
+      { name: 'Python for Data', description: 'NumPy, Pandas, visualization' },
+      { name: 'Machine Learning Fundamentals', description: 'scikit-learn, model evaluation, pipelines' },
+      { name: 'Deep Learning Intro', description: 'PyTorch, neural networks, CNNs, RNNs' },
+      { name: 'LLMs & RAG', description: 'Embeddings, vector databases, retrieval-augmented generation' },
+      { name: 'MLOps Basics', description: 'Model serving, monitoring, drift detection' },
+    ],
+    notes: 'Python track exists; this extends it toward ML engineering.',
+  },
+  {
+    key: 'game-development',
+    name: 'Game Development',
+    description: 'Create 2D and 3D games with modern engines and frameworks.',
+    category: 'game-development',
+    color: 'orange',
+    estimatedLessons: 25,
+    estimatedHours: 80,
+    status: 'planned',
+    modules: [
+      { name: 'Game Dev Fundamentals', description: 'Loops, input, rendering, physics basics' },
+      { name: '2D with Phaser/Godot', description: 'Sprites, tilemaps, collisions, scenes' },
+      { name: '3D with Three.js/Godot', description: 'Meshes, lighting, cameras, animation' },
+      { name: 'Multiplayer & Networking', description: 'WebRTC, WebSockets, authoritative servers' },
+    ],
+    notes: 'No content yet. Seeking contributors with game dev experience.',
+  },
+  {
+    key: 'desktop-apps',
+    name: 'Desktop Applications',
+    description: 'Build cross-platform desktop apps with native performance.',
+    category: 'desktop-apps',
+    color: 'slate',
+    estimatedLessons: 20,
+    estimatedHours: 60,
+    status: 'planned',
+    modules: [
+      { name: 'Tauri & Rust Basics', description: 'Rust fundamentals for web devs' },
+      { name: 'Tauri App Architecture', description: 'Commands, events, window management' },
+      { name: 'System Integration', description: 'Tray, notifications, auto-updates, file associations' },
+      { name: 'Distribution & Signing', description: 'MSIX, DMG, AppImage, code signing' },
+    ],
+    notes: 'Requires Rust knowledge. Could follow C/C++ tracks.',
+  },
+]
+
+const advancedLanguageModules = [
+  {
+    track: 'c',
+    name: 'C Advanced Modules (Modules 4-8)',
+    description: 'Linux kernel internals, custom allocators, VFS, eBPF, kernel modules, device drivers.',
+    color: 'blue',
+    status: 'advanced' as const,
+    note: 'These modules go far beyond job-ready C. They target OS developers and kernel engineers. Keep in repo but hidden from main navigation.',
+  },
+  {
+    track: 'cpp',
+    name: 'C++ Advanced Modules',
+    description: 'Template metaprogramming, SIMD, coroutines, custom allocators, lock-free programming.',
+    color: 'blue',
+    status: 'advanced' as const,
+    note: 'Expert-level content. Not required for general C++ proficiency.',
+  },
+  {
+    track: 'csharp',
+    name: 'C# Advanced Modules',
+    description: 'Orleans/Actors, Source Generators, Native AOT, advanced ASP.NET Core internals.',
+    color: 'blue',
+    status: 'advanced' as const,
+    note: 'Specialized topics for senior .NET engineers.',
+  },
+  {
+    track: 'python',
+    name: 'Python Advanced Modules',
+    description: 'CPython internals, C extensions, async internals, performance optimization.',
+    color: 'blue',
+    status: 'advanced' as const,
+    note: 'Deep internals track. Not needed for application development.',
+  },
+]
+
+function StatusBadge({ status, color = 'blue' }: { status: string; color?: string }) {
+  const variants: Record<string, string> = {
+    planned: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400',
+    'in-progress': 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
+    'needs-contributors': 'bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-400',
+    advanced: 'bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-400',
+  }
+  return (
+    <span className={cn('inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium', variants[status] ?? variants.planned)}>
+      {status.charAt(0).toUpperCase() + status.slice(1).replace('-', ' ')}
+    </span>
+  )
+}
+
+export default function PlannedPage() {
+  return (
+    <div className="flex min-h-screen flex-col">
+      <Header />
+      <main id="main-content" tabIndex={-1} className="flex-1">
+        {/* Hero */}
+        <section className="py-16 sm:py-24 bg-muted/30">
+          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 text-center">
+            <div className="inline-flex items-center gap-2 rounded-full bg-amber-100/50 px-4 py-1.5 text-sm font-medium text-amber-700 dark:bg-amber-900/20 dark:text-amber-400 mb-6">
+              <AlertCircle className="h-4 w-4" aria-hidden="true" />
+              <span>Planned & Advanced Content</span>
+            </div>
+            <h1 className="text-4xl font-bold tracking-tight sm:text-5xl">
+              What{' '}
+              <span className="bg-gradient-to-r from-amber-500 via-violet-500 to-rose-500 bg-clip-text text-transparent">
+                Comes Next
+              </span>
+            </h1>
+            <p className="mt-4 max-w-2xl mx-auto text-lg text-muted-foreground">
+              Nyxora Sync is built in the open. These tracks are either planned for the future,
+              marked as advanced/experimental, or waiting for contributors. They are <strong>not ready for learners yet</strong>.
+            </p>
+          </div>
+        </section>
+
+        {/* Planned Tracks */}
+        <section className="py-16 sm:py-20">
+          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <div className="mb-12 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">Planned Tracks</h2>
+                <p className="mt-2 text-muted-foreground">
+                  Full learning paths with written lessons, projects, and progress tracking — coming when ready.
+                </p>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
+              {plannedTracks.map((track) => (
+                <Card key={track.key} className="relative overflow-hidden border-border/50">
+                  <div className={cn('absolute inset-x-0 top-0 h-1 bg-gradient-to-r', getAccent(track.color).gradient)} />
+                  <CardHeader>
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex items-center gap-3">
+                        <div className={cn('flex h-12 w-12 items-center justify-center rounded-xl', getAccent(track.color).icon)}>
+                          <BookOpen className="h-6 w-6" aria-hidden="true" />
+                        </div>
+                        <div>
+                          <CardTitle className="text-xl">{track.name}</CardTitle>
+                          <p className="mt-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                            {track.category.replace('-', ' ')}
+                          </p>
+                        </div>
+                      </div>
+                      <StatusBadge status={track.status} />
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <p className="text-sm text-muted-foreground">{track.description}</p>
+                    <ul className="space-y-2" role="list">
+                      {track.modules.map((module, i) => (
+                        <li key={i} className="flex items-start gap-2 text-sm text-muted-foreground">
+                          <span className="flex-shrink-0 mt-1 h-1.5 w-1.5 rounded-full bg-current" />
+                          <span>{module.name}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground">
+                      <span className="inline-flex items-center gap-1.5">
+                        <BookOpen className="h-3.5 w-3.5" aria-hidden="true" />
+                        ~{track.estimatedLessons} lessons
+                      </span>
+                      <span className="inline-flex items-center gap-1.5">
+                        <Clock className="h-3.5 w-3.5" aria-hidden="true" />
+                        ~{track.estimatedHours} hours
+                      </span>
+                    </div>
+                    {track.notes && (
+                      <p className="text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 rounded-lg p-3">
+                        <Construction className="inline h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
+                        {track.notes}
+                      </p>
+                    )}
+                  </CardContent>
+                  <CardFooter className="border-t-0 pt-0">
+                    <Button variant="outline" disabled className="w-full justify-between opacity-50 cursor-not-allowed">
+                      Not Available Yet
+                      <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                    </Button>
+                  </CardFooter>
+                </Card>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* Advanced / Experimental Modules */}
+        <section className="py-16 sm:py-20 bg-muted/30">
+          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <div className="mb-12 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">Advanced / Experimental Modules</h2>
+                <p className="mt-2 text-muted-foreground">
+                  These modules exist in the codebase but are hidden from main navigation. They target specialists,
+                  not job-seeking learners. We keep them for reference and potential future expansion.
+                </p>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+              {advancedLanguageModules.map((mod) => (
+                <Card key={mod.track} className="relative overflow-hidden border-border/50">
+                  <div className={cn('absolute inset-x-0 top-0 h-1 bg-gradient-to-r', getAccent(mod.color).gradient)} />
+                  <CardHeader>
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <CardTitle className="text-xl">{mod.name}</CardTitle>
+                        <p className="mt-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                          {mod.track.toUpperCase()} Track
+                        </p>
+                      </div>
+                      <StatusBadge status="advanced" color={mod.color} />
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <p className="text-sm text-muted-foreground">{mod.description}</p>
+                    <p className="text-xs text-violet-600 dark:text-violet-400 bg-violet-50 dark:bg-violet-900/20 rounded-lg p-3">
+                      <Construction className="inline h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
+                      {mod.note}
+                    </p>
+                  </CardContent>
+                  <CardFooter className="border-t-0 pt-0">
+                    <Button variant="ghost" size="sm" asChild>
+                      <Link href={`/learn/${mod.track}`} className="flex items-center gap-1.5">
+                        View {mod.track.toUpperCase()} Track
+                        <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+                      </Link>
+                    </Button>
+                  </CardFooter>
+                </Card>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* How to Contribute */}
+        <section className="py-16 sm:py-20">
+          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <Card className="relative overflow-hidden bg-gradient-to-br from-emerald-500/10 via-violet-500/10 to-amber-500/10 border-border/50">
+              <CardContent className="relative py-12 sm:py-16 text-center">
+                <div className="mx-auto max-w-2xl">
+                  <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">
+                    Want to Help Build These?
+                  </h2>
+                  <p className="mt-4 text-lg text-muted-foreground">
+                    Every track on Nyxora Sync started as a plan. If you have expertise in any of these areas,
+                    your contributions — lessons, resources, reviews, or even just feedback — make them real.
+                  </p>
+                  <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
+                    <Button size="lg" asChild className="gap-2 w-full sm:w-auto">
+                      <Link href="/contribute">
+                        Read Contribution Guide
+                        <ArrowRight className="h-5 w-5" aria-hidden="true" />
+                      </Link>
+                    </Button>
+                    <Button size="lg" variant="outline" asChild className="gap-2 w-full sm:w-auto">
+                      <Link href="https://github.com/Nyxora-Sync/nyxora/issues/new/choose" target="_blank" rel="noopener noreferrer">
+                        Suggest a Track or Lesson
+                      </Link>
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </section>
+
+        {/* Disclaimer */}
+        <section className="py-8 border-t border-border/50">
+          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 text-center text-xs text-muted-foreground">
+            <p>
+              Time estimates and lesson counts are rough projections. Actual scope may change.
+              <br />
+              <strong>No dates are committed.</strong> Tracks ship when they meet our quality bar:
+              written lessons, working projects, verified resources, and peer review.
+            </p>
+          </div>
         </section>
       </main>
       <Footer />
@@ -6745,6 +6949,700 @@ export default function PlaygroundPage() {
         </section>
       </main>
       <Footer />
+    </div>
+  )
+}
+
+===== FILE: src/app/practice/page.tsx =====
+'use client'
+
+import { useState, useEffect } from 'react'
+import Link from 'next/link'
+import {
+  BookOpen,
+  Code2,
+  FolderOpen,
+  Mic,
+  Brain,
+  Flame,
+  CheckCircle,
+  Clock,
+  RotateCw,
+  X,
+  Star,
+  Zap,
+  TrendingUp,
+  Target,
+  Award,
+  RefreshCw,
+  Play,
+  Trophy,
+} from 'lucide-react'
+import { useProgress } from '@/hooks/use-progress'
+import {
+  getDueFlashcards,
+  getDailyKata,
+  getAllFlashcardsByCategory,
+  getAllKatas,
+  getAllMicroProjects,
+  getAllInterviewDrills,
+  getFlashcard,
+  getKata,
+  getMicroProject,
+  getInterviewDrill,
+  type Flashcard,
+  type CodeKata,
+  type MicroProject,
+  type InterviewDrill,
+  type PracticeItem,
+  type FlashcardProgress,
+  sm2,
+  initialFlashcardProgress,
+} from '@/lib/practice'
+import type { PracticeProgress } from '@/lib/practice'
+
+const CATEGORY_COLORS: Record<string, string> = {
+  javascript: 'bg-yellow-500',
+  react: 'bg-blue-500',
+  nodejs: 'bg-green-500',
+  mongodb: 'bg-green-700',
+  typescript: 'bg-blue-700',
+  testing: 'bg-purple-500',
+  security: 'bg-red-500',
+  devops: 'bg-cyan-500',
+  architecture: 'bg-indigo-500',
+  'first-client': 'bg-violet-500',
+}
+
+const CATEGORY_ICONS: Record<string, any> = {
+  javascript: BookOpen,
+  react: Code2,
+  nodejs: FolderOpen,
+  mongodb: FolderOpen,
+  typescript: Code2,
+  testing: Mic,
+  security: Zap,
+  devops: Brain,
+  architecture: Target,
+  'first-client': Award,
+}
+
+function FlashcardReview() {
+  const { practice, gradeFlashcard } = useProgress()
+  const [flashcards, setFlashcards] = useState<Flashcard[]>([])
+  const [currentIndex, setCurrentIndex] = useState(0)
+  const [showAnswer, setShowAnswer] = useState(false)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    const due = getDueFlashcards(practice)
+    setFlashcards(due)
+    setLoading(false)
+  }, [practice])
+
+  const handleGrade = (grade: number) => {
+    const card = flashcards[currentIndex]
+    if (!card) return
+
+    const progress = practice.flashcards[card.id] ?? initialFlashcardProgress
+    const result = sm2(grade, progress)
+
+    gradeFlashcard(card.id, grade, card.xpReward)
+
+    setShowAnswer(false)
+
+    if (currentIndex < flashcards.length - 1) {
+      setCurrentIndex((i) => i + 1)
+    } else {
+      // Refresh the list after completing
+      setFlashcards(getDueFlashcards(practice))
+      setCurrentIndex(0)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="text-center py-8 text-muted-foreground">
+        <Brain className="mx-auto h-8 w-8 animate-spin" />
+        <p className="mt-2">Loading flashcards...</p>
+      </div>
+    )
+  }
+
+  if (flashcards.length === 0) {
+    return (
+      <div className="text-center py-12">
+        <CheckCircle className="mx-auto h-12 w-12 text-green-500" />
+        <h3 className="mt-4 text-lg font-semibold">No cards due today!</h3>
+        <p className="mt-2 text-muted-foreground">
+          All caught up. Check back tomorrow or practice katas below.
+        </p>
+      </div>
+    )
+  }
+
+  const card = flashcards[currentIndex]
+  const progress = practice.flashcards[card.id] ?? initialFlashcardProgress
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between text-sm text-muted-foreground">
+        <span>Card {currentIndex + 1} of {flashcards.length}</span>
+        <span className={CATEGORY_COLORS[card.category] + ' px-2 py-0.5 rounded text-xs font-medium'}>
+          {card.category}
+        </span>
+      </div>
+
+      <div
+        className="relative h-64 cursor-pointer rounded-xl border-2 border-border bg-card p-6 shadow-sm transition-all hover:shadow-md"
+        onClick={() => setShowAnswer(true)}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => e.key === 'Enter' && setShowAnswer(true)}
+      >
+        <div className="h-full flex items-center justify-center">
+          <div className="text-center">
+            <p className="text-foreground">{showAnswer ? card.answer : card.question}</p>
+            {!showAnswer && (
+              <p className="mt-4 text-sm text-muted-foreground">Click or press Enter to reveal</p>
+            )}
+            {showAnswer && (
+              <p className="mt-4 text-sm text-green-600 dark:text-green-400">Answer shown</p>
+            )}
+          </div>
+        </div>
+
+        {showAnswer && (
+          <div className="absolute inset-0 flex items-end justify-center p-4 pointer-events-none">
+            <div className="flex gap-2 pointer-events-auto">
+              <button
+                onClick={() => handleGrade(0)}
+                className="px-4 py-2 rounded-lg bg-red-500 text-white text-sm hover:bg-red-600"
+                title="Again (0)"
+              >
+                <X className="h-4 w-4" />
+              </button>
+              <button
+                onClick={() => handleGrade(1)}
+                className="px-4 py-2 rounded-lg bg-orange-500 text-white text-sm hover:bg-orange-600"
+                title="Hard (1)"
+              >
+                <Clock className="h-4 w-4" />
+              </button>
+              <button
+                onClick={() => handleGrade(2)}
+                className="px-4 py-2 rounded-lg bg-green-500 text-white text-sm hover:bg-green-600"
+                title="Good (2)"
+              >
+                <CheckCircle className="h-4 w-4" />
+              </button>
+              <button
+                onClick={() => handleGrade(3)}
+                className="px-4 py-2 rounded-lg bg-blue-500 text-white text-sm hover:bg-blue-600"
+                title="Easy (3)"
+              >
+                <Star className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="flex items-center justify-between text-xs text-muted-foreground">
+        <span>Difficulty: {card.difficulty}</span>
+        <span>~{card.estimatedMinutes} min</span>
+        <span>XP: +{card.xpReward}</span>
+        {progress.repetitions > 0 && (
+          <span className="px-2 py-0.5 rounded bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200">
+            Rep: {progress.repetitions} · Next: {new Date(progress.nextReview).toLocaleDateString()}
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function KataOfTheDay() {
+  const { practice, completeKata } = useProgress()
+  const [kata, setKata] = useState<CodeKata | undefined>(undefined)
+  const [code, setCode] = useState('')
+  const [output, setOutput] = useState<string | null>(null)
+  const [running, setRunning] = useState(false)
+
+  useEffect(() => {
+    const dailyKata = getDailyKata()
+    setKata(dailyKata)
+    if (dailyKata?.starterCode) {
+      setCode(dailyKata.starterCode)
+    }
+  }, [practice])
+
+  const kataProgress = kata ? practice.katas[kata.id] : null
+
+  if (!kata) {
+    return (
+      <div className="text-center py-8 text-muted-foreground">
+        <Code2 className="mx-auto h-8 w-8" />
+        <p className="mt-2">No katas available</p>
+      </div>
+    )
+  }
+
+  const runCode = () => {
+    setRunning(true)
+    setOutput('Running...')
+    // Simulate execution - in real app would use a sandbox
+    setTimeout(() => {
+      const passed = kata.testCases.map((tc) => {
+        // Simple check - in reality would execute code
+        return `${tc.description}: ✓`
+      }).join('\n')
+      setOutput(`Tests passed:\n${passed}\n\nNote: Full execution requires sandbox environment.`)
+      setRunning(false)
+    }, 1000)
+  }
+
+  const handleComplete = () => {
+    if (!kataProgress?.completed) {
+      completeKata(kata.id, kata.xpReward)
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="font-semibold">Kata of the Day</h3>
+        <div className="flex items-center gap-2">
+          <span className="px-2 py-0.5 rounded text-xs font-medium bg-amber-500 text-amber-900">
+            {kata.isDaily ? 'DAILY' : 'PRACTICE'}
+          </span>
+          {kataProgress?.completed && (
+            <span className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
+              <CheckCircle className="h-3 w-3" />
+              Completed
+            </span>
+          )}
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <p className="text-sm text-muted-foreground">{kata.prompt}</p>
+        <div className="flex gap-2 text-xs text-muted-foreground">
+          <span className={CATEGORY_COLORS[kata.category] + ' px-2 py-0.5 rounded'}>
+            {kata.category}
+          </span>
+          <span className="px-2 py-0.5 rounded bg-gray-200 dark:bg-gray-700">
+            {kata.language}
+          </span>
+          <span className="px-2 py-0.5 rounded bg-gray-200 dark:bg-gray-700">
+            ~{kata.estimatedMinutes} min
+          </span>
+          <span className="px-2 py-0.5 rounded bg-gray-200 dark:bg-gray-700">
+            +{kata.xpReward} XP
+          </span>
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <label className="block text-sm font-medium">Your Solution</label>
+        <textarea
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+          className="w-full h-48 font-mono text-sm p-3 rounded-lg border border-input bg-background resize-none"
+          placeholder={kata.starterCode || 'Write your solution here...'}
+          spellCheck={false}
+        />
+        <div className="flex gap-2">
+          <button
+            onClick={runCode}
+            disabled={running}
+            className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-50"
+          >
+            {running ? (
+              <>
+                <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                Running...
+              </>
+            ) : (
+              <>
+                <RotateCw className="h-4 w-4 mr-2" />
+                Run Tests
+              </>
+            )}
+          </button>
+          <button
+            onClick={() => setCode(kata.starterCode || '')}
+            className="px-4 py-2 rounded-lg border border-input bg-background text-sm font-medium hover:bg-accent"
+          >
+            Reset
+          </button>
+          {!kataProgress?.completed && (
+            <button
+              onClick={handleComplete}
+              className="px-4 py-2 rounded-lg bg-green-500 text-white text-sm font-medium hover:bg-green-600"
+            >
+              <CheckCircle className="h-4 w-4 mr-2" />
+              Mark Complete
+            </button>
+          )}
+        </div>
+      </div>
+
+      {output && (
+        <div className="rounded-lg bg-muted p-3 font-mono text-sm whitespace-pre-wrap max-h-40 overflow-auto">
+          {output}
+        </div>
+      )}
+
+      {kata.solution && (
+        <details className="group">
+          <summary className="flex items-center gap-2 text-sm font-medium text-muted-foreground cursor-pointer">
+            <RotateCw className="h-4 w-4 transition-transform group-open:rotate-90" />
+            View Solution
+          </summary>
+          <pre className="mt-3 rounded-lg bg-muted p-3 overflow-auto">
+            <code className="font-mono text-sm">{kata.solution}</code>
+          </pre>
+        </details>
+      )}
+
+      {kata.testCases.length > 0 && (
+        <details className="group">
+          <summary className="flex items-center gap-2 text-sm font-medium text-muted-foreground cursor-pointer">
+            <RotateCw className="h-4 w-4 transition-transform group-open:rotate-90" />
+            Test Cases
+          </summary>
+          <div className="mt-3 space-y-2">
+            {kata.testCases.map((tc, i) => (
+              <div key={i} className="rounded-lg border border-input p-3 text-sm">
+                <p className="font-medium">Test {i + 1}: {tc.description}</p>
+                <p className="font-mono text-muted-foreground">Input: {tc.input}</p>
+                <p className="font-mono text-green-600 dark:text-green-400">Expected: {tc.expected}</p>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+    </div>
+  )
+}
+
+function ProjectList() {
+  const { practice, completeProject } = useProgress()
+  const projects = getAllMicroProjects()
+
+  return (
+    <div className="space-y-4">
+      <h3 className="font-semibold flex items-center gap-2">
+        <FolderOpen className="h-5 w-5 text-green-500" />
+        Micro Projects
+      </h3>
+      {projects.map((project) => {
+        const progress = practice.projects[project.id]
+        return (
+          <div
+            key={project.id}
+            className="rounded-lg border border-border/50 bg-card p-4 hover:border-border hover:shadow-sm transition-all"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <h4 className="font-medium">{project.title}</h4>
+                  {progress?.completed && (
+                    <span className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
+                      <CheckCircle className="h-3 w-3" />
+                      Completed
+                    </span>
+                  )}
+                </div>
+                <p className="mt-1 text-sm text-muted-foreground">{project.description}</p>
+                <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                  <span className={CATEGORY_COLORS[project.category] + ' px-2 py-0.5 rounded'}>
+                    {project.category}
+                  </span>
+                  <span className="px-2 py-0.5 rounded bg-gray-200 dark:bg-gray-700">
+                    ~{project.estimatedMinutes} min
+                  </span>
+                  <span className="px-2 py-0.5 rounded bg-gray-200 dark:bg-gray-700">
+                    +{project.xpReward} XP
+                  </span>
+                  <span className="px-2 py-0.5 rounded bg-gray-200 dark:bg-gray-700 capitalize">
+                    {project.difficulty}
+                  </span>
+                </div>
+                <div className="mt-3 space-y-1">
+                  <p className="text-xs font-medium text-muted-foreground">Requirements:</p>
+                  <ul className="list-disc list-inside text-xs text-muted-foreground space-y-0.5">
+                    {project.requirements.slice(0, 3).map((req, i) => (
+                      <li key={i}>{req}</li>
+                    ))}
+                    {project.requirements.length > 3 && (
+                      <li>+{project.requirements.length - 3} more...</li>
+                    )}
+                  </ul>
+                </div>
+              </div>
+              <div className="flex flex-col gap-2 shrink-0">
+                {!progress?.completed && (
+                  <button
+                    onClick={() => completeProject(project.id, project.xpReward)}
+                    className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90"
+                  >
+                    <Trophy className="h-4 w-4 mr-2" />
+                    Submit
+                  </button>
+                )}
+                {progress?.completed && (
+                  <button
+                    className="px-4 py-2 rounded-lg border border-input bg-background text-sm font-medium hover:bg-accent"
+                    disabled
+                  >
+                    <CheckCircle className="h-4 w-4 mr-2 text-green-500" />
+                    Submitted
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function DrillList() {
+  const { practice, completeDrill } = useProgress()
+  const drills = getAllInterviewDrills()
+
+  return (
+    <div className="space-y-4">
+      <h3 className="font-semibold flex items-center gap-2">
+        <Mic className="h-5 w-5 text-violet-500" />
+        Interview Drills
+      </h3>
+      {drills.map((drill) => {
+        const progress = practice.drills[drill.id]
+        return (
+          <div
+            key={drill.id}
+            className="rounded-lg border border-border/50 bg-card p-4 hover:border-border hover:shadow-sm transition-all"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <h4 className="font-medium">{drill.title}</h4>
+                  {progress?.completed && (
+                    <span className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
+                      <CheckCircle className="h-3 w-3" />
+                      Completed
+                    </span>
+                  )}
+                </div>
+                <p className="mt-1 text-sm text-muted-foreground">{drill.question}</p>
+                <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                  <span className={CATEGORY_COLORS[drill.category] + ' px-2 py-0.5 rounded'}>
+                    {drill.category}
+                  </span>
+                  <span className="px-2 py-0.5 rounded bg-gray-200 dark:bg-gray-700 capitalize">
+                    {drill.drillType}
+                  </span>
+                  <span className="px-2 py-0.5 rounded bg-gray-200 dark:bg-gray-700">
+                    ~{drill.estimatedMinutes} min
+                  </span>
+                  <span className="px-2 py-0.5 rounded bg-gray-200 dark:bg-gray-700">
+                    +{drill.xpReward} XP
+                  </span>
+                  <span className="px-2 py-0.5 rounded bg-gray-200 dark:bg-gray-700 capitalize">
+                    {drill.difficulty}
+                  </span>
+                </div>
+                {drill.followUps.length > 0 && (
+                  <details className="mt-3 group">
+                    <summary className="text-xs font-medium text-muted-foreground cursor-pointer flex items-center gap-1">
+                      <RotateCw className="h-3 w-3 transition-transform group-open:rotate-90" />
+                      Follow-up questions
+                    </summary>
+                    <ul className="mt-2 list-disc list-inside text-xs text-muted-foreground space-y-1">
+                      {drill.followUps.map((q, i) => (
+                        <li key={i}>{q}</li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+              </div>
+              <div className="flex flex-col gap-2 shrink-0">
+                {!progress?.completed && (
+                  <button
+                    onClick={() => completeDrill(drill.id, drill.xpReward)}
+                    className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90"
+                  >
+                    <Trophy className="h-4 w-4 mr-2" />
+                    Complete
+                  </button>
+                )}
+                {progress?.completed && (
+                  <button
+                    className="px-4 py-2 rounded-lg border border-input bg-background text-sm font-medium hover:bg-accent"
+                    disabled
+                  >
+                    <CheckCircle className="h-4 w-4 mr-2 text-green-500" />
+                    Done
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function PracticeDashboard() {
+  const { xp, streak, practice, getPracticeStats } = useProgress()
+  const [activeTab, setActiveTab] = useState<'flashcards' | 'katas' | 'projects' | 'drills' | 'all'>('flashcards')
+  const [allItems, setAllItems] = useState<PracticeItem[]>([])
+  const stats = getPracticeStats()
+
+  useEffect(() => {
+    setAllItems([
+      ...getAllFlashcardsByCategory('javascript'),
+      ...getAllFlashcardsByCategory('react'),
+      ...getAllFlashcardsByCategory('nodejs'),
+      ...getAllFlashcardsByCategory('first-client'),
+    ])
+  }, [])
+
+  const filteredItems = allItems.filter((item) => {
+    if (activeTab === 'all') return true
+    const typeMap = {
+      flashcards: 'flashcard',
+      katas: 'kata',
+      projects: 'project',
+      drills: 'interview',
+    }
+    return item.type === typeMap[activeTab]
+  })
+
+  return (
+    <div className="space-y-6">
+      {/* Stats Overview */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+        <StatCard
+          title="Total XP"
+          value={xp}
+          icon={Zap}
+          color="bg-amber-500"
+          description={`Level ${Math.floor(xp / 100) + 1}`}
+        />
+        <StatCard
+          title="Lesson Streak"
+          value={streak.current}
+          icon={Flame}
+          color="bg-orange-500"
+          description="days in a row"
+        />
+        <StatCard
+          title="Practice Streak"
+          value={practice.streak.current}
+          icon={Trophy}
+          color="bg-purple-500"
+          description="practice days in a row"
+        />
+        <StatCard
+          title="Flashcards Reviewed"
+          value={stats.flashcardsReviewed}
+          icon={Brain}
+          color="bg-blue-500"
+          description="cards in SRS"
+        />
+        <StatCard
+          title="Katas Solved"
+          value={stats.katasCompleted}
+          icon={Code2}
+          color="bg-green-500"
+          description="code katas completed"
+        />
+      </div>
+
+      {/* Main Practice Area */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        {/* Left: Flashcards */}
+        <section className="lg:col-span-1">
+          <div className="rounded-xl border bg-card p-6 shadow-sm">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="flex items-center gap-2 text-lg font-semibold">
+                <BookOpen className="h-5 w-5 text-blue-500" />
+                Flashcards Due
+              </h2>
+            </div>
+            <FlashcardReview />
+          </div>
+        </section>
+
+        {/* Right: Kata of the Day */}
+        <section className="lg:col-span-1">
+          <div className="rounded-xl border bg-card p-6 shadow-sm">
+            <h2 className="flex items-center gap-2 mb-4 text-lg font-semibold">
+              <Code2 className="h-5 w-5 text-green-500" />
+              Kata of the Day
+            </h2>
+            <KataOfTheDay />
+          </div>
+        </section>
+      </div>
+
+      {/* Projects & Drills */}
+      <div className="grid gap-6 md:grid-cols-2">
+        <section>
+          <div className="rounded-xl border bg-card p-6 shadow-sm">
+            <ProjectList />
+          </div>
+        </section>
+        <section>
+          <div className="rounded-xl border bg-card p-6 shadow-sm">
+            <DrillList />
+          </div>
+        </section>
+      </div>
+    </div>
+  )
+}
+
+function StatCard({ title, value, icon: Icon, color, description }: {
+  title: string
+  value: number
+  icon: React.ElementType
+  color: string
+  description: string
+}) {
+  return (
+    <div className="rounded-xl border bg-card p-6 shadow-sm">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm text-muted-foreground">{title}</p>
+          <p className="text-3xl font-bold">{value}</p>
+          <p className="text-xs text-muted-foreground">{description}</p>
+        </div>
+        <div className={`p-3 rounded-xl ${color} text-white`}>
+          <Icon className="h-6 w-6" />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export default function PracticePage() {
+  return (
+    <div className="container mx-auto py-8 px-4 max-w-6xl">
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold tracking-tight">Practice Dashboard</h1>
+        <p className="mt-2 text-muted-foreground">
+          Spaced repetition, daily katas, and interview prep — all in one place.
+        </p>
+      </div>
+
+      <PracticeDashboard />
     </div>
   )
 }

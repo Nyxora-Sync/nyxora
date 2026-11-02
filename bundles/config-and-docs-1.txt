@@ -307,7 +307,7 @@ Nyxora Sync is open source and welcomes contributions:
 - Share a project for the showcase
 - Help with translations or design improvements
 
-Open a [GitHub issue](https://github.com/Nyxora-Sync/nyxora-sync/issues) or submit a pull request. Read the [contribution guide](https://nyxora-sync.tech/contribute) and [Code of Conduct](https://nyxora-sync.tech/code-of-conduct) first.
+Open a [GitHub issue](https://github.com/Nyxora-Sync/nyxora/issues) or submit a pull request. Read the [contribution guide](https://nyxora-sync.tech/contribute) and [Code of Conduct](https://nyxora-sync.tech/code-of-conduct) first.
 
 ## Deployment
 

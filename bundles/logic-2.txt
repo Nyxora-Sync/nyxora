@@ -1,0 +1,1040 @@
+
+===== FILE: src/lib/search.ts =====
+import { tracks } from '@/lib/curriculum'
+import { resourcesData } from '@/lib/resources-data'
+import { faqSections } from '@/lib/faq'
+import { canonicalLearnPath } from '@/lib/seo'
+import { communityEnabled } from '@/lib/community'
+import { prisma } from '@/lib/db'
+
+export type SearchResultType =
+  | 'page'
+  | 'track'
+  | 'module'
+  | 'lesson'
+  | 'resource'
+  | 'faq'
+  | 'project'
+
+export interface SearchResult {
+  id: string
+  type: SearchResultType
+  title: string
+  description: string
+  href: string
+  meta?: string
+  external?: boolean
+  keywords?: string
+}
+
+const staticPages: SearchResult[] = [
+  {
+    id: 'page-home',
+    type: 'page',
+    title: 'Home',
+    description: 'Start learning web development and programming languages for free with written lessons, projects, progress tracking, and a community.',
+    href: '/',
+    keywords: 'mern python c c++ c# mongodb express react node full stack free curriculum',
+  },
+  {
+    id: 'page-learn',
+    type: 'page',
+    title: 'All Lessons',
+    description: 'Browse web development and programming language paths, module by module.',
+    href: '/learn',
+    keywords: 'curriculum lessons modules tracks beginner developer specializations languages',
+  },
+  {
+    id: 'page-languages',
+    type: 'page',
+    title: 'Programming Language Paths',
+    description: 'Learn C, C++, C#, and Python from beginner to mastery with written lessons and projects.',
+    href: '/learn/languages',
+    keywords: 'learn c learn c++ learn c# learn python programming languages beginner mastery',
+  },
+  {
+    id: 'page-roadmap',
+    type: 'page',
+    title: 'Learning Roadmap',
+    description: 'See the recommended order through web foundations, the MERN stack, language paths, advanced topics, and specializations.',
+    href: '/roadmap',
+    keywords: 'roadmap path order study plan specializations nextjs devops react native python c c++ c#',
+  },
+  {
+    id: 'page-resources',
+    type: 'page',
+    title: 'Free Resource Directory',
+    description: 'A searchable directory of free videos, articles, docs, courses, books, and tools.',
+    href: '/resources',
+    keywords: 'resources directory links tutorials videos docs free',
+  },
+  {
+    id: 'page-playground',
+    type: 'page',
+    title: 'Code Playground',
+    description: 'Edit HTML, CSS, and JavaScript in your browser and see the result live.',
+    href: '/playground',
+    keywords: 'playground editor html css javascript live preview sandbox',
+  },
+  {
+    id: 'page-community',
+    type: 'page',
+    title: 'Community',
+    description: 'Learn how discussions, public profiles, and the project showcase work.',
+    href: '/community',
+    keywords: 'community discussion profiles learners',
+  },
+  {
+    id: 'page-showcase',
+    type: 'page',
+    title: 'Project Showcase',
+    description: 'Browse projects built by learners, leave feedback, and share your own work.',
+    href: '/community/showcase',
+    keywords: 'projects showcase portfolio feedback upvote',
+  },
+  {
+    id: 'page-contribute',
+    type: 'page',
+    title: 'Contribute',
+    description: 'Help improve lessons, examples, translations, accessibility, and the codebase.',
+    href: '/contribute',
+    keywords: 'contribute github pull request translation corrections',
+  },
+  {
+    id: 'page-about',
+    type: 'page',
+    title: 'About Nyxora Sync',
+    description: 'Why the curriculum exists, how it is built, and what it does not claim to be.',
+    href: '/about',
+    keywords: 'about mission project open source',
+  },
+  {
+    id: 'page-faq',
+    type: 'page',
+    title: 'Frequently Asked Questions',
+    description: 'Answers about the tracks, accounts, progress, playground, community, and licenses.',
+    href: '/faq',
+    keywords: 'faq questions help answers',
+  },
+  {
+    id: 'page-contact',
+    type: 'page',
+    title: 'Contact',
+    description: 'Report a problem, send a correction, or ask a privacy or account question.',
+    href: '/contact',
+    keywords: 'contact support bug report feedback privacy',
+  },
+  {
+    id: 'page-code-of-conduct',
+    type: 'page',
+    title: 'Code of Conduct',
+    description: 'The standards for discussions, project feedback, and community spaces.',
+    href: '/code-of-conduct',
+    keywords: 'community rules conduct behaviour safety',
+  },
+  {
+    id: 'page-privacy',
+    type: 'page',
+    title: 'Privacy Policy',
+    description: 'What the site stores, where it lives, and how to remove it.',
+    href: '/privacy',
+    keywords: 'privacy data cookies local storage account deletion',
+  },
+  {
+    id: 'page-terms',
+    type: 'page',
+    title: 'Terms of Service',
+    description: 'The terms for using Nyxora Sync and the licenses that cover its content and code.',
+    href: '/terms',
+    keywords: 'terms license copyright cc by-sa mit',
+  },
+  {
+    id: 'page-accessibility',
+    type: 'page',
+    title: 'Accessibility',
+    description: 'The accessibility approach and how to report a barrier on the site.',
+    href: '/accessibility',
+    keywords: 'accessibility keyboard screen reader wcag reduced motion',
+  },
+]
+
+const typeOrder: Record<SearchResultType, number> = {
+  lesson: 0,
+  module: 1,
+  track: 2,
+  page: 3,
+  faq: 4,
+  resource: 5,
+  project: 6,
+}
+
+let cachedStaticEntries: SearchResult[] | null = null
+
+function getStaticEntries(): SearchResult[] {
+  if (cachedStaticEntries) return cachedStaticEntries
+
+  const entries = new Map<string, SearchResult>()
+
+  for (const page of staticPages) {
+    entries.set(page.href, page)
+  }
+
+  for (const track of tracks) {
+    entries.set(`/learn/${track.key}`, {
+      id: `track-${track.key}`,
+      type: 'track',
+      title: track.name,
+      description: track.description,
+      href: `/learn/${track.key}`,
+      meta: `${track.modules.length} modules`,
+      keywords: `${track.key} track modules curriculum`,
+    })
+
+    for (const mod of track.modules) {
+      const moduleHref = canonicalLearnPath(track.key, mod.key)
+      if (!entries.has(moduleHref)) {
+        entries.set(moduleHref, {
+          id: `module-${mod.key}`,
+          type: 'module',
+          title: mod.name,
+          description: mod.description,
+          href: moduleHref,
+          meta: `${mod.lessons.length} lessons · about ${mod.estimatedHours} hours`,
+          keywords: `${track.name} ${mod.key} ${mod.lessons.map((lesson) => lesson.title).join(' ')}`,
+        })
+      }
+
+      for (const lesson of mod.lessons) {
+        const lessonHref = canonicalLearnPath(track.key, mod.key, lesson.id)
+        if (!entries.has(lessonHref)) {
+          entries.set(lessonHref, {
+            id: `lesson-${lesson.id}`,
+            type: 'lesson',
+            title: lesson.title,
+            description: lesson.description,
+            href: lessonHref,
+            meta: `${mod.name} · ${lesson.estimatedMinutes} min · ${lesson.difficulty}`,
+            keywords: [
+              track.name,
+              mod.name,
+              lesson.difficulty,
+              ...lesson.keyTakeaways,
+              ...lesson.resources.map((resource) => resource.title),
+            ].join(' '),
+          })
+        }
+      }
+    }
+  }
+
+  for (const resource of resourcesData) {
+    entries.set(resource.url, {
+      id: `resource-${resource.id}`,
+      type: 'resource',
+      title: resource.title,
+      description: resource.description,
+      href: resource.url,
+      external: true,
+      meta: `${resource.provider} · ${resource.type} · ${resource.level}`,
+      keywords: `${resource.topic} ${resource.tags.join(' ')} ${resource.provider}`,
+    })
+  }
+
+  for (const section of faqSections) {
+    for (const item of section.items) {
+      entries.set(`/faq#${item.slug}`, {
+        id: `faq-${item.slug}`,
+        type: 'faq',
+        title: item.question,
+        description: item.answer,
+        href: `/faq#${item.slug}`,
+        meta: `FAQ · ${section.title}`,
+        keywords: `${section.title} ${section.description} ${item.answer}`,
+      })
+    }
+  }
+
+  cachedStaticEntries = [...entries.values()]
+  return cachedStaticEntries
+}
+
+function normalize(value: string): string {
+  return value.toLowerCase().replace(/\s+/g, ' ').trim()
+}
+
+function queryTerms(query: string): string[] {
+  return normalize(query).split(' ').filter(Boolean)
+}
+
+function scoreEntry(entry: SearchResult, normalizedQuery: string, terms: string[]): number {
+  const title = normalize(entry.title)
+  const meta = normalize(entry.meta ?? '')
+  const keywords = normalize(entry.keywords ?? '')
+  const haystack = `${title} ${normalize(entry.description)} ${meta} ${keywords}`
+
+  if (!terms.every((term) => haystack.includes(term))) return -1
+
+  let score = typeOrder[entry.type] * 0.1
+
+  if (title === normalizedQuery) score += 100
+  else if (title.startsWith(normalizedQuery)) score += 60
+  else if (title.includes(normalizedQuery)) score += 30
+
+  for (const term of terms) {
+    if (title.includes(term)) score += 12
+    if (meta.includes(term)) score += 4
+    if (keywords.includes(term)) score += 2
+  }
+
+  return score
+}
+
+function sortResults(results: SearchResult[], normalizedQuery: string, terms: string[]): SearchResult[] {
+  return results
+    .map((entry) => ({ entry, score: scoreEntry(entry, normalizedQuery, terms) }))
+    .filter((item) => item.score >= 0)
+    .sort((a, b) => b.score - a.score || a.entry.title.localeCompare(b.entry.title))
+    .map((item) => item.entry)
+}
+
+async function searchProjects(terms: string[]): Promise<SearchResult[]> {
+  if (!communityEnabled() || terms.length === 0) return []
+
+  try {
+    const projects = await prisma.project.findMany({
+      where: {
+        OR: terms.map((term) => ({
+          OR: [
+            { title: { contains: term, mode: 'insensitive' } },
+            { description: { contains: term, mode: 'insensitive' } },
+            { tags: { has: term } },
+            { modules: { has: term } },
+          ],
+        })),
+      },
+      orderBy: [{ upvotes: 'desc' }, { createdAt: 'desc' }],
+      take: 8,
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        tags: true,
+        track: true,
+        upvotes: true,
+      },
+    })
+
+    return projects.map((project) => ({
+      id: `project-${project.id}`,
+      type: 'project' as const,
+      title: project.title,
+      description: project.description,
+      href: `/community/showcase/${project.id}`,
+      meta: `${project.track} track · ${project.upvotes} ${project.upvotes === 1 ? 'upvote' : 'upvotes'}`,
+      keywords: project.tags.join(' '),
+    }))
+  } catch {
+    // Search should still work when the community database is unavailable.
+    return []
+  }
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+
+  const timeout = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve(fallback), ms)
+  })
+
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer)
+  })
+}
+
+export async function searchSite(query: string): Promise<SearchResult[]> {
+  const cleanedQuery = query.trim().slice(0, 120)
+  const normalizedQuery = normalize(cleanedQuery)
+  if (!normalizedQuery) return []
+
+  const terms = queryTerms(cleanedQuery).slice(0, 8)
+  const staticResults = sortResults(getStaticEntries(), normalizedQuery, terms)
+  // Static results should never wait on a slow or unavailable community database.
+  const projectResults = sortResults(
+    await withTimeout<SearchResult[]>(searchProjects(terms), 1500, []),
+    normalizedQuery,
+    terms
+  )
+
+  return [...staticResults, ...projectResults]
+}
+
+export function groupSearchResults(results: SearchResult[]): Array<{
+  type: SearchResultType
+  label: string
+  results: SearchResult[]
+}> {
+  const labels: Record<SearchResultType, string> = {
+    lesson: 'Lessons',
+    module: 'Modules',
+    track: 'Tracks',
+    page: 'Pages',
+    faq: 'FAQ',
+    resource: 'Resources',
+    project: 'Showcase projects',
+  }
+
+  const grouped = new Map<SearchResultType, SearchResult[]>()
+  for (const result of results) {
+    const list = grouped.get(result.type) ?? []
+    list.push(result)
+    grouped.set(result.type, list)
+  }
+
+  return ([...grouped.entries()] as Array<[SearchResultType, SearchResult[]]>)
+    .sort(([a], [b]) => typeOrder[a] - typeOrder[b])
+    .map(([type, items]) => ({ type, label: labels[type], results: items }))
+}
+
+
+===== FILE: src/lib/security.test.ts =====
+import { describe, expect, it } from 'vitest'
+import { getRequestIp, hashIp } from '@/lib/security'
+
+describe('request security helpers', () => {
+  it('takes the first forwarded address', () => {
+    const request = new Request('https://example.com', {
+      headers: { 'x-forwarded-for': '203.0.113.9, 10.0.0.1' },
+    })
+    expect(getRequestIp(request)).toBe('203.0.113.9')
+  })
+
+  it('falls back to Cloudflare and real-IP headers', () => {
+    expect(
+      getRequestIp(
+        new Request('https://example.com', {
+          headers: { 'cf-connecting-ip': '198.51.100.4' },
+        })
+      )
+    ).toBe('198.51.100.4')
+  })
+
+  it('hashes IPs deterministically without keeping the raw value', () => {
+    const first = hashIp('203.0.113.9')
+    const second = hashIp('203.0.113.9')
+    expect(first).toBe(second)
+    expect(first).not.toContain('203.0.113.9')
+    expect(first).toHaveLength(64)
+  })
+})
+
+
+===== FILE: src/lib/security.ts =====
+import { createHash } from 'node:crypto'
+import { prisma } from '@/lib/db'
+
+const LOGIN_WINDOW_MS = 15 * 60 * 1000
+const MAX_FAILED_LOGINS = 5
+
+/** Best-effort client IP from the proxy headers Vercel and Cloudflare set. */
+export function getRequestIp(request: Request): string {
+  const forwarded = request.headers.get('x-forwarded-for')
+  if (forwarded) return forwarded.split(',')[0]!.trim()
+
+  return (
+    request.headers.get('cf-connecting-ip') ??
+    request.headers.get('x-real-ip') ??
+    'unknown'
+  )
+}
+
+/**
+ * Pseudonymize an IP before storing it. We never persist raw addresses in the
+ * audit log, but repeated abuse can still be correlated.
+ */
+export function hashIp(ip: string): string {
+  const salt = process.env.AUTH_SECRET || 'nyxora-ip-hash'
+  return createHash('sha256').update(`${salt}:${ip}`).digest('hex')
+}
+
+export async function isAdminLoginRateLimited(ipHash: string): Promise<boolean> {
+  const failures = await prisma.adminAuditLog.count({
+    where: {
+      action: 'admin.login_failed',
+      ipHash,
+      createdAt: { gte: new Date(Date.now() - LOGIN_WINDOW_MS) },
+    },
+  })
+
+  return failures >= MAX_FAILED_LOGINS
+}
+
+export async function recordAdminLogin({
+  actorId,
+  ipHash,
+  success,
+}: {
+  actorId?: string | null
+  ipHash: string
+  success: boolean
+}): Promise<void> {
+  try {
+    await prisma.adminAuditLog.create({
+      data: {
+        actorId: success ? actorId ?? null : null,
+        action: success ? 'admin.login_success' : 'admin.login_failed',
+        ipHash,
+      },
+    })
+  } catch (error) {
+    // Audit logging must never turn a valid login into an outage.
+    console.error('Failed to record admin login audit event', error)
+  }
+}
+
+export async function writeAuditLog({
+  actorId,
+  action,
+  targetType,
+  targetId,
+  metadata,
+  ipHash,
+}: {
+  actorId: string
+  action: string
+  targetType?: string
+  targetId?: string
+  metadata?: Record<string, unknown>
+  ipHash?: string
+}): Promise<void> {
+  await prisma.adminAuditLog.create({
+    data: {
+      actorId,
+      action,
+      targetType,
+      targetId,
+      metadata: metadata as object | undefined,
+      ipHash,
+    },
+  })
+}
+
+
+===== FILE: src/lib/seo.ts =====
+import type { Metadata } from 'next'
+
+// Static output (sitemap, canonical links, Open Graph URLs) is generated at
+// build time. Fall back to the production custom domain when no explicit
+// public URL is supplied, while keeping local development on localhost.
+const fallbackUrl =
+  process.env.NODE_ENV === 'production'
+    ? 'https://nyxora-sync.tech'
+    : 'http://localhost:3000'
+
+const configuredUrl =
+  process.env.NEXT_PUBLIC_SITE_URL ||
+  (process.env.VERCEL_PROJECT_PRODUCTION_URL
+    ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+    : fallbackUrl)
+
+export const siteUrl = configuredUrl.replace(/\/+$/, '')
+export const siteName = 'Nyxora Sync'
+export const defaultDescription =
+  'Learn web development and programming languages for free. MERN, C, C++, C#, and Python paths from beginner to mastery, with written lessons, projects, playgrounds, and progress tracking.'
+export const defaultOgImage = '/og-image.jpg'
+
+// Modules shared by the beginner and developer tracks render the same lessons.
+// The developer-track copies are canonical so search engines index one URL.
+const sharedCoreModuleKeys = new Set(['node-express', 'mongodb', 'react', 'fullstack'])
+const canonicalSharedTrack = 'developer'
+
+export function canonicalTrackForModule(trackKey: string, moduleKey: string): string {
+  return sharedCoreModuleKeys.has(moduleKey) ? canonicalSharedTrack : trackKey
+}
+
+export function canonicalLearnPath(
+  trackKey: string,
+  moduleKey?: string,
+  lessonId?: string
+): string {
+  if (!moduleKey) return `/learn/${trackKey}`
+  const canonicalTrack = canonicalTrackForModule(trackKey, moduleKey)
+  return `/learn/${canonicalTrack}/${moduleKey}${lessonId ? `/${lessonId}` : ''}`
+}
+
+interface PageMetadataOptions {
+  title: string
+  description: string
+  path: string
+  type?: 'website' | 'article'
+  noIndex?: boolean
+  keywords?: string[]
+}
+
+export function absoluteUrl(path = '/'): string {
+  const normalized = path.startsWith('/') ? path : `/${path}`
+  return new URL(normalized, siteUrl).toString()
+}
+
+/**
+ * Per-page metadata with a canonical URL and explicit social images.
+ * The root layout only provides defaults; pages must opt into their canonical.
+ */
+export function pageMetadata({
+  title,
+  description,
+  path,
+  type = 'website',
+  noIndex = false,
+  keywords,
+}: PageMetadataOptions): Metadata {
+  const url = absoluteUrl(path)
+
+  return {
+    title,
+    description,
+    keywords,
+    alternates: { canonical: path },
+    robots: noIndex
+      ? { index: false, follow: false }
+      : { index: true, follow: true },
+    openGraph: {
+      type,
+      siteName,
+      locale: 'en_US',
+      title,
+      description,
+      url,
+      images: [
+        {
+          url: defaultOgImage,
+          width: 1200,
+          height: 630,
+          alt: `${siteName} — free web development and programming curriculum`,
+        },
+      ],
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title,
+      description,
+      images: [defaultOgImage],
+    },
+  }
+}
+
+
+===== FILE: src/lib/social.ts =====
+import { prisma } from '@/lib/db'
+
+export type FollowRelationshipStatus =
+  | 'self'
+  | 'none'
+  | 'following'
+  | 'pending_outgoing'
+  | 'pending_incoming'
+
+export interface FollowRelationship {
+  status: FollowRelationshipStatus
+  /** Present for an incoming pending request, so the profile can accept it. */
+  requestId: string | null
+}
+
+export interface ProfileViewCounts {
+  allTime: number
+  month: number
+  week: number
+  day: number
+}
+
+function startOfUtcDay(date = new Date()): Date {
+  return new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())
+  )
+}
+
+/**
+ * Visitor counts are for unique people, not page loads. ProfileView stores at
+ * most one row per viewer per UTC day, and these queries count distinct
+ * viewer keys across the requested window.
+ */
+export async function getProfileViewCounts(
+  profileUserId: string
+): Promise<ProfileViewCounts> {
+  const now = new Date()
+  const dayStart = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+  const weekStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+  const monthStart = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)
+  )
+
+  const rows = await prisma.$queryRaw<
+    Array<{ allTime: number; month: number; week: number; day: number }>
+  >`
+    SELECT
+      COUNT(DISTINCT "viewerKey")::int AS "allTime",
+      COUNT(DISTINCT "viewerKey") FILTER (WHERE "viewedAt" >= ${monthStart})::int AS "month",
+      COUNT(DISTINCT "viewerKey") FILTER (WHERE "viewedAt" >= ${weekStart})::int AS "week",
+      COUNT(DISTINCT "viewerKey") FILTER (WHERE "viewedAt" >= ${dayStart})::int AS "day"
+    FROM "ProfileView"
+    WHERE "profileUserId" = ${profileUserId}
+  `
+
+  return rows[0] ?? { allTime: 0, month: 0, week: 0, day: 0 }
+}
+
+async function anonymousViewerKey(request: Request): Promise<string> {
+  const ip =
+    request.headers.get('cf-connecting-ip') ??
+    request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
+    'unknown'
+  const userAgent = request.headers.get('user-agent') ?? ''
+  const secret = process.env.AUTH_SECRET ?? 'nyxora-profile-view'
+  const input = new TextEncoder().encode(`${ip}\n${userAgent}\n${secret}`)
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', input)
+  const hash = Array.from(new Uint8Array(digest))
+    .slice(0, 16)
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('')
+  return `anon:${hash}`
+}
+
+/**
+ * Records one visit per visitor per day. Self-views are deliberately ignored.
+ * A failure here must never prevent someone from viewing a profile.
+ */
+export async function recordProfileView(
+  request: Request,
+  profileUserId: string,
+  viewerId: string | null
+): Promise<void> {
+  if (viewerId === profileUserId) return
+
+  try {
+    const viewerKey = viewerId
+      ? `user:${viewerId}`
+      : await anonymousViewerKey(request)
+    const now = new Date()
+    const viewDate = startOfUtcDay(now)
+
+    await prisma.profileView.upsert({
+      where: {
+        profileUserId_viewerKey_viewDate: {
+          profileUserId,
+          viewerKey,
+          viewDate,
+        },
+      },
+      create: {
+        profileUserId,
+        viewerId,
+        viewerKey,
+        viewDate,
+      },
+      update: { viewedAt: now },
+    })
+  } catch {
+    // Visitor analytics are best-effort.
+  }
+}
+
+export async function getFollowRelationship(
+  viewerId: string | null,
+  profileUserId: string
+): Promise<FollowRelationship> {
+  if (!viewerId || viewerId === profileUserId) {
+    return {
+      status: viewerId === profileUserId ? 'self' : 'none',
+      requestId: null,
+    }
+  }
+
+  const rows = await prisma.follow.findMany({
+    where: {
+      OR: [
+        { followerId: viewerId, followingId: profileUserId },
+        { followerId: profileUserId, followingId: viewerId },
+      ],
+    },
+    select: {
+      id: true,
+      followerId: true,
+      followingId: true,
+      status: true,
+    },
+  })
+
+  const outgoing = rows.find((row) => row.followerId === viewerId)
+  const incoming = rows.find((row) => row.followerId === profileUserId)
+
+  if (outgoing?.status === 'accepted') {
+    return { status: 'following', requestId: null }
+  }
+  if (outgoing?.status === 'pending') {
+    return { status: 'pending_outgoing', requestId: null }
+  }
+  if (incoming?.status === 'pending') {
+    return { status: 'pending_incoming', requestId: incoming.id }
+  }
+  return { status: 'none', requestId: null }
+}
+
+export async function getFollowCounts(userId: string) {
+  const rows = await prisma.$queryRaw<
+    Array<{ followers: number; following: number }>
+  >`
+    SELECT
+      COUNT(*) FILTER (WHERE "followingId" = ${userId} AND status = 'accepted')::int AS "followers",
+      COUNT(*) FILTER (WHERE "followerId" = ${userId} AND status = 'accepted')::int AS "following"
+    FROM "Follow"
+  `
+  return rows[0] ?? { followers: 0, following: 0 }
+}
+
+export function actorName(name: string | null | undefined): string {
+  return name?.trim() || 'A learner'
+}
+
+
+===== FILE: src/lib/time.ts =====
+import { formatDistanceToNow } from 'date-fns'
+
+export function timeAgo(iso: string): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return ''
+  return formatDistanceToNow(date, { addSuffix: true })
+}
+
+export function shortDate(iso: string): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toLocaleDateString(undefined, { month: 'short', year: 'numeric' })
+}
+
+
+===== FILE: src/lib/utils.ts =====
+import { type ClassValue, clsx } from 'clsx'
+import { twMerge } from 'tailwind-merge'
+
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs))
+}
+
+// ============================================================
+// Accent color system
+// Tailwind v4 can't generate classes from dynamic strings, so we
+// keep a static map of literal class names for every accent we use.
+// ============================================================
+
+export type AccentColor =
+  | 'emerald' | 'violet' | 'amber' | 'rose' | 'blue' | 'indigo' | 'slate' | 'cyan'
+
+export interface AccentClasses {
+  /** Icon container: soft bg + strong fg, works in light & dark */
+  icon: string
+  /** Strong text color */
+  text: string
+  /** Soft background tint */
+  bgSoft: string
+  /** Soft border tint */
+  borderSoft: string
+  /** Badge-ish soft pill */
+  pill: string
+  /** Gradient bar (for top borders) */
+  gradient: string
+}
+
+export const accent: Record<AccentColor, AccentClasses> = {
+  emerald: {
+    icon: 'bg-emerald-100 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400',
+    text: 'text-emerald-700 dark:text-emerald-400',
+    bgSoft: 'bg-emerald-500/10',
+    borderSoft: 'border-emerald-500/40',
+    pill: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400',
+    gradient: 'from-emerald-500 to-emerald-600',
+  },
+  violet: {
+    icon: 'bg-violet-100 text-violet-600 dark:bg-violet-500/15 dark:text-violet-400',
+    text: 'text-violet-600 dark:text-violet-400',
+    bgSoft: 'bg-violet-500/10',
+    borderSoft: 'border-violet-500/40',
+    pill: 'bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-400',
+    gradient: 'from-violet-500 to-violet-600',
+  },
+  amber: {
+    icon: 'bg-amber-100 text-amber-600 dark:bg-amber-500/15 dark:text-amber-400',
+    text: 'text-amber-600 dark:text-amber-400',
+    bgSoft: 'bg-amber-500/10',
+    borderSoft: 'border-amber-500/40',
+    pill: 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400',
+    gradient: 'from-amber-500 to-amber-600',
+  },
+  rose: {
+    icon: 'bg-rose-100 text-rose-600 dark:bg-rose-500/15 dark:text-rose-400',
+    text: 'text-rose-600 dark:text-rose-400',
+    bgSoft: 'bg-rose-500/10',
+    borderSoft: 'border-rose-500/40',
+    pill: 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-400',
+    gradient: 'from-rose-500 to-rose-600',
+  },
+  blue: {
+    icon: 'bg-blue-100 text-blue-600 dark:bg-blue-500/15 dark:text-blue-400',
+    text: 'text-blue-600 dark:text-blue-400',
+    bgSoft: 'bg-blue-500/10',
+    borderSoft: 'border-blue-500/40',
+    pill: 'bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-400',
+    gradient: 'from-blue-500 to-blue-600',
+  },
+  indigo: {
+    icon: 'bg-indigo-100 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-400',
+    text: 'text-indigo-600 dark:text-indigo-400',
+    bgSoft: 'bg-indigo-500/10',
+    borderSoft: 'border-indigo-500/40',
+    pill: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-400',
+    gradient: 'from-indigo-500 to-indigo-600',
+  },
+  slate: {
+    icon: 'bg-slate-100 text-slate-600 dark:bg-slate-500/15 dark:text-slate-400',
+    text: 'text-slate-600 dark:text-slate-400',
+    bgSoft: 'bg-slate-500/10',
+    borderSoft: 'border-slate-500/40',
+    pill: 'bg-slate-100 text-slate-700 dark:bg-slate-500/15 dark:text-slate-400',
+    gradient: 'from-slate-500 to-slate-600',
+  },
+  cyan: {
+    icon: 'bg-cyan-100 text-cyan-600 dark:bg-cyan-500/15 dark:text-cyan-400',
+    text: 'text-cyan-600 dark:text-cyan-400',
+    bgSoft: 'bg-cyan-500/10',
+    borderSoft: 'border-cyan-500/40',
+    pill: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-500/15 dark:text-cyan-400',
+    gradient: 'from-cyan-500 to-cyan-600',
+  },
+}
+
+export function getAccent(color: string): AccentClasses {
+  return accent[(color as AccentColor)] ?? accent.slate
+}
+
+export function formatDuration(minutes: number): string {
+  if (minutes < 60) return `${minutes} min`
+  const hours = Math.floor(minutes / 60)
+  const mins = minutes % 60
+  return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`
+}
+
+export function calculateLevel(xp: number): { level: number; xpForNext: number; progress: number } {
+  const level = Math.floor(Math.sqrt(xp / 100)) + 1
+  const xpForCurrent = (level - 1) ** 2 * 100
+  const xpForNext = level ** 2 * 100
+  const progress = ((xp - xpForCurrent) / (xpForNext - xpForCurrent)) * 100
+  return { level, xpForNext, progress: Math.min(100, Math.max(0, progress)) }
+}
+
+export function getTrackColor(track: string): string {
+  switch (track) {
+    case 'beginner': return 'emerald'
+    case 'developer': return 'violet'
+    case 'specializations': return 'cyan'
+    case 'c': return 'blue'
+    case 'cpp': return 'indigo'
+    case 'csharp': return 'violet'
+    case 'python': return 'amber'
+    default: return 'slate'
+  }
+}
+
+export function getDifficultyColor(difficulty: string): string {
+  switch (difficulty) {
+    case 'beginner': return 'emerald'
+    case 'intermediate': return 'amber'
+    case 'advanced': return 'rose'
+    default: return 'slate'
+  }
+}
+
+===== FILE: src/mdx-components.tsx =====
+import type { MDXComponents } from 'mdx/types'
+import { Callout, KeyPoint } from '@/components/mdx/callout'
+import { Quiz } from '@/components/mdx/quiz'
+import { Exercise, TryIt } from '@/components/mdx/exercise'
+import { CodeBlock } from '@/components/mdx/code-block'
+
+const components: MDXComponents = {
+  a: ({ href = '', children, ...props }) => {
+    const external = href.startsWith('http')
+    return (
+      <a
+        href={href}
+        {...(external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+        className="font-medium text-emerald-700 underline decoration-emerald-500/40 underline-offset-4 transition-colors hover:text-emerald-600 dark:text-emerald-400"
+        {...props}
+      >
+        {children}
+      </a>
+    )
+  },
+  h2: ({ id, children, ...props }) => (
+    <h2 id={id} className="scroll-mt-24" {...props}>
+      {children}
+    </h2>
+  ),
+  h3: ({ id, children, ...props }) => (
+    <h3 id={id} className="scroll-mt-24" {...props}>
+      {children}
+    </h3>
+  ),
+  pre: CodeBlock,
+  table: ({ children, ...props }) => (
+    <div className="my-6 overflow-x-auto [&>table]:my-0">
+      <table {...props}>{children}</table>
+    </div>
+  ),
+  Callout,
+  KeyPoint,
+  Quiz,
+  Exercise,
+  TryIt,
+}
+
+export function useMDXComponents(): MDXComponents {
+  return components
+}
+
+
+===== FILE: src/middleware/admin.ts =====
+import { auth } from '@/lib/auth/auth'
+import { isAdmin } from '@/lib/admin'
+import { NextResponse } from 'next/server'
+import type { NextRequest } from 'next/server'
+
+export async function adminMiddleware(request: NextRequest) {
+  const session = await auth()
+  
+  if (!session?.user?.email || !isAdmin(session.user.email)) {
+    return NextResponse.redirect(new URL('/auth/signin?error=Unauthorized', request.url))
+  }
+
+  return NextResponse.next()
+}
+
+export const config = {
+  matcher: ['/admin/:path*'],
+}
+
+
+===== FILE: src/types/next-auth.d.ts =====
+import { DefaultSession, DefaultJWT } from 'next-auth'
+
+declare module 'next-auth' {
+  interface Session {
+    user: {
+      id: string
+      isAdmin?: boolean
+    } & DefaultSession['user']
+  }
+}
+
+declare module 'next-auth/jwt' {
+  interface JWT extends DefaultJWT {
+    isAdmin?: boolean
+  }
+}

@@ -94,9 +94,33 @@ import {
   loadProgressState,
   saveProgressState,
   type ProgressState,
+  type PracticeProgress,
 } from '@/lib/progress-state'
 
-export type { LessonProgress, ProgressState } from '@/lib/progress-state'
+export type { LessonProgress, ProgressState, PracticeProgress } from '@/lib/progress-state'
+
+function updatePracticeStreak(current: PracticeProgress): PracticeProgress {
+  const today = getToday()
+  const { lastActiveDate, current: currentStreak, longest } = current.streak
+
+  if (lastActiveDate === today) return current
+
+  const yesterday = new Date()
+  yesterday.setDate(yesterday.getDate() - 1)
+  const yesterdayStr = yesterday.toISOString().split('T')[0]
+
+  const newCurrent = lastActiveDate === yesterdayStr ? currentStreak + 1 : 1
+  const newLongest = Math.max(newCurrent, longest)
+
+  return {
+    ...current,
+    streak: {
+      current: newCurrent,
+      longest: newLongest,
+      lastActiveDate: today,
+    },
+  }
+}
 
 export function useProgress() {
   const [state, setState] = useState<ProgressState>(defaultProgressState)
@@ -205,6 +229,159 @@ export function useProgress() {
     })
   }, [])
 
+  // Practice-specific actions
+  const gradeFlashcard = useCallback((flashcardId: string, grade: number, xpReward: number) => {
+    setState((prev) => {
+      const now = new Date().toISOString()
+      const card = prev.practice.flashcards[flashcardId] ?? {
+        easeFactor: 2.5,
+        interval: 1,
+        repetitions: 0,
+        nextReview: now,
+        lastReviewed: null,
+        lastGrade: null,
+      }
+
+      // SM-2 algorithm
+      let { easeFactor, interval, repetitions } = card
+      if (grade < 2) {
+        repetitions = 0
+        interval = 1
+      } else {
+        repetitions += 1
+        if (repetitions === 1) interval = 1
+        else if (repetitions === 2) interval = 6
+        else interval = Math.ceil(interval * easeFactor)
+      }
+
+      easeFactor = Math.max(1.3, easeFactor + (0.1 - (2.5 - grade) * (0.08 + (2.5 - grade) * 0.02)))
+
+      const nextDate = new Date()
+      nextDate.setDate(nextDate.getDate() + interval)
+
+      const xpDelta = grade >= 2 ? xpReward : 0
+
+      let next: ProgressState = {
+        ...prev,
+        practice: {
+          ...prev.practice,
+          flashcards: {
+            ...prev.practice.flashcards,
+            [flashcardId]: {
+              easeFactor,
+              interval,
+              repetitions,
+              nextReview: nextDate.toISOString(),
+              lastReviewed: now,
+              lastGrade: grade,
+            },
+          },
+        },
+        xp: Math.max(0, prev.xp + xpDelta),
+      }
+
+      if (grade >= 2) {
+        next = { ...next, practice: updatePracticeStreak(next.practice) }
+      }
+
+      saveProgressState(next)
+      return next
+    })
+  }, [])
+
+  const completeKata = useCallback((kataId: string, xpReward: number) => {
+    setState((prev) => {
+      const now = new Date().toISOString()
+      const wasCompleted = prev.practice.katas[kataId]?.completed ?? false
+      const xpDelta = wasCompleted ? 0 : xpReward
+
+      let next: ProgressState = {
+        ...prev,
+        practice: {
+          ...prev.practice,
+          katas: {
+            ...prev.practice.katas,
+            [kataId]: {
+              completed: true,
+              completedAt: now,
+              attempts: (prev.practice.katas[kataId]?.attempts ?? 0) + 1,
+            },
+          },
+        },
+        xp: Math.max(0, prev.xp + xpDelta),
+      }
+
+      if (!wasCompleted) {
+        next = { ...next, practice: updatePracticeStreak(next.practice) }
+      }
+
+      saveProgressState(next)
+      return next
+    })
+  }, [])
+
+  const completeProject = useCallback((projectId: string, xpReward: number, submissionUrl?: string) => {
+    setState((prev) => {
+      const now = new Date().toISOString()
+      const wasCompleted = prev.practice.projects[projectId]?.completed ?? false
+      const xpDelta = wasCompleted ? 0 : xpReward
+
+      let next: ProgressState = {
+        ...prev,
+        practice: {
+          ...prev.practice,
+          projects: {
+            ...prev.practice.projects,
+            [projectId]: {
+              completed: true,
+              completedAt: now,
+              submissionUrl,
+            },
+          },
+        },
+        xp: Math.max(0, prev.xp + xpDelta),
+      }
+
+      if (!wasCompleted) {
+        next = { ...next, practice: updatePracticeStreak(next.practice) }
+      }
+
+      saveProgressState(next)
+      return next
+    })
+  }, [])
+
+  const completeDrill = useCallback((drillId: string, xpReward: number, notes?: string) => {
+    setState((prev) => {
+      const now = new Date().toISOString()
+      const wasCompleted = prev.practice.drills[drillId]?.completed ?? false
+      const xpDelta = wasCompleted ? 0 : xpReward
+
+      let next: ProgressState = {
+        ...prev,
+        practice: {
+          ...prev.practice,
+          drills: {
+            ...prev.practice.drills,
+            [drillId]: {
+              completed: true,
+              completedAt: now,
+              notes,
+            },
+          },
+        },
+        xp: Math.max(0, prev.xp + xpDelta),
+      }
+
+      if (!wasCompleted) {
+        next = { ...next, practice: updatePracticeStreak(next.practice) }
+      }
+
+      saveProgressState(next)
+      return next
+    })
+  }, [])
+
   const resetProgress = useCallback(() => {
     saveProgressState(defaultProgressState)
     setState(defaultProgressState)
@@ -217,6 +394,39 @@ export function useProgress() {
   const getCompletedCount = useCallback(() => {
     return Object.values(state.lessons).filter((l) => l.completed).length
   }, [state.lessons])
+
+  // Practice getters
+  const getFlashcardProgress = useCallback((flashcardId: string) => {
+    return state.practice.flashcards[flashcardId]
+  }, [state.practice.flashcards])
+
+  const getKataProgress = useCallback((kataId: string) => {
+    return state.practice.katas[kataId]
+  }, [state.practice.katas])
+
+  const getProjectProgress = useCallback((projectId: string) => {
+    return state.practice.projects[projectId]
+  }, [state.practice.projects])
+
+  const getDrillProgress = useCallback((drillId: string) => {
+    return state.practice.drills[drillId]
+  }, [state.practice.drills])
+
+  const getPracticeStats = useCallback(() => {
+    const p = state.practice
+    const flashcardsReviewed = Object.values(p.flashcards).filter(f => f.lastReviewed).length
+    const katasCompleted = Object.values(p.katas).filter(k => k.completed).length
+    const projectsCompleted = Object.values(p.projects).filter(p => p.completed).length
+    const drillsCompleted = Object.values(p.drills).filter(d => d.completed).length
+    return {
+      flashcardsReviewed,
+      katasCompleted,
+      projectsCompleted,
+      drillsCompleted,
+      practiceStreak: p.streak.current,
+      practiceLongestStreak: p.streak.longest,
+    }
+  }, [state.practice])
 
   return {
     state,
@@ -231,6 +441,17 @@ export function useProgress() {
     bookmarks: state.bookmarks,
     xp: state.xp,
     streak: state.streak,
+    // Practice
+    gradeFlashcard,
+    completeKata,
+    completeProject,
+    completeDrill,
+    getFlashcardProgress,
+    getKataProgress,
+    getProjectProgress,
+    getDrillProgress,
+    getPracticeStats,
+    practice: state.practice,
   }
 }
 
@@ -246,22 +467,28 @@ export function getModuleProgress(state: ProgressState, lessonIds: string[]) {
 
 ===== FILE: src/lib/admin.ts =====
 /**
- * Maintainer access is controlled by a comma-separated ADMIN_EMAILS
- * environment variable. Keep this server-only; never expose it to clients.
- * The admin user (admin@nyxora.local) is always considered an admin.
+ * Admin access is ONLY granted to the dedicated admin account (admin@nyxora.local).
+ * The ADMIN_EMAILS environment variable is used ONLY for notification purposes
+ * (e.g., where to send moderation reports), NOT for granting admin privileges.
+ * This prevents OAuth users (Google/GitHub) from accidentally gaining admin access.
  */
 export function isAdmin(email: string | null | undefined): boolean {
   if (!email) return false
 
-  // The dedicated admin account always has access
-  if (email.toLowerCase() === 'admin@nyxora.local') return true
+  // Only the dedicated admin account has admin privileges
+  return email.toLowerCase() === 'admin@nyxora.local'
+}
 
-  const admins = (process.env.ADMIN_EMAILS || '')
+/**
+ * Get list of email addresses that should receive admin notifications.
+ * This is separate from admin privileges - these emails receive notifications
+ * but do NOT get admin access to /admin routes.
+ */
+export function getAdminNotificationEmails(): string[] {
+  return (process.env.ADMIN_EMAILS || '')
     .split(',')
     .map((value) => value.trim().toLowerCase())
     .filter(Boolean)
-
-  return admins.includes(email.trim().toLowerCase())
 }
 
 
@@ -571,6 +798,13 @@ export async function loadBadgeData(userId: string) {
     },
     bookmarks: [],
     lastVisited: null,
+    practice: {
+      flashcards: {},
+      katas: {},
+      projects: {},
+      drills: {},
+      streak: { current: 0, longest: 0, lastActiveDate: null },
+    },
   }
 
   return {
@@ -859,6 +1093,13 @@ function context(overrides: Partial<BadgeContext> = {}): BadgeContext {
       streak: { current: 0, longest: 0, lastActiveDate: null },
       bookmarks: [],
       lastVisited: null,
+      practice: {
+        flashcards: {},
+        katas: {},
+        projects: {},
+        drills: {},
+        streak: { current: 0, longest: 0, lastActiveDate: null },
+      },
     },
     contributions: { projects: 0, comments: 0, upvotes: 0 },
     followers: 0,
@@ -1745,6 +1986,25 @@ export interface Lesson {
   }
   keyTakeaways: string[]
   isProject?: boolean
+  // Portfolio / Fast-Track enhancements
+  portfolioChecklist?: string[]          // What makes this project "portfolio grade"
+  liveDemoUrl?: string                   // Example live deployment URL
+  repoUrl?: string                       // Example GitHub repo URL
+  architectureDiagram?: string           // Text diagram of system architecture
+  techStack?: string[]                   // Key technologies used
+  difficultyNote?: string                // e.g., "Fast-track: 2-3 weeks" or "Deep-dive: 4-6 weeks"
+}
+
+export type ModuleStatus = 'core' | 'advanced' | 'planned'
+
+export interface CapstoneProject {
+  title: string
+  description: string
+  liveDemoUrl: string
+  repoUrl: string
+  techStack: string[]
+  portfolioChecklist: string[]
+  difficultyNote: string
 }
 
 export interface Module {
@@ -1754,9 +2014,17 @@ export interface Module {
   description: string
   order: number
   estimatedHours: number
+  estimatedHoursRange?: string  // e.g., "40-60 hrs" for realistic ranges
   icon: string
   color: string
   lessons: Lesson[]
+  status?: ModuleStatus // defaults to 'core'
+  // Outcome-driven fields
+  outcomes?: string[]           // "What you'll be able to build/earn"
+  capstoneProject?: CapstoneProject
+  isCapstone?: boolean
+  isFastTrackModule?: boolean   // Part of job-ready fast track
+  isExperimental?: boolean      // Advanced/experimental content, hidden by default in UI
 }
 
 export interface Track {
@@ -1768,6 +2036,12 @@ export interface Track {
   icon: string
   color: string
   modules: Module[]
+  isFastTrack?: boolean          // Highlights the job-ready fast track
+  fastTrackDescription?: string  // What the fast track covers
+  // Computed properties (added when transformed for display)
+  duration?: string
+  lessons?: number
+  modulesList?: Array<{ key: string; name: string; weeks: number; lessons: number }>
 }
 
 // ============================================================
@@ -1782,8 +2056,35 @@ const beginnerModules: Module[] = [
     description: 'HTML, CSS, JavaScript, Git, and developer tools. Start from absolute zero.',
     order: 1,
     estimatedHours: 120,
+    estimatedHoursRange: '40-60 hrs',
     icon: 'BookOpen',
     color: 'emerald',
+    isFastTrackModule: true,
+    outcomes: [
+      'Build responsive, accessible static websites with HTML5 and CSS3',
+      'Write modern JavaScript (ES6+) for DOM manipulation and API calls',
+      'Use Git/GitHub for version control and collaboration',
+      'Deploy static sites to Vercel, Netlify, or GitHub Pages',
+    ],
+    capstoneProject: {
+      title: 'Personal Portfolio Website',
+      description: 'A responsive, accessible portfolio showcasing your projects and skills — deployed live with a clean Git history.',
+      liveDemoUrl: 'https://yourname.vercel.app',
+      repoUrl: 'https://github.com/yourusername/portfolio',
+      techStack: ['HTML5', 'CSS3 (Flexbox/Grid)', 'Vanilla JS', 'Vercel/Netlify'],
+      portfolioChecklist: [
+        'Live deployment on Vercel/Netlify/GitHub Pages',
+        'README with: who you are, what you\'re learning, project links, contact info',
+        'GitHub repo with meaningful commits (not a single dump)',
+        'Mobile-first responsive design (375px, 768px, 1440px)',
+        'Semantic HTML5 structure (header, main, section, footer)',
+        'Clean CSS: custom properties, consistent spacing, no !important abuse',
+        'Accessible: alt text on images, heading hierarchy, focus styles',
+        'At least 3 portfolio projects featured (even if placeholders for now)',
+        'Favicon, meta tags, Open Graph tags for social sharing',
+      ],
+      difficultyNote: 'Fast-track: 1-2 weeks · Deep-dive: 3-4 weeks',
+    },
     lessons: [
       {
         id: 'foundations-how-web-works',
@@ -2126,6 +2427,24 @@ const beginnerModules: Module[] = [
             isVerified: true,
           },
         ],
+        // Portfolio / Fast-Track metadata
+        isProject: true,
+        portfolioChecklist: [
+          'Live deployment on Vercel/Netlify/GitHub Pages',
+          'README with: who you are, what you\'re learning, project links, contact info',
+          'GitHub repo with meaningful commits (not a single dump)',
+          'Mobile-first responsive design (375px, 768px, 1440px)',
+          'Semantic HTML5 structure (header, main, section, footer)',
+          'Clean CSS: custom properties, consistent spacing, no !important abuse',
+          'Accessible: alt text on images, heading hierarchy, focus styles',
+          'At least 3 portfolio projects featured (even if placeholders for now)',
+          'Favicon, meta tags, Open Graph tags for social sharing',
+        ],
+        liveDemoUrl: 'https://yourname.vercel.app',
+        repoUrl: 'https://github.com/yourusername/portfolio',
+        architectureDiagram: `Static HTML/CSS/JS → Vercel/Netlify → CDN`,
+        techStack: ['HTML5', 'CSS3 (Flexbox/Grid)', 'Vanilla JS', 'Vercel/Netlify'],
+        difficultyNote: 'Fast-track: 1-2 weeks · Deep-dive: 3-4 weeks',
       },
     ],
   },
@@ -2136,8 +2455,35 @@ const beginnerModules: Module[] = [
     description: 'Server-side JavaScript, REST APIs, authentication, and testing.',
     order: 2,
     estimatedHours: 60,
+    estimatedHoursRange: '30-45 hrs',
     icon: 'Server',
     color: 'emerald',
+    isFastTrackModule: true,
+    outcomes: [
+      'Build and deploy REST APIs with Express.js',
+      'Implement JWT authentication with bcrypt password hashing',
+      'Write unit and integration tests with Jest and Supertest',
+      'Handle errors gracefully with centralized error middleware',
+    ],
+    capstoneProject: {
+      title: 'Task Manager REST API',
+      description: 'A complete REST API with authentication, CRUD operations, validation, and tests — ready for a frontend to consume.',
+      liveDemoUrl: 'https://task-api.onrender.com',
+      repoUrl: 'https://github.com/yourusername/task-api',
+      techStack: ['Node.js', 'Express', 'JWT', 'Zod', 'Jest', 'Supertest', 'MongoDB', 'Render'],
+      portfolioChecklist: [
+        'Live deployment on Render/Railway with health endpoint',
+        'README with: problem statement, API docs, setup instructions, demo credentials',
+        'GitHub repo with clean commit history',
+        'Authentication: register, login, logout, protected routes',
+        'Full CRUD for at least 2 resources with validation (Zod)',
+        'Error handling: proper HTTP status codes, consistent error format',
+        'Tests: unit + integration (auth, CRUD) with >80% coverage',
+        'CI pipeline (GitHub Actions) running tests on every push',
+        'Environment variables documented (.env.example)',
+      ],
+      difficultyNote: 'Fast-track: 2-3 weeks · Deep-dive: 4-5 weeks',
+    },
     lessons: [
       {
         id: 'node-intro',
@@ -2341,8 +2687,33 @@ const beginnerModules: Module[] = [
     description: 'NoSQL databases, data modeling, relationships, and aggregations.',
     order: 3,
     estimatedHours: 40,
+    estimatedHoursRange: '20-30 hrs',
     icon: 'Database',
     color: 'emerald',
+    isFastTrackModule: true,
+    outcomes: [
+      'Model data with Mongoose schemas, validation, and middleware',
+      'Design relationships with referencing vs embedding strategies',
+      'Build aggregation pipelines for analytics and reporting',
+      'Secure MongoDB with authentication, indexes, and least-privilege users',
+    ],
+    capstoneProject: {
+      title: 'Blog Platform API with MongoDB',
+      description: 'A content API demonstrating advanced Mongoose patterns: relationships, virtuals, aggregation, and middleware.',
+      liveDemoUrl: 'https://blog-api.onrender.com',
+      repoUrl: 'https://github.com/yourusername/blog-api',
+      techStack: ['MongoDB', 'Mongoose', 'Express', 'Aggregation Pipeline', 'MongoDB Atlas'],
+      portfolioChecklist: [
+        'Models for User, Post, Comment with proper relationships',
+        'Virtuals for computed fields (e.g., post.authorName)',
+        'Middleware for slugs, timestamps, cascade deletes',
+        'Aggregation: posts by category, popular tags, author stats',
+        'Indexes for query performance (compound, text, partial)',
+        'Validation at schema and controller level',
+        'Seed script for reproducible development data',
+      ],
+      difficultyNote: 'Fast-track: 1-2 weeks · Deep-dive: 2-3 weeks',
+    },
     lessons: [
       {
         id: 'mongodb-intro',
@@ -2437,7 +2808,7 @@ const beginnerModules: Module[] = [
           {
             type: 'article',
             title: 'MongoDB Data Modeling Best Practices',
-            url: 'https://www.mongodb.com/developer/products/mongodb/mongodb-schema-design-best-practices/',
+            url: 'https://www.mongodb.com/docs/manual/data-modeling/',
             provider: 'MongoDB',
             isVerified: true,
           },
@@ -2483,8 +2854,36 @@ const beginnerModules: Module[] = [
     description: 'Modern React with hooks, routing, state management, and performance.',
     order: 4,
     estimatedHours: 80,
+    estimatedHoursRange: '40-60 hrs',
     icon: 'Atom',
     color: 'emerald',
+    isFastTrackModule: true,
+    outcomes: [
+      'Build interactive UIs with React hooks, Context, and React Router',
+      'Manage forms with React Hook Form + Zod validation',
+      'Fetch and cache server state with TanStack Query',
+      'Optimize performance with memo, lazy loading, and profiling',
+    ],
+    capstoneProject: {
+      title: 'E-Commerce Frontend',
+      description: 'A production-ready React SPA with cart, checkout flow, authentication, and product catalog — ready to connect to any backend.',
+      liveDemoUrl: 'https://shop.vercel.app',
+      repoUrl: 'https://github.com/yourusername/ecommerce-frontend',
+      techStack: ['React 19', 'React Router', 'TanStack Query', 'React Hook Form', 'Zod', 'Tailwind', 'Zustand', 'Vercel'],
+      portfolioChecklist: [
+        'Live deployment on Vercel with preview deployments',
+        'README with: architecture diagram, tech stack, setup instructions',
+        'GitHub repo with clean commits and PR template',
+        'Pages: Home, Products, Product Detail, Cart, Checkout, Account, Login/Register',
+        'State management: cart (Zustand), server state (TanStack Query), forms (RHF + Zod)',
+        'Authentication flow: protected routes, token refresh, logout',
+        'Responsive: mobile-first at 375px, 768px, 1440px',
+        'Accessible: semantic HTML, ARIA labels, focus management, contrast',
+        'Performance: code-split routes, lazy-loaded images, optimized bundle',
+        'Error boundaries, loading skeletons, empty states on all data screens',
+      ],
+      difficultyNote: 'Fast-track: 2-3 weeks · Deep-dive: 4-6 weeks',
+    },
     lessons: [
       {
         id: 'react-intro',
@@ -2618,7 +3017,7 @@ const beginnerModules: Module[] = [
           {
             type: 'docs',
             title: 'Zustand Documentation',
-            url: 'https://zustand.docs.pmnd.rs/getting-started/introduction',
+            url: 'https://zustand.docs.pmnd.rs/',
             provider: 'Zustand',
             isVerified: true,
           },
@@ -2692,8 +3091,9 @@ const beginnerModules: Module[] = [
           {
             type: 'article',
             title: 'React Performance Optimization Guide',
-            url: 'https://www.debugbear.com/blog/react-performance',
-            provider: 'DebugBear',
+            url: 'https://react.dev/learn/render-and-commit',
+            provider: 'React',
+            isVerified: true,
           },
         ],
       },
@@ -2706,8 +3106,35 @@ const beginnerModules: Module[] = [
     description: 'Integrate everything: architecture, real-time, deployment, and CI/CD.',
     order: 5,
     estimatedHours: 50,
+    estimatedHoursRange: '30-45 hrs',
     icon: 'Layers',
     color: 'emerald',
+    isFastTrackModule: true,
+    outcomes: [
+      'Connect React frontend to Express backend with typed API client',
+      'Implement real-time features with Socket.io',
+      'Deploy full MERN stack: MongoDB Atlas, Render/Railway, Vercel',
+      'Set up CI/CD pipeline with GitHub Actions',
+    ],
+    capstoneProject: {
+      title: 'TeamBoard — Real-Time Collaboration App',
+      description: 'A Trello-like board with real-time updates, drag-and-drop, authentication, and full deployment pipeline.',
+      liveDemoUrl: 'https://teamboard.vercel.app',
+      repoUrl: 'https://github.com/yourusername/teamboard',
+      techStack: ['React 19', 'React Router', 'TanStack Query', 'Tailwind', 'Node 20', 'Express', 'Socket.io', 'Mongoose', 'Zod', 'Vitest', 'MongoDB Atlas', 'Render', 'Vercel', 'GitHub Actions'],
+      portfolioChecklist: [
+        'Live deployment on Vercel/Render/Neon (not localhost)',
+        'README with: problem statement, architecture diagram, tech stack, setup instructions, demo credentials',
+        'GitHub repo with clean commit history (no single "initial commit" dumps)',
+        'At least 3 meaningful integration tests (auth, CRUD, real-time)',
+        'CI pipeline (GitHub Actions) running tests on every push',
+        'Error handling: loading, empty, and error states on every data screen',
+        'Mobile-responsive layout (375px, 768px, 1440px breakpoints)',
+        'Accessibility basics: semantic HTML, labels, contrast, focus management',
+        '30-second demo video or GIF of the core user flow',
+      ],
+      difficultyNote: 'Fast-track: 2-3 weeks · Deep-dive: 4-6 weeks',
+    },
     lessons: [
       {
         id: 'fullstack-architecture',
@@ -2901,11 +3328,30 @@ const beginnerModules: Module[] = [
           {
             type: 'project',
             title: 'Build a MERN E-commerce Store',
-            url: 'https://www.freecodecamp.org/news/how-to-build-a-mern-stack-ecommerce-website/',
+            url: 'https://www.freecodecamp.org/news/search/?query=build+mern+ecommerce',
             provider: 'freeCodeCamp',
             isVerified: true,
           },
         ],
+        // Portfolio / Fast-Track metadata
+        isProject: true,
+        portfolioChecklist: [
+          'Live deployment on Vercel/Render/Neon (not localhost)',
+          'README with: problem statement, architecture diagram, tech stack, setup instructions, demo credentials',
+          'GitHub repo with clean commit history (no single "initial commit" dumps)',
+          'At least 3 meaningful integration tests (auth, CRUD, real-time)',
+          'CI pipeline (GitHub Actions) running tests on every push',
+          'Error handling: loading, empty, and error states on every data screen',
+          'Mobile-responsive layout (375px, 768px, 1440px breakpoints)',
+          'Accessibility basics: semantic HTML, labels, contrast, focus management',
+          '30-second demo video or GIF of the core user flow',
+        ],
+        liveDemoUrl: 'https://teamboard.vercel.app',
+        repoUrl: 'https://github.com/yourusername/teamboard',
+        architectureDiagram: `Client (React + TanStack Query) → API (Express + Socket.io) → MongoDB Atlas
+                                    ↘ WebSocket (real-time)         ↘ Redis (optional, for scaling)`,
+        techStack: ['React 19', 'React Router', 'TanStack Query', 'Tailwind', 'Node 20', 'Express', 'Socket.io', 'Mongoose', 'Zod', 'Vitest', 'MongoDB Atlas', 'Render', 'Vercel', 'GitHub Actions'],
+        difficultyNote: 'Fast-track: 2-3 weeks · Deep-dive: 4-6 weeks',
       },
     ],
   },
@@ -2923,8 +3369,16 @@ const masteryModules: Module[] = [
     description: 'Static types across the whole stack: fundamentals, typed Express APIs, React with TypeScript, and end-to-end type safety.',
     order: 5,
     estimatedHours: 12,
+    estimatedHoursRange: '20-30 hrs',
     icon: 'FileCode',
     color: 'blue',
+    status: 'advanced' as ModuleStatus,
+    outcomes: [
+      'Add static types to JavaScript projects with confidence',
+      'Type Express APIs end-to-end with Zod schema inference',
+      'Write type-safe React components, hooks, and forms',
+      'Share types across client and server for contract-first development',
+    ],
     lessons: [
       {
         id: 'typescript-foundations',
@@ -3063,8 +3517,8 @@ const masteryModules: Module[] = [
           },
           {
             type: 'docs',
-            title: 'OpenAPI TypeScript',
-            url: 'https://openapi-ts.dev/introduction',
+            title: 'OpenAPI TypeScript Generator',
+            url: 'https://github.com/ferdikoomen/openapi-typescript-codegen',
             provider: 'OpenAPI TypeScript',
           },
         ],
@@ -3075,11 +3529,19 @@ const masteryModules: Module[] = [
     id: 'testing',
     key: 'testing',
     name: 'Testing in Depth',
-    description: 'From the testing trophy to Playwright: unit tests, API integration tests, component tests, and end-to-end coverage that runs in CI.',
+    description: 'From the testing trophy to Playwright: unit tests, API integration tests, component tests, and end-to-end coverage that runs in CI. Covers fundamentals; mastery takes months of practice.',
     order: 6,
     estimatedHours: 14,
+    estimatedHoursRange: '25-40 hrs',
     icon: 'FlaskConical',
     color: 'rose',
+    status: 'advanced' as ModuleStatus,
+    outcomes: [
+      'Write unit tests with Vitest that catch real bugs',
+      'Build API integration tests with Supertest and in-memory databases',
+      'Test React components with Testing Library and MSW',
+      'Run end-to-end tests in CI with Playwright',
+    ],
     lessons: [
       {
         id: 'testing-strategy',
@@ -3230,11 +3692,19 @@ const masteryModules: Module[] = [
     id: 'security',
     key: 'security',
     name: 'Security',
-    description: 'Think like an attacker and defend like an engineer: web vulnerabilities, API hardening, advanced auth, and protecting stored data.',
+    description: 'Think like an attacker and defend like an engineer: web vulnerabilities, API hardening, advanced auth, and protecting stored data. Covers fundamentals; mastery takes months of practice.',
     order: 7,
     estimatedHours: 13,
+    estimatedHoursRange: '25-35 hrs',
     icon: 'ShieldCheck',
     color: 'amber',
+    status: 'advanced' as ModuleStatus,
+    outcomes: [
+      'Identify and prevent OWASP Top 10 vulnerabilities (XSS, CSRF, injection)',
+      'Harden Express APIs with Helmet, rate limiting, and validation',
+      'Implement advanced auth: refresh tokens, 2FA/TOTP, OAuth 2.0',
+      'Protect data with encryption, least-privilege DB users, and audit logs',
+    ],
     lessons: [
       {
         id: 'security-web-fundamentals',
@@ -3386,11 +3856,19 @@ const masteryModules: Module[] = [
     id: 'devops',
     key: 'devops',
     name: 'DevOps',
-    description: 'Ship and operate with confidence: containers in depth, production CI/CD, observability, and scaling past a single server.',
+    description: 'Ship and operate with confidence: containers in depth, production CI/CD, observability, and scaling past a single server. Covers fundamentals; mastery takes months of practice.',
     order: 8,
     estimatedHours: 11,
+    estimatedHoursRange: '20-30 hrs',
     icon: 'Container',
     color: 'cyan',
+    status: 'advanced' as ModuleStatus,
+    outcomes: [
+      'Dockerize full-stack apps with multi-stage builds and Compose',
+      'Build production CI/CD pipelines with environments and rollbacks',
+      'Add observability: structured logging, metrics, tracing, and alerts',
+      'Scale horizontally with zero-downtime deployments',
+    ],
     lessons: [
       {
         id: 'devops-docker-deep',
@@ -3423,9 +3901,10 @@ const masteryModules: Module[] = [
           },
           {
             type: 'interactive',
-            title: 'Play with Docker',
-            url: 'https://labs.play-with-docker.com',
+            title: 'Docker Get Started Tutorial',
+            url: 'https://docs.docker.com/get-started/',
             provider: 'Docker',
+            isVerified: true,
           },
         ],
       },
@@ -3510,11 +3989,19 @@ const masteryModules: Module[] = [
     id: 'architecture',
     key: 'architecture',
     name: 'Architecture & System Design',
-    description: 'Design systems that last: modular architecture, background jobs and caching, evolving APIs, and data modeling at scale.',
+    description: 'Design systems that last: modular architecture, background jobs and caching, evolving APIs, and data modeling at scale. Covers fundamentals; mastery takes months of practice.',
     order: 9,
     estimatedHours: 12,
+    estimatedHoursRange: '20-30 hrs',
     icon: 'Network',
     color: 'indigo',
+    status: 'advanced' as ModuleStatus,
+    outcomes: [
+      'Design modular monoliths and extract services when justified',
+      'Implement background jobs with BullMQ and Redis',
+      'Design caching layers with invalidation strategies',
+      'Model data for access patterns at scale',
+    ],
     lessons: [
       {
         id: 'architecture-system-design',
@@ -3638,8 +4125,16 @@ const masteryModules: Module[] = [
     description: 'Measure, then make it fast everywhere: Node.js internals, database queries, and frontend delivery with caching.',
     order: 10,
     estimatedHours: 11,
+    estimatedHoursRange: '20-30 hrs',
     icon: 'Gauge',
     color: 'violet',
+    status: 'advanced' as ModuleStatus,
+    outcomes: [
+      'Profile Node.js apps and fix memory leaks',
+      'Optimize MongoDB queries with indexes and explain plans',
+      'Improve Core Web Vitals: images, fonts, bundles, caching',
+      'Implement Redis cache-aside patterns with invalidation',
+    ],
     lessons: [
       {
         id: 'performance-node-runtime',
@@ -3764,8 +4259,37 @@ const masteryModules: Module[] = [
     description: 'The final build: a multi-tenant SaaS application — then ship it, document it, and use it to open doors.',
     order: 11,
     estimatedHours: 19,
+    estimatedHoursRange: '40-60 hrs',
     icon: 'Rocket',
     color: 'emerald',
+    status: 'advanced' as ModuleStatus,
+    isCapstone: true,
+    outcomes: [
+      'Build a production-grade multi-tenant SaaS with orgs, roles, and billing',
+      'Implement audit logs, background jobs, and real-time features',
+      'Deploy with monitoring, health checks, and CI/CD',
+      'Write a compelling case study that opens doors',
+    ],
+    capstoneProject: {
+      title: 'PulseBoard — Multi-Tenant SaaS Platform',
+      description: 'A production-grade multi-tenant collaboration platform with organizations, role-based access, invites, audit logs, background jobs, and a billing stub.',
+      liveDemoUrl: 'https://pulseboard.vercel.app',
+      repoUrl: 'https://github.com/yourusername/pulseboard',
+      techStack: ['React 19', 'React Router', 'TanStack Query', 'Tailwind', 'Node 20', 'Express', 'Socket.io', 'BullMQ', 'Mongoose', 'Zod', 'Vitest', 'Playwright', 'MongoDB Atlas', 'Redis', 'Render', 'Vercel', 'GitHub Actions', 'Stripe'],
+      portfolioChecklist: [
+        'Live deployment with health monitoring endpoint',
+        'README with: multi-tenant problem statement, architecture diagram, tech stack, setup instructions, demo credentials',
+        'GitHub repo with clean, incremental commit history showing progression',
+        'Cross-tenant isolation tests proving data separation (critical for SaaS)',
+        'CI pipeline with test + lint + type-check on every push',
+        'Four states (loading, empty, error, success) on every data screen',
+        'Mobile-responsive at 375px, 768px, 1440px',
+        'Accessibility: semantic HTML, labels, ARIA where needed, keyboard navigation',
+        '3-minute demo video showing: signup → org creation → invite member → core feature flow',
+        'Case study document: problem, constraints, decisions, outcome, what you\'d change',
+      ],
+      difficultyNote: 'Fast-track: 3-4 weeks · Deep-dive: 6-8 weeks',
+    },
     lessons: [
       {
         id: 'capstone-saas-app',
@@ -3798,11 +4322,32 @@ const masteryModules: Module[] = [
           {
             type: 'project',
             title: 'Build a MERN E-commerce Store',
-            url: 'https://www.freecodecamp.org/news/how-to-build-a-mern-stack-ecommerce-website/',
+            url: 'https://www.freecodecamp.org/news/search/?query=build+mern+ecommerce',
             provider: 'freeCodeCamp',
             isVerified: true,
           },
         ],
+        // Portfolio / Fast-Track metadata
+        isProject: true,
+        portfolioChecklist: [
+          'Live deployment with health monitoring endpoint',
+          'README with: multi-tenant problem statement, architecture diagram, tech stack, setup instructions, demo credentials',
+          'GitHub repo with clean, incremental commit history showing progression',
+          'Cross-tenant isolation tests proving data separation (critical for SaaS)',
+          'CI pipeline with test + lint + type-check on every push',
+          'Four states (loading, empty, error, success) on every data screen',
+          'Mobile-responsive at 375px, 768px, 1440px',
+          'Accessibility: semantic HTML, labels, ARIA where needed, keyboard navigation',
+          '3-minute demo video showing: signup → org creation → invite member → core feature flow',
+          'Case study document: problem, constraints, decisions, outcome, what you\'d change',
+        ],
+        liveDemoUrl: 'https://pulseboard.vercel.app',
+        repoUrl: 'https://github.com/yourusername/pulseboard',
+        architectureDiagram: `Client (React + TanStack Query) → API (Express + Socket.io + BullMQ) → MongoDB Atlas
+                                    ↘ WebSocket (real-time)          ↘ Redis (queue + cache)
+                                    ↘ Worker (background jobs)       ↘ Stripe (billing stub)`,
+        techStack: ['React 19', 'React Router', 'TanStack Query', 'Tailwind', 'Node 20', 'Express', 'Socket.io', 'BullMQ', 'Mongoose', 'Zod', 'Vitest', 'Playwright', 'MongoDB Atlas', 'Redis', 'Render', 'Vercel', 'GitHub Actions', 'Stripe'],
+        difficultyNote: 'Fast-track: 3-4 weeks · Deep-dive: 6-8 weeks',
       },
       {
         id: 'capstone-portfolio-career',
@@ -3847,8 +4392,316 @@ const masteryModules: Module[] = [
 ]
 
 // ============================================================
-// SPECIALIZATIONS TRACK (after the core MERN curriculum)
+// FIRST CLIENT TRACK (8-week freelancing system)
 // ============================================================
+
+const firstClientModules: Module[] = [
+  {
+    id: 'client-m1-offer',
+    key: 'offer-positioning',
+    name: 'Week 1: Offer & Positioning',
+    description: 'Define your high-value freelance offer, select a profitable niche, and price your services for international clients.',
+    order: 1,
+    estimatedHours: 10,
+    icon: 'Briefcase',
+    color: 'indigo',
+    lessons: [
+      {
+        id: 'client-niche-selection',
+        title: 'Choosing a Profitable Freelance Niche',
+        description: 'Why generalists struggle and specialists thrive. How to position yourself around business outcomes, not just code.',
+        order: 1,
+        estimatedMinutes: 120,
+        difficulty: 'beginner',
+        xpReward: 25,
+        keyTakeaways: [
+          'The problem with "full stack developer for hire"',
+          'Matching technical skills to business problems (e.g. e-commerce conversion, SaaS dashboards)',
+          'Targeting international clients on platforms and direct outreach',
+        ],
+        resources: [
+          {
+            type: 'article',
+            title: 'The Positioning Manual for Technical Freelancers',
+            url: 'https://www.freecodecamp.org/news/freelance-web-developer-guide/',
+            provider: 'freeCodeCamp',
+            isVerified: true,
+          },
+        ],
+      },
+      {
+        id: 'client-pricing-strategy',
+        title: 'Pricing for International Clients',
+        description: 'Value-based pricing vs. hourly vs. fixed-scope. How to charge $1,000+ per project instead of competing on $5/hr races to the bottom.',
+        order: 2,
+        estimatedMinutes: 150,
+        difficulty: 'intermediate',
+        xpReward: 30,
+        keyTakeaways: [
+          'Why hourly pricing punishes efficiency',
+          'How to calculate project fees based on client ROI',
+          'Handling currency conversion, Wise, Payoneer, and Stripe safely from emerging markets',
+        ],
+        resources: [
+          {
+            type: 'article',
+            title: 'Double Your Freelancing Rate',
+            url: 'https://doubleyourfreelancing.com/rate/',
+            provider: 'Brennan Dunn',
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'client-m2-portfolio',
+    key: 'portfolio-proof',
+    name: 'Week 2: Portfolio & Case Studies',
+    description: 'Transform your capstone projects into compelling case studies that prove reliability and competence.',
+    order: 2,
+    estimatedHours: 10,
+    icon: 'FileCode',
+    color: 'indigo',
+    lessons: [
+      {
+        id: 'client-case-studies',
+        title: 'Writing Case Studies That Sell',
+        description: 'Structure your projects around Problem → Solution → Outcome. What clients look for before hiring.',
+        order: 1,
+        estimatedMinutes: 120,
+        difficulty: 'beginner',
+        xpReward: 25,
+        keyTakeaways: [
+          'Anatomy of a high-converting freelance portfolio piece',
+          'Highlighting trade-offs, testing, and production deployments',
+          'Recording a 60-second Loom walkthrough for each project',
+        ],
+        resources: [
+          {
+            type: 'article',
+            title: 'How to Showcase Projects in Your Portfolio',
+            url: 'https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-readmes',
+            provider: 'GitHub Guides',
+            isVerified: true,
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'client-m3-outreach',
+    key: 'outreach-channels',
+    name: 'Week 3: Platforms & Cold Outreach',
+    description: 'Master Upwork proposals, Contra/Fiverr profiles, and personalized cold email/DM strategies.',
+    order: 3,
+    estimatedHours: 12,
+    icon: 'Network',
+    color: 'indigo',
+    lessons: [
+      {
+        id: 'client-upwork-mastery',
+        title: 'Winning Upwork Proposals',
+        description: 'How to beat 50+ applicants by focusing the first two sentences entirely on the client\'s problem.',
+        order: 1,
+        estimatedMinutes: 180,
+        difficulty: 'intermediate',
+        xpReward: 35,
+        keyTakeaways: [
+          'Spotting legitimate clients vs. time-wasters',
+          'The 3-part proposal formula (Hook, Relevant Proof, Clear Call to Action)',
+          'Setting up JSS (Job Success Score) foundations from day one',
+        ],
+        resources: [
+          {
+            type: 'article',
+            title: 'Upwork Proposal Guide',
+            url: 'https://www.upwork.com/freelancers/',
+            provider: 'Upwork',
+            isVerified: true,
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'client-m4-proposals',
+    key: 'discovery-proposals',
+    name: 'Week 4: Discovery Calls & Proposals',
+    description: 'Run professional discovery calls, uncover hidden requirements, and send proposals that close.',
+    order: 4,
+    estimatedHours: 10,
+    icon: 'FileCode',
+    color: 'indigo',
+    lessons: [
+      {
+        id: 'client-discovery-call',
+        title: 'Running a 15-Minute Discovery Call',
+        description: 'Ask the right questions, listen 80% of the time, and diagnose whether the client is a good fit.',
+        order: 1,
+        estimatedMinutes: 120,
+        difficulty: 'intermediate',
+        xpReward: 30,
+        keyTakeaways: [
+          'The BANT framework (Budget, Authority, Need, Timeline) adapted for web dev',
+          'Red flags: clients who want everything yesterday for $100',
+          'Transitioning from call to paid proposal',
+        ],
+        resources: [
+          {
+            type: 'article',
+            title: 'The Freelance Discovery Call Blueprint',
+            url: 'https://www.freecodecamp.org/news/tag/freelancing/',
+            provider: 'freeCodeCamp',
+            isVerified: true,
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'client-m5-workflow',
+    key: 'delivery-workflow',
+    name: 'Week 5: Contracts, Milestones & Invoices',
+    description: 'Protect yourself with solid contracts, milestone payments, and professional client communication.',
+    order: 5,
+    estimatedHours: 10,
+    icon: 'ShieldCheck',
+    color: 'indigo',
+    lessons: [
+      {
+        id: 'client-contracts-invoicing',
+        title: 'Contracts, Deposits & Scope Control',
+        description: 'Never write a line of code without a 50% upfront deposit and a signed scope of work.',
+        order: 1,
+        estimatedMinutes: 150,
+        difficulty: 'advanced',
+        xpReward: 35,
+        keyTakeaways: [
+          'Essential clauses in a freelance dev contract (IP ownership, revisions cap, termination)',
+          'Managing scope creep politely and profitably',
+          'Invoicing and payment rails for international work',
+        ],
+        resources: [
+          {
+            type: 'docs',
+            title: 'AIGA Standard Form of Agreement',
+            url: 'https://www.aiga.org/standard-agreement/',
+            provider: 'AIGA',
+            isVerified: true,
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'client-m6-execution',
+    key: 'project-execution',
+    name: 'Week 6: Simulated Client Execution',
+    description: 'Execute an end-to-end simulated client project following strict acceptance criteria and staging deploys.',
+    order: 6,
+    estimatedHours: 15,
+    icon: 'Rocket',
+    color: 'indigo',
+    lessons: [
+      {
+        id: 'client-simulation-capstone',
+        title: 'Capstone: Client Project Simulation',
+        description: 'Build, test, stage, and hand off a client project with zero friction.',
+        order: 1,
+        estimatedMinutes: 450,
+        difficulty: 'advanced',
+        xpReward: 100,
+        keyTakeaways: [
+          'Staging environments on Vercel/Render',
+          'Client feedback loops and Loom video updates',
+          'Production handover and documentation',
+        ],
+        resources: [
+          {
+            type: 'project',
+            title: 'Simulated Client Brief & Spec',
+            url: 'https://github.com/nyxora-sync',
+            provider: 'Nyxora Sync',
+          },
+        ],
+        isProject: true,
+        portfolioChecklist: [
+          'Staging URL provided to client',
+          'Loom video demo recorded and shared',
+          'Clean handoff document with credentials and maintenance notes',
+        ],
+      },
+    ],
+  },
+  {
+    id: 'client-m7-retention',
+    key: 'retention-upsells',
+    name: 'Week 7: Retention, Upsells & Referrals',
+    description: 'Turn one-off project clients into recurring monthly retainer clients and generate referral flywheels.',
+    order: 7,
+    estimatedHours: 8,
+    icon: 'Trophy',
+    color: 'indigo',
+    lessons: [
+      {
+        id: 'client-retainers-referrals',
+        title: 'Turning One-Offs into Monthly Retainers',
+        description: 'Maintenance packages, SEO audits, security updates, and the 60-day post-launch check-in.',
+        order: 1,
+        estimatedMinutes: 120,
+        difficulty: 'intermediate',
+        xpReward: 25,
+        keyTakeaways: [
+          'Structuring monthly maintenance retainers ($200-$500/mo)',
+          'The exact script to ask for referrals and LinkedIn recommendations',
+        ],
+        resources: [
+          {
+            type: 'article',
+            title: 'Building Recurring Revenue as a Freelancer',
+            url: 'https://www.freecodecamp.org/news/freelance-web-developer-guide/',
+            provider: 'freeCodeCamp',
+            isVerified: true,
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'client-m8-scale',
+    key: 'systems-scale',
+    name: 'Week 8: Systems & Agency Scaling',
+    description: 'Build SOPs for your freelance business, automate invoicing, and decide whether to hire subcontractors.',
+    order: 8,
+    estimatedHours: 8,
+    icon: 'Cloud',
+    color: 'indigo',
+    lessons: [
+      {
+        id: 'client-sops-scaling',
+        title: 'SOPs, Automation & Scaling Solo',
+        description: 'Standard Operating Procedures for client onboarding, code standards, and deployment checklists.',
+        order: 1,
+        estimatedMinutes: 120,
+        difficulty: 'advanced',
+        xpReward: 30,
+        keyTakeaways: [
+          'Documenting your repeatable workflow',
+          'When and how to bring on a junior developer or designer contractor',
+        ],
+        resources: [
+          {
+            type: 'docs',
+            title: 'The E-Myth Revisited (Summary)',
+            url: 'https://www.michaelegerber.com/',
+            provider: 'Michael E. Gerber',
+          },
+        ],
+      },
+    ],
+  },
+]
+
 
 const specializationModules: Module[] = [
   {
@@ -4484,6 +5337,8 @@ export const tracks: Track[] = [
     icon: 'BookOpen',
     color: 'emerald',
     modules: beginnerModules,
+    isFastTrack: true,
+    fastTrackDescription: 'HTML/CSS/JS → Node/Express → MongoDB → React → Full-Stack MERN → Capstone. ~14 weeks to job-ready portfolio.',
   },
   {
     id: 'developer',
@@ -4491,6 +5346,8 @@ export const tracks: Track[] = [
     name: 'Developer Track',
     description: 'Already know JavaScript? Skip the basics, master the MERN stack, then go deeper with TypeScript, testing, security, DevOps, architecture, performance, and a master capstone.',
     category: 'web-development',
+    isFastTrack: false,
+    fastTrackDescription: 'Node/Express → MongoDB → React → Full-Stack MERN → Mastery (TS, Testing, Security, DevOps, Architecture). ~10 weeks to senior-level portfolio.',
     icon: 'Code2',
     color: 'violet',
     modules: developerModules,
@@ -4504,6 +5361,18 @@ export const tracks: Track[] = [
     icon: 'Sparkles',
     color: 'cyan',
     modules: specializationModules,
+  },
+  {
+    id: 'first-client',
+    key: 'first-client',
+    name: 'First Client Track',
+    description: 'From portfolio to paid work: an 8-week system to land your first freelance client, deliver professionally, and build a repeatable pipeline. Designed for developers in emerging markets targeting international clients.',
+    category: 'web-development',
+    icon: 'Briefcase',
+    color: 'indigo',
+    isFastTrack: true,
+    fastTrackDescription: '8 weeks to first paid client: positioning → portfolio → outreach → proposals → delivery → retention → scale.',
+    modules: firstClientModules,
   },
   ...languageTracks,
   {
@@ -4524,6 +5393,7 @@ export const tracks: Track[] = [
         estimatedHours: 40,
         icon: 'Cpu',
         color: 'amber',
+        status: 'planned' as ModuleStatus,
         lessons: [
           {
             id: 'embedded-placeholder',
@@ -4569,6 +5439,20 @@ export function getTotalXP(trackKey: string): number {
 
 export function getTotalMinutes(trackKey: string): number {
   return getAllLessons(trackKey).reduce((sum, lesson) => sum + lesson.estimatedMinutes, 0)
+}
+
+// Helper to compute display properties for a track
+export function getTrackDisplay(track: Track) {
+  const totalHours = track.modules.reduce((sum, m) => sum + m.estimatedHours, 0)
+  const totalLessons = track.modules.reduce((sum, m) => sum + m.lessons.length, 0)
+  const duration = `~${Math.round(totalHours / 10)} wks` // assuming ~10 hrs/week
+  const modulesList = track.modules.map((m) => ({
+    key: m.key,
+    name: m.name,
+    weeks: Math.max(1, Math.round(m.estimatedHours / 10)),
+    lessons: m.lessons.length,
+  }))
+  return { duration, lessons: totalLessons, modulesList }
 }
 
 ===== FILE: src/lib/db.ts =====
@@ -4777,7 +5661,7 @@ export const faqSections: FaqSection[] = [
 
 
 ===== FILE: src/lib/language-curriculum.ts =====
-import type { Difficulty, Lesson, Module, Resource, Track } from './curriculum'
+import type { Difficulty, Lesson, Module, ModuleStatus, Resource, Track } from './curriculum'
 
 /**
  * Language tracks are kept in their own module so the growing catalog stays
@@ -4831,7 +5715,14 @@ const moduleDef = (
   order: number,
   estimatedHours: number,
   color: string,
-  lessons: Lesson[]
+  lessons: Lesson[],
+  status: ModuleStatus = 'core',
+  isExperimental?: boolean,
+  estimatedHoursRange?: string,
+  outcomes?: string[],
+  capstoneProject?: Module['capstoneProject'],
+  isCapstone?: boolean,
+  isFastTrackModule?: boolean
 ): Module => ({
   id,
   key: id,
@@ -4839,9 +5730,16 @@ const moduleDef = (
   description,
   order,
   estimatedHours,
+  estimatedHoursRange,
   icon: 'FileCode',
   color,
   lessons,
+  status,
+  isExperimental,
+  outcomes,
+  capstoneProject,
+  isCapstone,
+  isFastTrackModule,
 })
 
 // ---------------------------------------------------------------------------
@@ -5185,7 +6083,9 @@ const cAdvancedModules: Module[] = [
         ],
         [cDocs.linuxKernel, cDocs.explorer, docs('BCC Reference Guide', 'https://github.com/iovisor/bcc/blob/master/docs/reference_guide.md', 'iovisor')]
       ),
-    ]
+    ],
+    'advanced',
+    true
   ),
   moduleDef(
     'c-kernel-drivers',
@@ -5259,7 +6159,9 @@ const cAdvancedModules: Module[] = [
         ],
         [cDocs.linuxKernel, cDocs.driverModel, docs('Device Tree Spec', 'https://www.devicetree.org/', 'devicetree.org')]
       ),
-    ]
+    ],
+    'advanced',
+    true
   ),
   moduleDef(
     'c-rtos-embedded',
@@ -5333,7 +6235,9 @@ const cAdvancedModules: Module[] = [
         ],
         [cDocs.freertos, cDocs.zephyr, cDocs.reference]
       ),
-    ]
+    ],
+    'advanced',
+    true
   ),
   moduleDef(
     'c-security-hardening',
@@ -5407,7 +6311,9 @@ const cAdvancedModules: Module[] = [
         ],
         [cDocs.hardening, docs('Reproducible Builds', 'https://reproducible-builds.org/', 'Reproducible Builds'), docs('Sigstore', 'https://www.sigstore.dev/', 'Sigstore')]
       ),
-    ]
+    ],
+    'advanced',
+    true
   ),
   moduleDef(
     'c-advanced-topics',
@@ -5481,7 +6387,9 @@ const cAdvancedModules: Module[] = [
         ],
         [cDocs.gcc, cDocs.make, cDocs.linuxKernel]
       ),
-    ]
+    ],
+    'advanced',
+    true
   ),
 ]
 
@@ -5604,7 +6512,7 @@ const cppModules: Module[] = [
         ],
         [cppDocs.cmake, cppDocs.googletest, cppDocs.explorer]
       ),
-    ]
+    ],
   ),
   moduleDef(
     'cpp-engineering',
@@ -5833,7 +6741,9 @@ const cppAdvancedModules: Module[] = [
         ],
         [cppDocs.metaprog, cppDocs.reference, cppDocs.explorer]
       ),
-    ]
+    ],
+    'advanced',
+    true
   ),
   moduleDef(
     'cpp-coroutines',
@@ -5907,7 +6817,9 @@ const cppAdvancedModules: Module[] = [
         ],
         [cppDocs.coro, cppDocs.folly, docs('liburing C++', 'https://github.com/axboe/liburing/tree/master/src/cpp', 'Jens Axboe')]
       ),
-    ]
+    ],
+    'advanced',
+    true
   ),
   moduleDef(
     'cpp-simd-vectorization',
@@ -5981,7 +6893,9 @@ const cppAdvancedModules: Module[] = [
         ],
         [docs('SYCL 2020 Spec', 'https://www.khronos.org/sycl/', 'Khronos'), docs('OpenMP 5.2', 'https://www.openmp.org/spec-html/5.2/openmp.html', 'OpenMP'), cppDocs.explorer]
       ),
-    ]
+    ],
+    'advanced',
+    true
   ),
   moduleDef(
     'cpp-modules-build',
@@ -6055,7 +6969,9 @@ const cppAdvancedModules: Module[] = [
         ],
         [docs('Bazel C++ Rules', 'https://bazel.build/rules/cpp', 'Bazel'), docs('Buck2', 'https://buck2.build/', 'Meta'), cppDocs.explorer]
       ),
-    ]
+    ],
+    'advanced',
+    true
   ),
   moduleDef(
     'cpp-advanced-concurrency',
@@ -6129,7 +7045,9 @@ const cppAdvancedModules: Module[] = [
         ],
         [cppDocs.exec, cppDocs.stdexec, cppDocs.folly]
       ),
-    ]
+    ],
+    'advanced',
+    true
   ),
 ]
 
@@ -6482,7 +7400,9 @@ const csharpAdvancedModules: Module[] = [
         ],
         [csharpDocs.sourceGen, csharpDocs.cli, csharpDocs.testing]
       ),
-    ]
+    ],
+    'advanced',
+    true
   ),
   moduleDef(
     'csharp-maui-blazor',
@@ -6556,7 +7476,9 @@ const csharpAdvancedModules: Module[] = [
         ],
         [csharpDocs.testing, csharpDocs.blazor, csharpDocs.maui]
       ),
-    ]
+    ],
+    'advanced',
+    true
   ),
   moduleDef(
     'csharp-grpc-cloud',
@@ -6630,7 +7552,9 @@ const csharpAdvancedModules: Module[] = [
         ],
         [csharpDocs.yarp, csharpDocs.security, csharpDocs.health]
       ),
-    ]
+    ],
+    'advanced',
+    true
   ),
   moduleDef(
     'csharp-orleans-distributed',
@@ -6704,7 +7628,9 @@ const csharpAdvancedModules: Module[] = [
         ],
         [csharpDocs.signalr, csharpDocs.orleans, csharpDocs.diagnostics]
       ),
-    ]
+    ],
+    'advanced',
+    true
   ),
   moduleDef(
     'csharp-advanced-architecture',
@@ -6778,7 +7704,9 @@ const csharpAdvancedModules: Module[] = [
         ],
         [csharpDocs.diagnostics, csharpDocs.health, csharpDocs.testing]
       ),
-    ]
+    ],
+    'advanced',
+    true
   ),
 ]
 
@@ -7142,7 +8070,9 @@ const pythonAdvancedModules: Module[] = [
         ],
         [pythonDocs.packaging, pythonDocs.cApi, pythonDocs.explorer]
       ),
-    ]
+    ],
+    'advanced',
+    true
   ),
   moduleDef(
     'python-ml-ops',
@@ -7216,7 +8146,9 @@ const pythonAdvancedModules: Module[] = [
         ],
         [docs('Great Expectations', 'https://greatexpectations.io/', 'GX'), docs('Evidently', 'https://www.evidentlyai.com/', 'Evidently'), pythonDocs.mlflow]
       ),
-    ]
+    ],
+    'advanced',
+    true
   ),
   moduleDef(
     'python-distributed-systems',
@@ -7290,7 +8222,9 @@ const pythonAdvancedModules: Module[] = [
         ],
         [pythonDocs.kafka, pythonDocs.celery, pythonDocs.asyncio]
       ),
-    ]
+    ],
+    'advanced',
+    true
   ),
   moduleDef(
     'python-advanced-async',
@@ -7364,7 +8298,9 @@ const pythonAdvancedModules: Module[] = [
         ],
         [docs('SQLAlchemy 2.0', 'https://docs.sqlalchemy.org/en/20/', 'SQLAlchemy'), docs('asyncpg', 'https://magicstack.github.io/asyncpg/', 'MagicStack'), docs('Tortoise ORM', 'https://tortoise-orm.readthedocs.io/', 'Tortoise')]
       ),
-    ]
+    ],
+    'advanced',
+    true
   ),
   moduleDef(
     'python-advanced-topics',
@@ -7438,7 +8374,9 @@ const pythonAdvancedModules: Module[] = [
         ],
         [docs('CPython Dev Guide', 'https://devguide.python.org/', 'Python'), pythonDocs.profile, pythonDocs.explorer]
       ),
-    ]
+    ],
+    'advanced',
+    true
   ),
 ]
 
@@ -8023,6 +8961,586 @@ export async function sendNewsletterBroadcast({
 }
 
 
+===== FILE: src/lib/practice.ts =====
+import type { ResourceType } from './curriculum'
+
+// ============================================================
+// TYPES
+// ============================================================
+
+export type PracticeItem = Flashcard | CodeKata | MicroProject | InterviewDrill
+
+export type PracticeMode = 'flashcard' | 'kata' | 'project' | 'interview'
+
+export type PracticeCategory =
+  | 'javascript'
+  | 'react'
+  | 'nodejs'
+  | 'mongodb'
+  | 'typescript'
+  | 'testing'
+  | 'security'
+  | 'devops'
+  | 'architecture'
+  | 'first-client'
+
+export interface BasePracticeItem {
+  id: string
+  title: string
+  description: string
+  category: PracticeCategory
+  tags: string[]
+  estimatedMinutes: number
+  difficulty: 'beginner' | 'intermediate' | 'advanced'
+  xpReward: number
+  createdAt: string
+}
+
+export interface Flashcard extends BasePracticeItem {
+  type: 'flashcard'
+  question: string
+  answer: string
+  // Card specific
+  cardType: 'concept' | 'code' | 'snippet' | 'formula'
+}
+
+export interface CodeKata extends BasePracticeItem {
+  type: 'kata'
+  prompt: string
+  starterCode: string | null
+  solution: string | null
+  testCases: TestCase[]
+  // Kata specific
+  language: 'javascript' | 'typescript' | 'python' | 'bash'
+  isDaily: boolean
+}
+
+export interface MicroProject extends BasePracticeItem {
+  type: 'project'
+  prompt: string
+  requirements: string[]
+  constraints: string[]
+  starterRepo: string | null
+  submissionUrl: string | null
+  // Project specific
+  stack: string[]
+}
+
+export interface InterviewDrill extends BasePracticeItem {
+  type: 'interview'
+  question: string
+  // Drill specific
+  drillType: 'behavioral' | 'technical' | 'system-design' | 'whiteboard'
+  followUps: string[]
+  answerGuide: string
+  // For whiteboard/system design
+  codeTemplate: string | null
+}
+
+interface TestCase {
+  input: string
+  expected: string
+  description: string
+}
+
+// Progress types (synced with progress-state.ts)
+export interface FlashcardProgress {
+  easeFactor: number
+  interval: number
+  repetitions: number
+  nextReview: string
+  lastReviewed: string | null
+  lastGrade: number | null
+}
+
+export interface KataProgress {
+  completed: boolean
+  completedAt: string
+  attempts: number
+}
+
+export interface ProjectProgress {
+  completed: boolean
+  completedAt: string
+  submissionUrl?: string
+}
+
+export interface DrillProgress {
+  completed: boolean
+  completedAt: string
+  notes?: string
+}
+
+export interface PracticeProgress {
+  flashcards: Record<string, FlashcardProgress>
+  katas: Record<string, KataProgress>
+  projects: Record<string, ProjectProgress>
+  drills: Record<string, DrillProgress>
+  streak: {
+    current: number
+    lastActiveDate: string | null
+    longest: number
+  }
+}
+
+// ============================================================
+// SRS ENGINE (SM-2 Algorithm)
+// ============================================================
+
+export function sm2(
+  grade: number, // 0-3 scale (0=again, 1=hard, 2=good, 3=easy)
+  card: FlashcardProgress
+): { easeFactor: number; interval: number; repetitions: number; nextReview: string } {
+  let { easeFactor, interval, repetitions } = card
+
+  // SM-2 algorithm
+  if (grade < 2) {
+    // Failed — reset
+    repetitions = 0
+    interval = 1
+  } else {
+    repetitions += 1
+    if (repetitions === 1) {
+      interval = 1
+    } else if (repetitions === 2) {
+      interval = 6
+    } else {
+      interval = Math.ceil(interval * easeFactor)
+    }
+  }
+
+  // Update ease factor (minimum 1.3)
+  easeFactor = Math.max(1.3, easeFactor + (0.1 - (2.5 - grade) * (0.08 + (2.5 - grade) * 0.02)))
+
+  // Calculate next review date
+  const nextDate = new Date()
+  nextDate.setDate(nextDate.getDate() + interval)
+
+  return {
+    easeFactor,
+    interval,
+    repetitions,
+    nextReview: nextDate.toISOString(),
+  }
+}
+
+// Initial SRS state for a new flashcard
+export const initialFlashcardProgress: FlashcardProgress = {
+  easeFactor: 2.5,
+  interval: 1,
+  repetitions: 0,
+  nextReview: new Date().toISOString(),
+  lastReviewed: null,
+  lastGrade: null,
+}
+
+// ============================================================
+// PRACTICE CATALOG (Static item definitions)
+// ============================================================
+
+function createFlashcards(): Flashcard[] {
+  const now = new Date().toISOString()
+
+  return [
+    {
+      id: 'flash-js-promise-states',
+      type: 'flashcard',
+      title: 'Promise States',
+      description: 'The three states of a JavaScript Promise',
+      question: 'What are the three states of a JavaScript Promise?',
+      answer: 'pending → fulfilled (resolved) or pending → rejected. Once a promise settles, it becomes immutable (either fulfilled or rejected).',
+      category: 'javascript',
+      tags: ['promises', 'async', 'fundamentals'],
+      estimatedMinutes: 1,
+      difficulty: 'beginner',
+      xpReward: 5,
+      createdAt: now,
+      cardType: 'concept',
+    },
+    {
+      id: 'flash-js-event-loop',
+      type: 'flashcard',
+      title: 'Event Loop Order',
+      description: 'JavaScript event loop processing order',
+      question: 'In what order does the JavaScript event loop process the macrotask queue, microtask queue, and rendering?',
+      answer: '1. Macrotask (setTimeout, setInterval, I/O) → 2. Microtask queue drains (Promise.then, queueMicrotask) → 3. Render → 4. Repeat',
+      category: 'javascript',
+      tags: ['event-loop', 'async', 'advanced'],
+      estimatedMinutes: 2,
+      difficulty: 'advanced',
+      xpReward: 10,
+      createdAt: now,
+      cardType: 'concept',
+    },
+    {
+      id: 'flash-react-hooks-rules',
+      type: 'flashcard',
+      title: 'React Hooks Rules',
+      description: 'The two rules of React Hooks',
+      question: 'What are the two rules of React Hooks?',
+      answer: '1. Only call hooks at the top level (not inside loops, conditions, or nested functions). 2. Only call hooks from React function components or custom hooks.',
+      category: 'react',
+      tags: ['react', 'hooks', 'fundamentals'],
+      estimatedMinutes: 1,
+      difficulty: 'beginner',
+      xpReward: 5,
+      createdAt: now,
+      cardType: 'concept',
+    },
+    {
+      id: 'flash-react-useeffect-deps',
+      type: 'flashcard',
+      title: 'useEffect Dependency Array',
+      description: 'useEffect dependency array patterns',
+      question: 'What happens with these useEffect patterns: `[]`, `[dep]`, no array?',
+      answer: '[] → runs once on mount, cleanup on unmount. [dep] → runs on dep change. No array → runs on every render.',
+      category: 'react',
+      tags: ['react', 'hooks', 'useEffect'],
+      estimatedMinutes: 1,
+      difficulty: 'intermediate',
+      xpReward: 5,
+      createdAt: now,
+      cardType: 'concept',
+    },
+    {
+      id: 'flash-express-middleware',
+      type: 'flashcard',
+      title: 'Express Middleware Order',
+      description: 'Express middleware mounting order for security',
+      question: 'In what order should Express middleware be mounted?',
+      answer: '1. Body parser/JSON → 2. CORS → 3. Rate limiter → 4. Helmet/security → 5. Auth routes → 6. API routes → 7. Error handler (last)',
+      category: 'nodejs',
+      tags: ['express', 'middleware', 'security'],
+      estimatedMinutes: 1,
+      difficulty: 'intermediate',
+      xpReward: 5,
+      createdAt: now,
+      cardType: 'concept',
+    },
+  ]
+}
+
+function createKatas(): CodeKata[] {
+  const now = new Date().toISOString()
+
+  return [
+    {
+      id: 'kata-js-reverse-words',
+      type: 'kata',
+      title: 'Reverse Words in a String',
+      description: 'Reverse the order of words in a string handling edge cases',
+      prompt: 'Write a function that reverses the order of words in a string. "the sky is blue" becomes "blue is sky the". Handle leading/trailing spaces and multiple spaces between words.',
+      starterCode: 'function reverseWords(s) {\n  // Your code here\n}',
+      solution: '// Trim, split by spaces, filter empty, reverse, join\nreturn s.trim().split(/\\s+/).reverse().join(" ");',
+      testCases: [
+        { input: '"the sky is blue"', expected: '"blue is sky the"', description: 'Basic case' },
+        { input: '"  hello world  "', expected: '"world hello"', description: 'Leading/trailing spaces' },
+        { input: '"a good    example"', expected: '"example good a"', description: 'Multiple spaces' },
+      ],
+      language: 'javascript',
+      category: 'javascript',
+      tags: ['strings', 'arrays', 'interview'],
+      estimatedMinutes: 15,
+      difficulty: 'beginner',
+      xpReward: 15,
+      isDaily: true,
+      createdAt: now,
+    },
+    {
+      id: 'kata-js-two-sum',
+      type: 'kata',
+      title: 'Two Sum (Hash Map)',
+      description: 'Find two indices that sum to target using hash map for O(n)',
+      prompt: 'Given an array of integers and a target sum, return indices of the two numbers that add up to the target. Use a hash map for O(n) solution.',
+      starterCode: 'function twoSum(nums, target) {\n  // Your code here\n}',
+      solution: 'const map = new Map();\nfor (let i = 0; i < nums.length; i++) {\n  const complement = target - nums[i];\n  if (map.has(complement)) return [map.get(complement), i];\n  map.set(nums[i], i);\n}\nreturn [];',
+      testCases: [
+        { input: '[2,7,11,15], 9', expected: '[0,1]', description: 'Basic case' },
+        { input: '[3,2,4], 6', expected: '[1,2]', description: 'No self-pairing' },
+        { input: '[3,3], 6', expected: '[0,1]', description: 'Duplicate values' },
+      ],
+      language: 'javascript',
+      category: 'javascript',
+      tags: ['arrays', 'hash-map', 'interview'],
+      estimatedMinutes: 20,
+      difficulty: 'intermediate',
+      xpReward: 20,
+      isDaily: true,
+      createdAt: now,
+    },
+    {
+      id: 'kata-react-usefetch',
+      type: 'kata',
+      title: 'Custom useFetch Hook',
+      description: 'Build a custom useFetch hook with loading, error, and cleanup',
+      prompt: 'Build a custom `useFetch` hook that handles loading, error, and data states. Use it in a component with proper cleanup on unmount.',
+      starterCode: 'import { useState, useEffect } from "react";\n\nfunction useFetch(url) {\n  // Your code here\n}',
+      solution: '// Hook with abort controller for cleanup\nconst [data, setData] = useState(null);\nconst [loading, setLoading] = useState(true);\nconst [error, setError] = useState(null);\n\nuseEffect(() => {\n  const controller = new AbortController();\n  setLoading(true);\n  fetch(url, { signal: controller.signal })\n    .then(res => res.json())\n    .then(data => { setData(data); setLoading(false); })\n    .catch(err => { if (err.name !== "AbortError") { setError(err); setLoading(false); } });\n  return () => controller.abort();\n}, [url]);\nreturn { data, loading, error };',
+      testCases: [
+        { input: 'API returns data', expected: 'data is populated, loading is false', description: 'Success state' },
+        { input: 'API returns 404', expected: 'error is populated, loading is false', description: 'Error state' },
+        { input: 'Component unmounts during fetch', expected: 'No state update or memory leak', description: 'Cleanup on unmount' },
+      ],
+      language: 'javascript',
+      category: 'react',
+      tags: ['hooks', 'fetch', 'cleanup'],
+      estimatedMinutes: 30,
+      difficulty: 'advanced',
+      xpReward: 30,
+      isDaily: false,
+      createdAt: now,
+    },
+  ]
+}
+
+function createMicroProjects(): MicroProject[] {
+  const now = new Date().toISOString()
+
+  return [
+    {
+      id: 'project-express-api',
+      type: 'project',
+      title: 'Express REST API with Validation',
+      description: 'Build a REST API for a todo app with full CRUD, Zod validation, and error handling middleware',
+      prompt: 'Build a REST API for a todo app with full CRUD, Zod validation, and error handling middleware.',
+      requirements: [
+        'Create Express server with routes: GET/POST /todos, GET/PUT/DELETE /todos/:id',
+        'Use Zod for input validation (title: string, completed: boolean)',
+        'Implement centralized error handling middleware',
+        'Add request logging middleware',
+        'Return proper HTTP status codes (200, 201, 400, 404, 500)',
+      ],
+      constraints: ['No external database — use in-memory array', 'No auth required', 'Must have 80%+ test coverage'],
+      starterRepo: null,
+      submissionUrl: null,
+      category: 'nodejs',
+      tags: ['express', 'api', 'validation', 'testing'],
+      estimatedMinutes: 90,
+      difficulty: 'intermediate',
+      xpReward: 50,
+      createdAt: now,
+      stack: ['Node.js', 'Express', 'Zod', 'Vitest'],
+    },
+    {
+      id: 'project-react-todo',
+      type: 'project',
+      title: 'React Todo with Context API',
+      description: 'Build a todo app using Context API for state management',
+      prompt: 'Build a todo app using Context API for state management (no Redux). Include add, toggle, delete, and filter (all/active/completed).',
+      requirements: [
+        'Create TodoContext with CRUD operations',
+        'Components: TodoList, TodoItem, AddTodo, FilterBar',
+        'Persist todos to localStorage',
+        'Show count of active/completed todos',
+        'Responsive design with Tailwind CSS',
+      ],
+      constraints: ['Must use Context API (not Redux)', 'No external UI libraries', 'SSR-safe localStorage access'],
+      starterRepo: null,
+      submissionUrl: null,
+      category: 'react',
+      tags: ['react', 'context', 'state-management', 'tailwind'],
+      estimatedMinutes: 120,
+      difficulty: 'intermediate',
+      xpReward: 60,
+      createdAt: now,
+      stack: ['React 19', 'Context API', 'Tailwind CSS'],
+    },
+    {
+      id: 'project-prisma-mongo',
+      type: 'project',
+      title: 'Prisma + MongoDB Blog API',
+      description: 'Build a blog API with Prisma ORM connected to MongoDB',
+      prompt: 'Build a blog API with Prisma ORM connected to MongoDB. Include posts, comments, and authors with proper relations.',
+      requirements: [
+        'Design Prisma schema: User, Post, Comment models with relations',
+        'REST endpoints: /posts, /posts/:id, /comments',
+        'Use Prisma Client for all DB operations',
+        'Add pagination to posts list',
+        'Include input validation with Zod',
+      ],
+      constraints: ['Must use Prisma Client (not raw MongoDB queries)', 'Must demonstrate relation queries', 'Use MongoDB Atlas (free tier)'],
+      starterRepo: null,
+      submissionUrl: null,
+      category: 'mongodb',
+      tags: ['prisma', 'mongodb', 'api', 'orm'],
+      estimatedMinutes: 150,
+      difficulty: 'advanced',
+      xpReward: 75,
+      createdAt: now,
+      stack: ['Node.js', 'Express', 'Prisma', 'MongoDB', 'Zod'],
+    },
+  ]
+}
+
+function createInterviewDrills(): InterviewDrill[] {
+  const now = new Date().toISOString()
+
+  return [
+    {
+      id: 'drill-behavioral-story',
+      type: 'interview',
+      title: 'Tell Me About a Time You Debugged a Difficult Bug',
+      description: 'STAR format behavioral question about debugging under pressure',
+      question: 'Tell me about a time you had to debug a production issue under pressure. What was your process?',
+      drillType: 'behavioral',
+      followUps: [
+        'How did you identify the root cause?',
+        'What would you do differently now?',
+        'How did you communicate the issue to non-technical stakeholders?',
+      ],
+      answerGuide: 'Use STAR format: Situation, Task, Action, Result. Show process (reproduce → isolate → fix → verify), ownership, and communication.',
+      category: 'first-client',
+      tags: ['behavioral', 'debugging', 'communication'],
+      estimatedMinutes: 10,
+      difficulty: 'intermediate',
+      xpReward: 10,
+      codeTemplate: null,
+      createdAt: now,
+    },
+    {
+      id: 'drill-system-design-scalability',
+      type: 'interview',
+      title: 'Design a Rate Limiter',
+      description: 'System design question for distributed rate limiting',
+      question: 'Design a rate limiter for an API. How would you handle 10,000 requests/second across 100,000 users?',
+      drillType: 'system-design',
+      followUps: [
+        'How does the token bucket algorithm work?',
+        'How would you handle distributed rate limiting?',
+        'What metrics would you track?',
+      ],
+      answerGuide: 'Discuss: token bucket vs leaky bucket, Redis for distributed rate limiting, sliding window logs, handling burst traffic, graceful degradation.',
+      codeTemplate: '// Sketch the API interface\nclass RateLimiter {\n  // constructor, check method, etc.\n}',
+      category: 'architecture',
+      tags: ['system-design', 'rate-limiting', 'scalability'],
+      estimatedMinutes: 20,
+      difficulty: 'advanced',
+      xpReward: 20,
+      createdAt: now,
+    },
+    {
+      id: 'drill-technical-express',
+      type: 'interview',
+      title: 'Express Error Handling',
+      description: 'Technical question about centralized error handling in Express',
+      question: 'How would you handle errors in an Express application? Write a centralized error handler.',
+      drillType: 'technical',
+      followUps: [
+        'How do you handle async errors?',
+        'What HTTP status codes map to what errors?',
+        'How do you avoid leaking sensitive info?',
+      ],
+      answerGuide: 'Use error middleware (4 args: err, req, res, next). Wrap async routes in try/catch or use express-async-handler. Log errors, return controlled responses. Never expose stack traces in production.',
+      codeTemplate: 'app.use((err, req, res, next) => {\n  // Your error handling here\n});',
+      category: 'nodejs',
+      tags: ['express', 'error-handling', 'middleware'],
+      estimatedMinutes: 15,
+      difficulty: 'intermediate',
+      xpReward: 15,
+      createdAt: now,
+    },
+    {
+      id: 'drill-behavioral-client',
+      type: 'interview',
+      title: 'Handling Client Feedback',
+      description: 'Behavioral question about handling unhappy clients professionally',
+      question: 'Describe a time when a client was unhappy with your work. How did you handle it?',
+      drillType: 'behavioral',
+      followUps: [
+        'What signals did you miss that could have prevented this?',
+        'How did you turn it into a positive outcome?',
+        'What process changes did you implement afterward?',
+      ],
+      answerGuide: 'Focus on: active listening, acknowledging concerns, proposing solutions not excuses, documenting changes, following up. Show empathy and professionalism.',
+      category: 'first-client',
+      tags: ['behavioral', 'client-communication', 'conflict-resolution'],
+      estimatedMinutes: 10,
+      difficulty: 'intermediate',
+      xpReward: 10,
+      codeTemplate: null,
+      createdAt: now,
+    },
+  ]
+}
+
+// ============================================================
+// CATALOG EXPORTS
+// ============================================================
+
+export const allFlashcards = createFlashcards()
+export const allKatas = createKatas()
+export const allMicroProjects = createMicroProjects()
+export const allInterviewDrills = createInterviewDrills()
+
+export const allPracticeItems: PracticeItem[] = [
+  ...allFlashcards,
+  ...allKatas,
+  ...allMicroProjects,
+  ...allInterviewDrills,
+]
+
+// Lookup helpers
+export function getPracticeItem(id: string): PracticeItem | undefined {
+  return allPracticeItems.find((item) => item.id === id)
+}
+
+export function getFlashcard(id: string): Flashcard | undefined {
+  return allFlashcards.find((item) => item.id === id)
+}
+
+export function getKata(id: string): CodeKata | undefined {
+  return allKatas.find((item) => item.id === id)
+}
+
+export function getMicroProject(id: string): MicroProject | undefined {
+  return allMicroProjects.find((item) => item.id === id)
+}
+
+export function getInterviewDrill(id: string): InterviewDrill | undefined {
+  return allInterviewDrills.find((item) => item.id === id)
+}
+
+export function getDailyKata(): CodeKata | undefined {
+  if (allKatas.length === 0) return undefined
+  const todayIndex = Math.floor(Date.now() / 86400000) % allKatas.length
+  return allKatas[todayIndex]
+}
+
+export function getDueFlashcards(progress: PracticeProgress): Flashcard[] {
+  const now = new Date().toISOString()
+  return allFlashcards.filter((card) => {
+    const prog = progress.flashcards[card.id]
+    if (!prog) return true // New cards are due
+    return prog.nextReview <= now
+  })
+}
+
+export function getPracticeItemsByCategory(category: PracticeCategory): PracticeItem[] {
+  return allPracticeItems.filter((item) => item.category === category)
+}
+
+export function getPracticeItemsByType(type: PracticeMode): PracticeItem[] {
+  return allPracticeItems.filter((item) => item.type === type)
+}
+
+export function getAllFlashcardsByCategory(category: PracticeCategory): Flashcard[] {
+  return allFlashcards.filter((item) => item.category === category)
+}
+
+export function getAllKatas(): CodeKata[] {
+  return allKatas
+}
+
+export function getAllMicroProjects(): MicroProject[] {
+  return allMicroProjects
+}
+
+export function getAllInterviewDrills(): InterviewDrill[] {
+  return allInterviewDrills
+}
+
+
+
 ===== FILE: src/lib/progress-state.ts =====
 // Shared progress state helpers used by the localStorage hook and the
 // account-sync layer. This module is safe to import from client components
@@ -8032,6 +9550,42 @@ export interface LessonProgress {
   completed: boolean
   completedAt?: string
   notes?: string
+}
+
+export interface PracticeProgress {
+  // Flashcard SRS state per card
+  flashcards: Record<string, {
+    easeFactor: number
+    interval: number
+    repetitions: number
+    nextReview: string
+    lastReviewed: string | null
+    lastGrade: number | null
+  }>
+  // Kata completions
+  katas: Record<string, {
+    completed: boolean
+    completedAt: string
+    attempts: number
+  }>
+  // Micro-project submissions
+  projects: Record<string, {
+    completed: boolean
+    completedAt: string
+    submissionUrl?: string
+  }>
+  // Interview drill completions
+  drills: Record<string, {
+    completed: boolean
+    completedAt: string
+    notes?: string
+  }>
+  // Practice streak (separate from lesson streak)
+  streak: {
+    current: number
+    lastActiveDate: string | null
+    longest: number
+  }
 }
 
 export interface ProgressState {
@@ -8049,10 +9603,24 @@ export interface ProgressState {
     lesson: string
     timestamp: string
   } | null
+  // Practice system progress
+  practice: PracticeProgress
 }
 
 export const GUEST_STORAGE_KEY = 'mern-learn-progress'
 const USER_STORAGE_PREFIX = 'mern-learn-progress:u:'
+
+export const defaultPracticeProgress: PracticeProgress = {
+  flashcards: {},
+  katas: {},
+  projects: {},
+  drills: {},
+  streak: {
+    current: 0,
+    lastActiveDate: null,
+    longest: 0,
+  },
+}
 
 export const defaultProgressState: ProgressState = {
   lessons: {},
@@ -8064,6 +9632,7 @@ export const defaultProgressState: ProgressState = {
   },
   bookmarks: [],
   lastVisited: null,
+  practice: defaultPracticeProgress,
 }
 
 // Which bucket is currently active. Set to the signed-in user's id by
@@ -8088,6 +9657,7 @@ export function loadProgressState(userId: string | null = activeUserId): Progres
       ...defaultProgressState,
       ...parsed,
       streak: { ...defaultProgressState.streak, ...parsed.streak },
+      practice: { ...defaultPracticeProgress, ...parsed.practice },
     }
   } catch {
     return defaultProgressState
@@ -8136,6 +9706,78 @@ function mergeStreaks(a: ProgressState['streak'], b: ProgressState['streak']): P
   }
 }
 
+function mergePracticeProgress(
+  primary: PracticeProgress,
+  secondary: PracticeProgress
+): PracticeProgress {
+  // Merge flashcards - keep the most advanced SRS state per card
+  const flashcardIds = new Set([
+    ...Object.keys(primary.flashcards),
+    ...Object.keys(secondary.flashcards),
+  ])
+  const flashcards: PracticeProgress['flashcards'] = {}
+  for (const id of flashcardIds) {
+    const a = primary.flashcards[id]
+    const b = secondary.flashcards[id]
+    // Keep the one with higher repetitions (more advanced)
+    flashcards[id] = a && b
+      ? a.repetitions >= b.repetitions
+        ? a
+        : b
+      : a ?? b
+  }
+
+  // Merge katas - union completions
+  const kataIds = new Set([...Object.keys(primary.katas), ...Object.keys(secondary.katas)])
+  const katas: PracticeProgress['katas'] = {}
+  for (const id of kataIds) {
+    const a = primary.katas[id]
+    const b = secondary.katas[id]
+    katas[id] = {
+      completed: Boolean(a?.completed || b?.completed),
+      completedAt: a?.completed && b?.completed
+        ? (a.completedAt > b.completedAt ? a.completedAt : b.completedAt)
+        : a?.completedAt ?? b?.completedAt ?? new Date().toISOString(),
+      attempts: Math.max(a?.attempts ?? 0, b?.attempts ?? 0),
+    }
+  }
+
+  // Merge projects - union completions
+  const projectIds = new Set([...Object.keys(primary.projects), ...Object.keys(secondary.projects)])
+  const projects: PracticeProgress['projects'] = {}
+  for (const id of projectIds) {
+    const a = primary.projects[id]
+    const b = secondary.projects[id]
+    projects[id] = {
+      completed: Boolean(a?.completed || b?.completed),
+      completedAt: a?.completed && b?.completed
+        ? (a.completedAt > b.completedAt ? a.completedAt : b.completedAt)
+        : a?.completedAt ?? b?.completedAt ?? new Date().toISOString(),
+      submissionUrl: a?.submissionUrl ?? b?.submissionUrl,
+    }
+  }
+
+  // Merge drills - union completions
+  const drillIds = new Set([...Object.keys(primary.drills), ...Object.keys(secondary.drills)])
+  const drills: PracticeProgress['drills'] = {}
+  for (const id of drillIds) {
+    const a = primary.drills[id]
+    const b = secondary.drills[id]
+    drills[id] = {
+      completed: Boolean(a?.completed || b?.completed),
+      completedAt: a?.completed && b?.completed
+        ? (a.completedAt > b.completedAt ? a.completedAt : b.completedAt)
+        : a?.completedAt ?? b?.completedAt ?? new Date().toISOString(),
+      notes: a?.notes?.trim() ? a.notes : b?.notes,
+    }
+  }
+
+  // Merge practice streak
+  const streak = mergeStreaks(primary.streak, secondary.streak)
+
+  return { flashcards, katas, projects, drills, streak }
+}
+
 /**
  * Merge two progress snapshots without losing work.
  * `primary` wins note conflicts; completion, bookmarks, and streaks are unioned.
@@ -8172,6 +9814,7 @@ export function mergeProgressStates(primary: ProgressState, secondary: ProgressS
     streak: mergeStreaks(primary.streak, secondary.streak),
     bookmarks,
     lastVisited,
+    practice: mergePracticeProgress(primary.practice, secondary.practice),
   }
 }
 
@@ -9182,1043 +10825,3 @@ export const resourceLevels = [
   { key: 'intermediate', label: 'Intermediate' },
   { key: 'advanced', label: 'Advanced' },
 ]
-
-===== FILE: src/lib/search.ts =====
-import { tracks } from '@/lib/curriculum'
-import { resourcesData } from '@/lib/resources-data'
-import { faqSections } from '@/lib/faq'
-import { canonicalLearnPath } from '@/lib/seo'
-import { communityEnabled } from '@/lib/community'
-import { prisma } from '@/lib/db'
-
-export type SearchResultType =
-  | 'page'
-  | 'track'
-  | 'module'
-  | 'lesson'
-  | 'resource'
-  | 'faq'
-  | 'project'
-
-export interface SearchResult {
-  id: string
-  type: SearchResultType
-  title: string
-  description: string
-  href: string
-  meta?: string
-  external?: boolean
-  keywords?: string
-}
-
-const staticPages: SearchResult[] = [
-  {
-    id: 'page-home',
-    type: 'page',
-    title: 'Home',
-    description: 'Start learning web development and programming languages for free with written lessons, projects, progress tracking, and a community.',
-    href: '/',
-    keywords: 'mern python c c++ c# mongodb express react node full stack free curriculum',
-  },
-  {
-    id: 'page-learn',
-    type: 'page',
-    title: 'All Lessons',
-    description: 'Browse web development and programming language paths, module by module.',
-    href: '/learn',
-    keywords: 'curriculum lessons modules tracks beginner developer specializations languages',
-  },
-  {
-    id: 'page-languages',
-    type: 'page',
-    title: 'Programming Language Paths',
-    description: 'Learn C, C++, C#, and Python from beginner to mastery with written lessons and projects.',
-    href: '/learn/languages',
-    keywords: 'learn c learn c++ learn c# learn python programming languages beginner mastery',
-  },
-  {
-    id: 'page-roadmap',
-    type: 'page',
-    title: 'Learning Roadmap',
-    description: 'See the recommended order through web foundations, the MERN stack, language paths, advanced topics, and specializations.',
-    href: '/roadmap',
-    keywords: 'roadmap path order study plan specializations nextjs devops react native python c c++ c#',
-  },
-  {
-    id: 'page-resources',
-    type: 'page',
-    title: 'Free Resource Directory',
-    description: 'A searchable directory of free videos, articles, docs, courses, books, and tools.',
-    href: '/resources',
-    keywords: 'resources directory links tutorials videos docs free',
-  },
-  {
-    id: 'page-playground',
-    type: 'page',
-    title: 'Code Playground',
-    description: 'Edit HTML, CSS, and JavaScript in your browser and see the result live.',
-    href: '/playground',
-    keywords: 'playground editor html css javascript live preview sandbox',
-  },
-  {
-    id: 'page-community',
-    type: 'page',
-    title: 'Community',
-    description: 'Learn how discussions, public profiles, and the project showcase work.',
-    href: '/community',
-    keywords: 'community discussion profiles learners',
-  },
-  {
-    id: 'page-showcase',
-    type: 'page',
-    title: 'Project Showcase',
-    description: 'Browse projects built by learners, leave feedback, and share your own work.',
-    href: '/community/showcase',
-    keywords: 'projects showcase portfolio feedback upvote',
-  },
-  {
-    id: 'page-contribute',
-    type: 'page',
-    title: 'Contribute',
-    description: 'Help improve lessons, examples, translations, accessibility, and the codebase.',
-    href: '/contribute',
-    keywords: 'contribute github pull request translation corrections',
-  },
-  {
-    id: 'page-about',
-    type: 'page',
-    title: 'About Nyxora Sync',
-    description: 'Why the curriculum exists, how it is built, and what it does not claim to be.',
-    href: '/about',
-    keywords: 'about mission project open source',
-  },
-  {
-    id: 'page-faq',
-    type: 'page',
-    title: 'Frequently Asked Questions',
-    description: 'Answers about the tracks, accounts, progress, playground, community, and licenses.',
-    href: '/faq',
-    keywords: 'faq questions help answers',
-  },
-  {
-    id: 'page-contact',
-    type: 'page',
-    title: 'Contact',
-    description: 'Report a problem, send a correction, or ask a privacy or account question.',
-    href: '/contact',
-    keywords: 'contact support bug report feedback privacy',
-  },
-  {
-    id: 'page-code-of-conduct',
-    type: 'page',
-    title: 'Code of Conduct',
-    description: 'The standards for discussions, project feedback, and community spaces.',
-    href: '/code-of-conduct',
-    keywords: 'community rules conduct behaviour safety',
-  },
-  {
-    id: 'page-privacy',
-    type: 'page',
-    title: 'Privacy Policy',
-    description: 'What the site stores, where it lives, and how to remove it.',
-    href: '/privacy',
-    keywords: 'privacy data cookies local storage account deletion',
-  },
-  {
-    id: 'page-terms',
-    type: 'page',
-    title: 'Terms of Service',
-    description: 'The terms for using Nyxora Sync and the licenses that cover its content and code.',
-    href: '/terms',
-    keywords: 'terms license copyright cc by-sa mit',
-  },
-  {
-    id: 'page-accessibility',
-    type: 'page',
-    title: 'Accessibility',
-    description: 'The accessibility approach and how to report a barrier on the site.',
-    href: '/accessibility',
-    keywords: 'accessibility keyboard screen reader wcag reduced motion',
-  },
-]
-
-const typeOrder: Record<SearchResultType, number> = {
-  lesson: 0,
-  module: 1,
-  track: 2,
-  page: 3,
-  faq: 4,
-  resource: 5,
-  project: 6,
-}
-
-let cachedStaticEntries: SearchResult[] | null = null
-
-function getStaticEntries(): SearchResult[] {
-  if (cachedStaticEntries) return cachedStaticEntries
-
-  const entries = new Map<string, SearchResult>()
-
-  for (const page of staticPages) {
-    entries.set(page.href, page)
-  }
-
-  for (const track of tracks) {
-    entries.set(`/learn/${track.key}`, {
-      id: `track-${track.key}`,
-      type: 'track',
-      title: track.name,
-      description: track.description,
-      href: `/learn/${track.key}`,
-      meta: `${track.modules.length} modules`,
-      keywords: `${track.key} track modules curriculum`,
-    })
-
-    for (const mod of track.modules) {
-      const moduleHref = canonicalLearnPath(track.key, mod.key)
-      if (!entries.has(moduleHref)) {
-        entries.set(moduleHref, {
-          id: `module-${mod.key}`,
-          type: 'module',
-          title: mod.name,
-          description: mod.description,
-          href: moduleHref,
-          meta: `${mod.lessons.length} lessons · about ${mod.estimatedHours} hours`,
-          keywords: `${track.name} ${mod.key} ${mod.lessons.map((lesson) => lesson.title).join(' ')}`,
-        })
-      }
-
-      for (const lesson of mod.lessons) {
-        const lessonHref = canonicalLearnPath(track.key, mod.key, lesson.id)
-        if (!entries.has(lessonHref)) {
-          entries.set(lessonHref, {
-            id: `lesson-${lesson.id}`,
-            type: 'lesson',
-            title: lesson.title,
-            description: lesson.description,
-            href: lessonHref,
-            meta: `${mod.name} · ${lesson.estimatedMinutes} min · ${lesson.difficulty}`,
-            keywords: [
-              track.name,
-              mod.name,
-              lesson.difficulty,
-              ...lesson.keyTakeaways,
-              ...lesson.resources.map((resource) => resource.title),
-            ].join(' '),
-          })
-        }
-      }
-    }
-  }
-
-  for (const resource of resourcesData) {
-    entries.set(resource.url, {
-      id: `resource-${resource.id}`,
-      type: 'resource',
-      title: resource.title,
-      description: resource.description,
-      href: resource.url,
-      external: true,
-      meta: `${resource.provider} · ${resource.type} · ${resource.level}`,
-      keywords: `${resource.topic} ${resource.tags.join(' ')} ${resource.provider}`,
-    })
-  }
-
-  for (const section of faqSections) {
-    for (const item of section.items) {
-      entries.set(`/faq#${item.slug}`, {
-        id: `faq-${item.slug}`,
-        type: 'faq',
-        title: item.question,
-        description: item.answer,
-        href: `/faq#${item.slug}`,
-        meta: `FAQ · ${section.title}`,
-        keywords: `${section.title} ${section.description} ${item.answer}`,
-      })
-    }
-  }
-
-  cachedStaticEntries = [...entries.values()]
-  return cachedStaticEntries
-}
-
-function normalize(value: string): string {
-  return value.toLowerCase().replace(/\s+/g, ' ').trim()
-}
-
-function queryTerms(query: string): string[] {
-  return normalize(query).split(' ').filter(Boolean)
-}
-
-function scoreEntry(entry: SearchResult, normalizedQuery: string, terms: string[]): number {
-  const title = normalize(entry.title)
-  const meta = normalize(entry.meta ?? '')
-  const keywords = normalize(entry.keywords ?? '')
-  const haystack = `${title} ${normalize(entry.description)} ${meta} ${keywords}`
-
-  if (!terms.every((term) => haystack.includes(term))) return -1
-
-  let score = typeOrder[entry.type] * 0.1
-
-  if (title === normalizedQuery) score += 100
-  else if (title.startsWith(normalizedQuery)) score += 60
-  else if (title.includes(normalizedQuery)) score += 30
-
-  for (const term of terms) {
-    if (title.includes(term)) score += 12
-    if (meta.includes(term)) score += 4
-    if (keywords.includes(term)) score += 2
-  }
-
-  return score
-}
-
-function sortResults(results: SearchResult[], normalizedQuery: string, terms: string[]): SearchResult[] {
-  return results
-    .map((entry) => ({ entry, score: scoreEntry(entry, normalizedQuery, terms) }))
-    .filter((item) => item.score >= 0)
-    .sort((a, b) => b.score - a.score || a.entry.title.localeCompare(b.entry.title))
-    .map((item) => item.entry)
-}
-
-async function searchProjects(terms: string[]): Promise<SearchResult[]> {
-  if (!communityEnabled() || terms.length === 0) return []
-
-  try {
-    const projects = await prisma.project.findMany({
-      where: {
-        OR: terms.map((term) => ({
-          OR: [
-            { title: { contains: term, mode: 'insensitive' } },
-            { description: { contains: term, mode: 'insensitive' } },
-            { tags: { has: term } },
-            { modules: { has: term } },
-          ],
-        })),
-      },
-      orderBy: [{ upvotes: 'desc' }, { createdAt: 'desc' }],
-      take: 8,
-      select: {
-        id: true,
-        title: true,
-        description: true,
-        tags: true,
-        track: true,
-        upvotes: true,
-      },
-    })
-
-    return projects.map((project) => ({
-      id: `project-${project.id}`,
-      type: 'project' as const,
-      title: project.title,
-      description: project.description,
-      href: `/community/showcase/${project.id}`,
-      meta: `${project.track} track · ${project.upvotes} ${project.upvotes === 1 ? 'upvote' : 'upvotes'}`,
-      keywords: project.tags.join(' '),
-    }))
-  } catch {
-    // Search should still work when the community database is unavailable.
-    return []
-  }
-}
-
-function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined
-
-  const timeout = new Promise<T>((resolve) => {
-    timer = setTimeout(() => resolve(fallback), ms)
-  })
-
-  return Promise.race([promise, timeout]).finally(() => {
-    if (timer) clearTimeout(timer)
-  })
-}
-
-export async function searchSite(query: string): Promise<SearchResult[]> {
-  const cleanedQuery = query.trim().slice(0, 120)
-  const normalizedQuery = normalize(cleanedQuery)
-  if (!normalizedQuery) return []
-
-  const terms = queryTerms(cleanedQuery).slice(0, 8)
-  const staticResults = sortResults(getStaticEntries(), normalizedQuery, terms)
-  // Static results should never wait on a slow or unavailable community database.
-  const projectResults = sortResults(
-    await withTimeout<SearchResult[]>(searchProjects(terms), 1500, []),
-    normalizedQuery,
-    terms
-  )
-
-  return [...staticResults, ...projectResults]
-}
-
-export function groupSearchResults(results: SearchResult[]): Array<{
-  type: SearchResultType
-  label: string
-  results: SearchResult[]
-}> {
-  const labels: Record<SearchResultType, string> = {
-    lesson: 'Lessons',
-    module: 'Modules',
-    track: 'Tracks',
-    page: 'Pages',
-    faq: 'FAQ',
-    resource: 'Resources',
-    project: 'Showcase projects',
-  }
-
-  const grouped = new Map<SearchResultType, SearchResult[]>()
-  for (const result of results) {
-    const list = grouped.get(result.type) ?? []
-    list.push(result)
-    grouped.set(result.type, list)
-  }
-
-  return ([...grouped.entries()] as Array<[SearchResultType, SearchResult[]]>)
-    .sort(([a], [b]) => typeOrder[a] - typeOrder[b])
-    .map(([type, items]) => ({ type, label: labels[type], results: items }))
-}
-
-
-===== FILE: src/lib/security.test.ts =====
-import { describe, expect, it } from 'vitest'
-import { getRequestIp, hashIp } from '@/lib/security'
-
-describe('request security helpers', () => {
-  it('takes the first forwarded address', () => {
-    const request = new Request('https://example.com', {
-      headers: { 'x-forwarded-for': '203.0.113.9, 10.0.0.1' },
-    })
-    expect(getRequestIp(request)).toBe('203.0.113.9')
-  })
-
-  it('falls back to Cloudflare and real-IP headers', () => {
-    expect(
-      getRequestIp(
-        new Request('https://example.com', {
-          headers: { 'cf-connecting-ip': '198.51.100.4' },
-        })
-      )
-    ).toBe('198.51.100.4')
-  })
-
-  it('hashes IPs deterministically without keeping the raw value', () => {
-    const first = hashIp('203.0.113.9')
-    const second = hashIp('203.0.113.9')
-    expect(first).toBe(second)
-    expect(first).not.toContain('203.0.113.9')
-    expect(first).toHaveLength(64)
-  })
-})
-
-
-===== FILE: src/lib/security.ts =====
-import { createHash } from 'node:crypto'
-import { prisma } from '@/lib/db'
-
-const LOGIN_WINDOW_MS = 15 * 60 * 1000
-const MAX_FAILED_LOGINS = 5
-
-/** Best-effort client IP from the proxy headers Vercel and Cloudflare set. */
-export function getRequestIp(request: Request): string {
-  const forwarded = request.headers.get('x-forwarded-for')
-  if (forwarded) return forwarded.split(',')[0]!.trim()
-
-  return (
-    request.headers.get('cf-connecting-ip') ??
-    request.headers.get('x-real-ip') ??
-    'unknown'
-  )
-}
-
-/**
- * Pseudonymize an IP before storing it. We never persist raw addresses in the
- * audit log, but repeated abuse can still be correlated.
- */
-export function hashIp(ip: string): string {
-  const salt = process.env.AUTH_SECRET || 'nyxora-ip-hash'
-  return createHash('sha256').update(`${salt}:${ip}`).digest('hex')
-}
-
-export async function isAdminLoginRateLimited(ipHash: string): Promise<boolean> {
-  const failures = await prisma.adminAuditLog.count({
-    where: {
-      action: 'admin.login_failed',
-      ipHash,
-      createdAt: { gte: new Date(Date.now() - LOGIN_WINDOW_MS) },
-    },
-  })
-
-  return failures >= MAX_FAILED_LOGINS
-}
-
-export async function recordAdminLogin({
-  actorId,
-  ipHash,
-  success,
-}: {
-  actorId?: string | null
-  ipHash: string
-  success: boolean
-}): Promise<void> {
-  try {
-    await prisma.adminAuditLog.create({
-      data: {
-        actorId: success ? actorId ?? null : null,
-        action: success ? 'admin.login_success' : 'admin.login_failed',
-        ipHash,
-      },
-    })
-  } catch (error) {
-    // Audit logging must never turn a valid login into an outage.
-    console.error('Failed to record admin login audit event', error)
-  }
-}
-
-export async function writeAuditLog({
-  actorId,
-  action,
-  targetType,
-  targetId,
-  metadata,
-  ipHash,
-}: {
-  actorId: string
-  action: string
-  targetType?: string
-  targetId?: string
-  metadata?: Record<string, unknown>
-  ipHash?: string
-}): Promise<void> {
-  await prisma.adminAuditLog.create({
-    data: {
-      actorId,
-      action,
-      targetType,
-      targetId,
-      metadata: metadata as object | undefined,
-      ipHash,
-    },
-  })
-}
-
-
-===== FILE: src/lib/seo.ts =====
-import type { Metadata } from 'next'
-
-// Static output (sitemap, canonical links, Open Graph URLs) is generated at
-// build time. Fall back to the production custom domain when no explicit
-// public URL is supplied, while keeping local development on localhost.
-const fallbackUrl =
-  process.env.NODE_ENV === 'production'
-    ? 'https://nyxora-sync.tech'
-    : 'http://localhost:3000'
-
-const configuredUrl =
-  process.env.NEXT_PUBLIC_SITE_URL ||
-  (process.env.VERCEL_PROJECT_PRODUCTION_URL
-    ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
-    : fallbackUrl)
-
-export const siteUrl = configuredUrl.replace(/\/+$/, '')
-export const siteName = 'Nyxora Sync'
-export const defaultDescription =
-  'Learn web development and programming languages for free. MERN, C, C++, C#, and Python paths from beginner to mastery, with written lessons, projects, playgrounds, and progress tracking.'
-export const defaultOgImage = '/og-image.jpg'
-
-// Modules shared by the beginner and developer tracks render the same lessons.
-// The developer-track copies are canonical so search engines index one URL.
-const sharedCoreModuleKeys = new Set(['node-express', 'mongodb', 'react', 'fullstack'])
-const canonicalSharedTrack = 'developer'
-
-export function canonicalTrackForModule(trackKey: string, moduleKey: string): string {
-  return sharedCoreModuleKeys.has(moduleKey) ? canonicalSharedTrack : trackKey
-}
-
-export function canonicalLearnPath(
-  trackKey: string,
-  moduleKey?: string,
-  lessonId?: string
-): string {
-  if (!moduleKey) return `/learn/${trackKey}`
-  const canonicalTrack = canonicalTrackForModule(trackKey, moduleKey)
-  return `/learn/${canonicalTrack}/${moduleKey}${lessonId ? `/${lessonId}` : ''}`
-}
-
-interface PageMetadataOptions {
-  title: string
-  description: string
-  path: string
-  type?: 'website' | 'article'
-  noIndex?: boolean
-  keywords?: string[]
-}
-
-export function absoluteUrl(path = '/'): string {
-  const normalized = path.startsWith('/') ? path : `/${path}`
-  return new URL(normalized, siteUrl).toString()
-}
-
-/**
- * Per-page metadata with a canonical URL and explicit social images.
- * The root layout only provides defaults; pages must opt into their canonical.
- */
-export function pageMetadata({
-  title,
-  description,
-  path,
-  type = 'website',
-  noIndex = false,
-  keywords,
-}: PageMetadataOptions): Metadata {
-  const url = absoluteUrl(path)
-
-  return {
-    title,
-    description,
-    keywords,
-    alternates: { canonical: path },
-    robots: noIndex
-      ? { index: false, follow: false }
-      : { index: true, follow: true },
-    openGraph: {
-      type,
-      siteName,
-      locale: 'en_US',
-      title,
-      description,
-      url,
-      images: [
-        {
-          url: defaultOgImage,
-          width: 1200,
-          height: 630,
-          alt: `${siteName} — free web development and programming curriculum`,
-        },
-      ],
-    },
-    twitter: {
-      card: 'summary_large_image',
-      title,
-      description,
-      images: [defaultOgImage],
-    },
-  }
-}
-
-
-===== FILE: src/lib/social.ts =====
-import { prisma } from '@/lib/db'
-
-export type FollowRelationshipStatus =
-  | 'self'
-  | 'none'
-  | 'following'
-  | 'pending_outgoing'
-  | 'pending_incoming'
-
-export interface FollowRelationship {
-  status: FollowRelationshipStatus
-  /** Present for an incoming pending request, so the profile can accept it. */
-  requestId: string | null
-}
-
-export interface ProfileViewCounts {
-  allTime: number
-  month: number
-  week: number
-  day: number
-}
-
-function startOfUtcDay(date = new Date()): Date {
-  return new Date(
-    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())
-  )
-}
-
-/**
- * Visitor counts are for unique people, not page loads. ProfileView stores at
- * most one row per viewer per UTC day, and these queries count distinct
- * viewer keys across the requested window.
- */
-export async function getProfileViewCounts(
-  profileUserId: string
-): Promise<ProfileViewCounts> {
-  const now = new Date()
-  const dayStart = new Date(now.getTime() - 24 * 60 * 60 * 1000)
-  const weekStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
-  const monthStart = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)
-  )
-
-  const rows = await prisma.$queryRaw<
-    Array<{ allTime: number; month: number; week: number; day: number }>
-  >`
-    SELECT
-      COUNT(DISTINCT "viewerKey")::int AS "allTime",
-      COUNT(DISTINCT "viewerKey") FILTER (WHERE "viewedAt" >= ${monthStart})::int AS "month",
-      COUNT(DISTINCT "viewerKey") FILTER (WHERE "viewedAt" >= ${weekStart})::int AS "week",
-      COUNT(DISTINCT "viewerKey") FILTER (WHERE "viewedAt" >= ${dayStart})::int AS "day"
-    FROM "ProfileView"
-    WHERE "profileUserId" = ${profileUserId}
-  `
-
-  return rows[0] ?? { allTime: 0, month: 0, week: 0, day: 0 }
-}
-
-async function anonymousViewerKey(request: Request): Promise<string> {
-  const ip =
-    request.headers.get('cf-connecting-ip') ??
-    request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
-    'unknown'
-  const userAgent = request.headers.get('user-agent') ?? ''
-  const secret = process.env.AUTH_SECRET ?? 'nyxora-profile-view'
-  const input = new TextEncoder().encode(`${ip}\n${userAgent}\n${secret}`)
-  const digest = await globalThis.crypto.subtle.digest('SHA-256', input)
-  const hash = Array.from(new Uint8Array(digest))
-    .slice(0, 16)
-    .map((byte) => byte.toString(16).padStart(2, '0'))
-    .join('')
-  return `anon:${hash}`
-}
-
-/**
- * Records one visit per visitor per day. Self-views are deliberately ignored.
- * A failure here must never prevent someone from viewing a profile.
- */
-export async function recordProfileView(
-  request: Request,
-  profileUserId: string,
-  viewerId: string | null
-): Promise<void> {
-  if (viewerId === profileUserId) return
-
-  try {
-    const viewerKey = viewerId
-      ? `user:${viewerId}`
-      : await anonymousViewerKey(request)
-    const now = new Date()
-    const viewDate = startOfUtcDay(now)
-
-    await prisma.profileView.upsert({
-      where: {
-        profileUserId_viewerKey_viewDate: {
-          profileUserId,
-          viewerKey,
-          viewDate,
-        },
-      },
-      create: {
-        profileUserId,
-        viewerId,
-        viewerKey,
-        viewDate,
-      },
-      update: { viewedAt: now },
-    })
-  } catch {
-    // Visitor analytics are best-effort.
-  }
-}
-
-export async function getFollowRelationship(
-  viewerId: string | null,
-  profileUserId: string
-): Promise<FollowRelationship> {
-  if (!viewerId || viewerId === profileUserId) {
-    return {
-      status: viewerId === profileUserId ? 'self' : 'none',
-      requestId: null,
-    }
-  }
-
-  const rows = await prisma.follow.findMany({
-    where: {
-      OR: [
-        { followerId: viewerId, followingId: profileUserId },
-        { followerId: profileUserId, followingId: viewerId },
-      ],
-    },
-    select: {
-      id: true,
-      followerId: true,
-      followingId: true,
-      status: true,
-    },
-  })
-
-  const outgoing = rows.find((row) => row.followerId === viewerId)
-  const incoming = rows.find((row) => row.followerId === profileUserId)
-
-  if (outgoing?.status === 'accepted') {
-    return { status: 'following', requestId: null }
-  }
-  if (outgoing?.status === 'pending') {
-    return { status: 'pending_outgoing', requestId: null }
-  }
-  if (incoming?.status === 'pending') {
-    return { status: 'pending_incoming', requestId: incoming.id }
-  }
-  return { status: 'none', requestId: null }
-}
-
-export async function getFollowCounts(userId: string) {
-  const rows = await prisma.$queryRaw<
-    Array<{ followers: number; following: number }>
-  >`
-    SELECT
-      COUNT(*) FILTER (WHERE "followingId" = ${userId} AND status = 'accepted')::int AS "followers",
-      COUNT(*) FILTER (WHERE "followerId" = ${userId} AND status = 'accepted')::int AS "following"
-    FROM "Follow"
-  `
-  return rows[0] ?? { followers: 0, following: 0 }
-}
-
-export function actorName(name: string | null | undefined): string {
-  return name?.trim() || 'A learner'
-}
-
-
-===== FILE: src/lib/time.ts =====
-import { formatDistanceToNow } from 'date-fns'
-
-export function timeAgo(iso: string): string {
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) return ''
-  return formatDistanceToNow(date, { addSuffix: true })
-}
-
-export function shortDate(iso: string): string {
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) return ''
-  return date.toLocaleDateString(undefined, { month: 'short', year: 'numeric' })
-}
-
-
-===== FILE: src/lib/utils.ts =====
-import { type ClassValue, clsx } from 'clsx'
-import { twMerge } from 'tailwind-merge'
-
-export function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs))
-}
-
-// ============================================================
-// Accent color system
-// Tailwind v4 can't generate classes from dynamic strings, so we
-// keep a static map of literal class names for every accent we use.
-// ============================================================
-
-export type AccentColor =
-  | 'emerald' | 'violet' | 'amber' | 'rose' | 'blue' | 'indigo' | 'slate' | 'cyan'
-
-export interface AccentClasses {
-  /** Icon container: soft bg + strong fg, works in light & dark */
-  icon: string
-  /** Strong text color */
-  text: string
-  /** Soft background tint */
-  bgSoft: string
-  /** Soft border tint */
-  borderSoft: string
-  /** Badge-ish soft pill */
-  pill: string
-  /** Gradient bar (for top borders) */
-  gradient: string
-}
-
-export const accent: Record<AccentColor, AccentClasses> = {
-  emerald: {
-    icon: 'bg-emerald-100 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400',
-    text: 'text-emerald-700 dark:text-emerald-400',
-    bgSoft: 'bg-emerald-500/10',
-    borderSoft: 'border-emerald-500/40',
-    pill: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400',
-    gradient: 'from-emerald-500 to-emerald-600',
-  },
-  violet: {
-    icon: 'bg-violet-100 text-violet-600 dark:bg-violet-500/15 dark:text-violet-400',
-    text: 'text-violet-600 dark:text-violet-400',
-    bgSoft: 'bg-violet-500/10',
-    borderSoft: 'border-violet-500/40',
-    pill: 'bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-400',
-    gradient: 'from-violet-500 to-violet-600',
-  },
-  amber: {
-    icon: 'bg-amber-100 text-amber-600 dark:bg-amber-500/15 dark:text-amber-400',
-    text: 'text-amber-600 dark:text-amber-400',
-    bgSoft: 'bg-amber-500/10',
-    borderSoft: 'border-amber-500/40',
-    pill: 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400',
-    gradient: 'from-amber-500 to-amber-600',
-  },
-  rose: {
-    icon: 'bg-rose-100 text-rose-600 dark:bg-rose-500/15 dark:text-rose-400',
-    text: 'text-rose-600 dark:text-rose-400',
-    bgSoft: 'bg-rose-500/10',
-    borderSoft: 'border-rose-500/40',
-    pill: 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-400',
-    gradient: 'from-rose-500 to-rose-600',
-  },
-  blue: {
-    icon: 'bg-blue-100 text-blue-600 dark:bg-blue-500/15 dark:text-blue-400',
-    text: 'text-blue-600 dark:text-blue-400',
-    bgSoft: 'bg-blue-500/10',
-    borderSoft: 'border-blue-500/40',
-    pill: 'bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-400',
-    gradient: 'from-blue-500 to-blue-600',
-  },
-  indigo: {
-    icon: 'bg-indigo-100 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-400',
-    text: 'text-indigo-600 dark:text-indigo-400',
-    bgSoft: 'bg-indigo-500/10',
-    borderSoft: 'border-indigo-500/40',
-    pill: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-400',
-    gradient: 'from-indigo-500 to-indigo-600',
-  },
-  slate: {
-    icon: 'bg-slate-100 text-slate-600 dark:bg-slate-500/15 dark:text-slate-400',
-    text: 'text-slate-600 dark:text-slate-400',
-    bgSoft: 'bg-slate-500/10',
-    borderSoft: 'border-slate-500/40',
-    pill: 'bg-slate-100 text-slate-700 dark:bg-slate-500/15 dark:text-slate-400',
-    gradient: 'from-slate-500 to-slate-600',
-  },
-  cyan: {
-    icon: 'bg-cyan-100 text-cyan-600 dark:bg-cyan-500/15 dark:text-cyan-400',
-    text: 'text-cyan-600 dark:text-cyan-400',
-    bgSoft: 'bg-cyan-500/10',
-    borderSoft: 'border-cyan-500/40',
-    pill: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-500/15 dark:text-cyan-400',
-    gradient: 'from-cyan-500 to-cyan-600',
-  },
-}
-
-export function getAccent(color: string): AccentClasses {
-  return accent[(color as AccentColor)] ?? accent.slate
-}
-
-export function formatDuration(minutes: number): string {
-  if (minutes < 60) return `${minutes} min`
-  const hours = Math.floor(minutes / 60)
-  const mins = minutes % 60
-  return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`
-}
-
-export function calculateLevel(xp: number): { level: number; xpForNext: number; progress: number } {
-  const level = Math.floor(Math.sqrt(xp / 100)) + 1
-  const xpForCurrent = (level - 1) ** 2 * 100
-  const xpForNext = level ** 2 * 100
-  const progress = ((xp - xpForCurrent) / (xpForNext - xpForCurrent)) * 100
-  return { level, xpForNext, progress: Math.min(100, Math.max(0, progress)) }
-}
-
-export function getTrackColor(track: string): string {
-  switch (track) {
-    case 'beginner': return 'emerald'
-    case 'developer': return 'violet'
-    case 'specializations': return 'cyan'
-    case 'c': return 'blue'
-    case 'cpp': return 'indigo'
-    case 'csharp': return 'violet'
-    case 'python': return 'amber'
-    default: return 'slate'
-  }
-}
-
-export function getDifficultyColor(difficulty: string): string {
-  switch (difficulty) {
-    case 'beginner': return 'emerald'
-    case 'intermediate': return 'amber'
-    case 'advanced': return 'rose'
-    default: return 'slate'
-  }
-}
-
-===== FILE: src/mdx-components.tsx =====
-import type { MDXComponents } from 'mdx/types'
-import { Callout, KeyPoint } from '@/components/mdx/callout'
-import { Quiz } from '@/components/mdx/quiz'
-import { Exercise, TryIt } from '@/components/mdx/exercise'
-import { CodeBlock } from '@/components/mdx/code-block'
-
-const components: MDXComponents = {
-  a: ({ href = '', children, ...props }) => {
-    const external = href.startsWith('http')
-    return (
-      <a
-        href={href}
-        {...(external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
-        className="font-medium text-emerald-700 underline decoration-emerald-500/40 underline-offset-4 transition-colors hover:text-emerald-600 dark:text-emerald-400"
-        {...props}
-      >
-        {children}
-      </a>
-    )
-  },
-  h2: ({ id, children, ...props }) => (
-    <h2 id={id} className="scroll-mt-24" {...props}>
-      {children}
-    </h2>
-  ),
-  h3: ({ id, children, ...props }) => (
-    <h3 id={id} className="scroll-mt-24" {...props}>
-      {children}
-    </h3>
-  ),
-  pre: CodeBlock,
-  table: ({ children, ...props }) => (
-    <div className="my-6 overflow-x-auto [&>table]:my-0">
-      <table {...props}>{children}</table>
-    </div>
-  ),
-  Callout,
-  KeyPoint,
-  Quiz,
-  Exercise,
-  TryIt,
-}
-
-export function useMDXComponents(): MDXComponents {
-  return components
-}
-
-
-===== FILE: src/middleware/admin.ts =====
-import { auth } from '@/lib/auth/auth'
-import { isAdmin } from '@/lib/admin'
-import { NextResponse } from 'next/server'
-import type { NextRequest } from 'next/server'
-
-export async function adminMiddleware(request: NextRequest) {
-  const session = await auth()
-  
-  if (!session?.user?.email || !isAdmin(session.user.email)) {
-    return NextResponse.redirect(new URL('/auth/signin?error=Unauthorized', request.url))
-  }
-
-  return NextResponse.next()
-}
-
-export const config = {
-  matcher: ['/admin/:path*'],
-}
-
-
-===== FILE: src/types/next-auth.d.ts =====
-import { DefaultSession, DefaultJWT } from 'next-auth'
-
-declare module 'next-auth' {
-  interface Session {
-    user: {
-      id: string
-      isAdmin?: boolean
-    } & DefaultSession['user']
-  }
-}
-
-declare module 'next-auth/jwt' {
-  interface JWT extends DefaultJWT {
-    isAdmin?: boolean
-  }
-}
