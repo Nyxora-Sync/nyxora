@@ -24,19 +24,19 @@ const platformLinks = [
   { name: 'Privacy Policy', href: '/privacy' },
   { name: 'Terms of Service', href: '/terms' },
   { name: 'Accessibility', href: '/accessibility' },
-  { name: 'Open Source', href: 'https://github.com/Nyxora-Sync/nyxora-sync', external: true },
+  { name: 'Open Source', href: 'https://github.com/Nyxora-Sync/nyxora', external: true },
 ]
 
 const communityLinks = [
   { name: 'Lesson Discussions', href: '/community' },
   { name: 'Project Showcase', href: '/community/showcase' },
-  { name: 'GitHub Issues', href: 'https://github.com/Nyxora-Sync/nyxora-sync/issues', external: true },
+  { name: 'GitHub Issues', href: 'https://github.com/Nyxora-Sync/nyxora/issues', external: true },
   { name: 'Contribute', href: '/contribute' },
   { name: 'Code of Conduct', href: '/code-of-conduct' },
 ]
 
 const socialLinks = [
-  { name: 'GitHub', href: 'https://github.com/Nyxora-Sync/nyxora-sync', external: true },
+  { name: 'GitHub', href: 'https://github.com/Nyxora-Sync/nyxora', external: true },
   { name: 'Contact', href: '/contact', external: false },
 ]
 
@@ -169,7 +169,7 @@ export function Footer() {
               CC BY-SA 4.0
             </a>{' '}
             • Code under{' '}
-            <a href="https://github.com/Nyxora-Sync/nyxora-sync/blob/main/LICENSE" target="_blank" rel="noopener noreferrer" className="underline hover:text-foreground">
+            <a href="https://github.com/Nyxora-Sync/nyxora/blob/main/LICENSE" target="_blank" rel="noopener noreferrer" className="underline hover:text-foreground">
               MIT License
             </a>
           </p>

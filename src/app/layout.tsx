@@ -81,7 +81,7 @@ const siteSchema = [
     logo: absoluteUrl('/icon-512.png'),
     description:
       'A free, open-source curriculum for the MERN stack, C, C++, C#, and Python, with written lessons, playgrounds, progress tracking, and a project showcase.',
-    sameAs: ['https://github.com/Nyxora-Sync/nyxora-sync'],
+    sameAs: ['https://github.com/Nyxora-Sync/nyxora'],
   },
   {
     '@context': 'https://schema.org',

@@ -121,7 +121,7 @@ export default function NewsletterPage() {
                       inbox subscription.
                     </p>
                     <Button asChild variant="outline" size="sm" className="mt-4 gap-2">
-                      <a href="https://github.com/Nyxora-Sync/nyxora-sync" target="_blank" rel="noopener noreferrer">
+                      <a href="https://github.com/Nyxora-Sync/nyxora" target="_blank" rel="noopener noreferrer">
                         <GithubIcon className="h-4 w-4" aria-hidden="true" />
                         Watch on GitHub
                       </a>

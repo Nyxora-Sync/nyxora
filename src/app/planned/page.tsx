@@ -332,7 +332,7 @@ export default function PlannedPage() {
                       </Link>
                     </Button>
                     <Button size="lg" variant="outline" asChild className="gap-2 w-full sm:w-auto">
-                      <Link href="https://github.com/Nyxora-Sync/nyxora-sync/issues/new/choose" target="_blank" rel="noopener noreferrer">
+                      <Link href="https://github.com/Nyxora-Sync/nyxora/issues/new/choose" target="_blank" rel="noopener noreferrer">
                         Suggest a Track or Lesson
                       </Link>
                     </Button>

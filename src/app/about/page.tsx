@@ -152,7 +152,7 @@ export default function AboutPage() {
                 </Link>
               </Button>
               <Button asChild variant="ghost" className="gap-2">
-                <a href="https://github.com/Nyxora-Sync/nyxora-sync" target="_blank" rel="noopener noreferrer">
+                <a href="https://github.com/Nyxora-Sync/nyxora" target="_blank" rel="noopener noreferrer">
                   <GithubIcon className="h-4 w-4" aria-hidden="true" />
                   View source
                 </a>
@@ -351,7 +351,7 @@ export default function AboutPage() {
                   <Link href="/contribute">Contribute</Link>
                 </Button>
                 <Button asChild variant="outline" className="gap-2">
-                  <a href="https://github.com/Nyxora-Sync/nyxora-sync" target="_blank" rel="noopener noreferrer">
+                  <a href="https://github.com/Nyxora-Sync/nyxora" target="_blank" rel="noopener noreferrer">
                     <GithubIcon className="h-4 w-4" aria-hidden="true" />
                     Open the repository
                   </a>
